@@ -41,7 +41,10 @@ def test_ci_nao_tem_acesso_a_publicacao_e_a_segredos_da_vps() -> None:
         assert "environment" not in job, name
         assert "secrets" not in job, name
         assert "secrets." not in yaml.safe_dump(job), name
-        assert "write" not in job.get("permissions", {}).values(), name
+        # Só o token OIDC e o atestado dos jobs de imagem escrevem (tests/test_ci_atestado.py);
+        # nada de escrita em registro, conteúdo ou qualquer outro escopo.
+        escrita = {k for k, v in job.get("permissions", {}).items() if v == "write"}
+        assert escrita <= {"id-token", "attestations"}, name
 
 
 def test_as_jornadas_locais_rodam_apos_o_contrato_do_receptor() -> None:

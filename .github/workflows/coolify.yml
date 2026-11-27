@@ -87,6 +87,7 @@ jobs:
     permissions:
       contents: read
       actions: read
+      attestations: read
       packages: write
     outputs:
       eligible: ${{ steps.promotable.outputs.eligible }}
@@ -125,6 +126,23 @@ jobs:
           for role in app executor web; do
             digest=$(jq -er --arg role "$role" '.images[$role].digest' "$receipt")
             python3 deploy/coolify/release/ci_oci.py verify "$RUNNER_TEMP/ci-oci/gs-oci-$role-"* "$digest"
+          done
+      - name: Verificar a proveniência dos três índices
+        # O blob do índice no layout OCI tem o digest do sujeito atestado pelo ci.yml no push da
+        # main, do commit liberado; sem atestado válido desse workflow, dessa ref e desse commit,
+        # nada é gravado no GHCR (#442, 68c).
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          receipt="$RUNNER_TEMP/oci-receipt/oci-receipt.json"
+          for role in app executor web; do
+            digest=$(jq -er --arg role "$role" '.images[$role].digest' "$receipt")
+            layout=$(echo "$RUNNER_TEMP/ci-oci/gs-oci-$role-"*)
+            gh attestation verify "$layout/blobs/sha256/${digest#sha256:}" \
+              --repo "$GITHUB_REPOSITORY" \
+              --signer-workflow "$GITHUB_REPOSITORY/.github/workflows/ci.yml" \
+              --source-ref refs/heads/main \
+              --source-digest "$RELEASE_COMMIT"
           done
       - uses: actions/setup-go@d8cbb8045d7f43706b9177cceb36c1f91a6644d5 # v7.1.0
         with:
