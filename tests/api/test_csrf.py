@@ -137,6 +137,24 @@ def test_falha_de_csrf_e_auditada_mesmo_com_a_requisicao_recusada(
     assert _csrf_failures(factory) == ["failure"]
 
 
+def test_rajada_de_csrf_invalido_grava_uma_linha(
+    app: FastAPI, client: TestClient, factory: sessionmaker[Session]
+) -> None:
+    # Uma linha por conta e minuto: a rajada não inunda a auditoria (#442, 50a).
+    issued = open_session(app, new_user(factory), now=NOW)
+    _freeze(app, NOW)
+    headers = session_headers(app, issued)
+    del headers["X-CSRF-Token"]
+
+    statuses = [
+        _send(client, "POST", CANCEL, headers).status_code
+        for _ in range(REQUESTS_PER_MINUTE[RequestClass.COMMAND])
+    ]
+
+    assert statuses == [403] * REQUESTS_PER_MINUTE[RequestClass.COMMAND]
+    assert _csrf_failures(factory) == ["failure"]
+
+
 def test_mutacao_legitima_por_cookie_passa_pelo_csrf(
     app: FastAPI, client: TestClient, factory: sessionmaker[Session]
 ) -> None:

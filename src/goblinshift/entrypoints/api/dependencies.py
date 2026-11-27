@@ -50,6 +50,7 @@ from goblinshift.identity import (
     csrf_token_matches,
     find_account,
     record_audit_event,
+    record_csrf_failure,
     record_session_use,
     resolve_session,
 )
@@ -357,7 +358,10 @@ def _verify_csrf(request: Request, session: Session, principal: Principal, now: 
         request.headers.get(CSRF_HEADER),
     )
     if cross_site or not token_matches:
-        _audit_failure(session, AuditEventType.CSRF_FAILED, principal, request, now)
+        # Transação própria, como em `_audit_failure`; agregada por conta e minuto, para que a
+        # rajada forjada por outro site não inunde a auditoria.
+        with session.begin():
+            record_csrf_failure(session, user_id=principal.owner_id, ip=client_ip(request), now=now)
         raise ApiProblem(ProblemCode.CSRF_FAILED, _CSRF_DETAIL)
 
 

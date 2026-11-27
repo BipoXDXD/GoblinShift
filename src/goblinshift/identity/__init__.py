@@ -32,10 +32,12 @@ from goblinshift.identity.accounts import (
     unblock_account,
 )
 from goblinshift.identity.audit import (
+    CSRF_FAILURE_AUDIT_INTERVAL,
     AuditEventType,
     AuditOutcome,
     LimitChange,
     limits_changed_details,
+    record_csrf_failure,
     truncate_ip,
 )
 from goblinshift.identity.audit import record as record_audit_event
@@ -87,6 +89,7 @@ from goblinshift.identity.users import (
 
 __all__ = [
     "ADMIN_ISSUER",
+    "CSRF_FAILURE_AUDIT_INTERVAL",
     "CURRENT_TERMS_VERSION",
     "DEFAULT_KEY_DAYS",
     "KEY_PREFIX",
@@ -143,6 +146,7 @@ __all__ = [
     "parse_scopes",
     "purge_owner",
     "record_audit_event",
+    "record_csrf_failure",
     "record_session_use",
     "request_account_deletion",
     "resolve_login",
