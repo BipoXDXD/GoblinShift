@@ -19,13 +19,17 @@ from fastapi.testclient import TestClient
 from sqlalchemy.orm import Session, sessionmaker
 from starlette.types import Message, Scope
 
+from goblinshift.entrypoints.api import uploads as uploads_api
 from goblinshift.entrypoints.api.transfers import TransferTimeouts
+from goblinshift.files.transfers import release_transfer_slot
 from tests.api.files_support import (
     OCTET_STREAM,
     UPLOADS,
+    PoolHog,
     create_upload,
     idle_in_transaction,
     new_account,
+    refusing_pool,
     slot_count,
 )
 from tests.api.support import assert_problem
@@ -33,6 +37,7 @@ from tests.api.support import assert_problem
 pytestmark = [pytest.mark.integration, pytest.mark.anyio]
 
 WAIT_LIMIT_S = 10
+ME = "/api/v1/me"
 
 
 @pytest.fixture
@@ -77,6 +82,24 @@ async def put_content(
     client: httpx.AsyncClient, auth: dict[str, str], item: dict[str, Any], body: Any
 ) -> httpx.Response:
     return await client.put(item["content"]["url"], content=body, headers={**auth, **OCTET_STREAM})
+
+
+async def trickle(data: bytes, interval_s: float) -> AsyncIterator[bytes]:
+    """Um byte por vez, a cada `interval_s`."""
+    for byte in data:
+        await anyio.sleep(interval_s)
+        yield bytes([byte])
+
+
+def state_of(client: TestClient, auth: dict[str, str], item: dict[str, Any]) -> str:
+    state: str = client.get(f"{UPLOADS}/{item['id']}", headers=auth).json()["state"]
+    return state
+
+
+def reserved_bytes(client: TestClient, auth: dict[str, str]) -> int:
+    """Bytes que a conta tem reservados na cota de armazenamento, como o `/me` publica."""
+    reserved: int = client.get(ME, headers=auth).json()["usage"]["storage_reserved_bytes"]
+    return reserved
 
 
 async def test_dois_envios_concorrentes_no_mesmo_upload_um_recebe_409(
@@ -151,7 +174,7 @@ async def test_envio_parado_alem_do_prazo_sem_progresso_falha_e_libera_a_vaga(
     stalled.resume.set()
 
     assert_problem(response, 408, "REQUEST_TIMEOUT")
-    assert sync_client.get(f"{UPLOADS}/{item['id']}", headers=auth).json()["state"] == "failed"
+    assert state_of(sync_client, auth, item) == "failed"
     assert await anyio.to_thread.run_sync(slot_count, factory) == 0
 
 
@@ -167,15 +190,84 @@ async def test_envio_que_passa_do_prazo_total_falha_mesmo_com_progresso(
     _, auth = new_account(factory)
     item = create_upload(sync_client, auth, size=100)
 
-    async def trickle() -> AsyncIterator[bytes]:
-        for _ in range(100):
-            await anyio.sleep(0.05)
-            yield b"x"
-
-    response = await put_content(async_client, auth, item, trickle())
+    response = await put_content(async_client, auth, item, trickle(b"x" * 100, 0.05))
 
     assert_problem(response, 408, "REQUEST_TIMEOUT")
-    assert sync_client.get(f"{UPLOADS}/{item['id']}", headers=auth).json()["state"] == "failed"
+    assert state_of(sync_client, auth, item) == "failed"
+
+
+async def test_envio_abaixo_do_piso_recebe_408_antes_do_prazo_total_e_libera_a_vaga(
+    app: FastAPI,
+    async_client: httpx.AsyncClient,
+    sync_client: TestClient,
+    factory: sessionmaker[Session],
+) -> None:
+    # Prazos total e sem progresso longos: só o piso de vazão pode encerrar o envio no teste.
+    app.state.transfer_timeouts = TransferTimeouts(
+        total=timedelta(minutes=10),
+        idle=timedelta(seconds=WAIT_LIMIT_S),
+        min_rate_bytes_per_s=1000,
+        min_rate_grace=timedelta(milliseconds=200),
+    )
+    _, auth = new_account(factory)
+    item = create_upload(sync_client, auth, size=100)
+    assert reserved_bytes(sync_client, auth) == 64 * 1024  # o piso de reserva da intenção
+
+    with anyio.fail_after(WAIT_LIMIT_S):
+        response = await put_content(async_client, auth, item, trickle(b"x" * 100, 0.05))
+
+    assert_problem(response, 408, "REQUEST_TIMEOUT")
+    assert state_of(sync_client, auth, item) == "failed"
+    assert await anyio.to_thread.run_sync(slot_count, factory) == 0
+    assert reserved_bytes(sync_client, auth) == 0
+
+
+async def test_envio_lento_mas_acima_do_piso_passa(
+    app: FastAPI,
+    async_client: httpx.AsyncClient,
+    sync_client: TestClient,
+    factory: sessionmaker[Session],
+) -> None:
+    app.state.transfer_timeouts = TransferTimeouts(
+        total=timedelta(minutes=10),
+        idle=timedelta(seconds=WAIT_LIMIT_S),
+        min_rate_bytes_per_s=10,
+        min_rate_grace=timedelta(milliseconds=200),
+    )
+    _, auth = new_account(factory)
+    content = b"0123456789abcdefghij"
+    item = create_upload(sync_client, auth, size=len(content))
+
+    # 20 B/s por 1 s, o dobro do piso.
+    with anyio.fail_after(WAIT_LIMIT_S):
+        response = await put_content(async_client, auth, item, trickle(content, 0.05))
+
+    assert response.status_code == 200, response.text
+    assert response.json()["sha256"] == hashlib.sha256(content).hexdigest()
+
+
+async def test_pausa_antes_do_primeiro_byte_conta_para_o_piso(
+    app: FastAPI,
+    async_client: httpx.AsyncClient,
+    sync_client: TestClient,
+    factory: sessionmaker[Session],
+) -> None:
+    app.state.transfer_timeouts = TransferTimeouts(
+        total=timedelta(minutes=10),
+        idle=timedelta(seconds=WAIT_LIMIT_S),
+        min_rate_bytes_per_s=1000,
+        min_rate_grace=timedelta(milliseconds=200),
+    )
+    _, auth = new_account(factory)
+    item = create_upload(sync_client, auth, size=1)
+
+    # Parado 300 ms e depois 1 byte: a média desde o início da leitura fica bem abaixo do piso.
+    with anyio.fail_after(WAIT_LIMIT_S):
+        response = await put_content(async_client, auth, item, trickle(b"x", 0.3))
+
+    assert_problem(response, 408, "REQUEST_TIMEOUT")
+    assert state_of(sync_client, auth, item) == "failed"
+    assert await anyio.to_thread.run_sync(slot_count, factory) == 0
 
 
 async def test_cliente_que_desconecta_no_meio_do_envio_recebe_400_e_o_upload_falha(
@@ -216,5 +308,70 @@ async def test_cliente_que_desconecta_no_meio_do_envio_recebe_400_e_o_upload_fal
     body = json.loads(b"".join(message.get("body", b"") for message in sent))
     assert start["status"] == 400
     assert (body["code"], body["detail"]) == ("BAD_REQUEST", "O envio foi interrompido.")
-    assert sync_client.get(f"{UPLOADS}/{item['id']}", headers=auth).json()["state"] == "failed"
+    assert state_of(sync_client, auth, item) == "failed"
+    assert await anyio.to_thread.run_sync(slot_count, factory) == 0
+
+
+async def test_pool_esgotado_logo_depois_do_envio_ainda_deixa_o_upload_pronto_e_devolve_a_vaga(
+    app: FastAPI,
+    async_client: httpx.AsyncClient,
+    sync_client: TestClient,
+    factory: sessionmaker[Session],
+) -> None:
+    # A transferência já terminou: desistir no commit perderia o envio e prenderia a vaga até o
+    # lease vencer. A escrita final espera até o `db_pool_timeout_s` das settings.
+    _, auth = new_account(factory)
+    item = create_upload(sync_client, auth, size=3)
+    hog = PoolHog(app)
+
+    async def body() -> AsyncIterator[bytes]:
+        yield b"abc"
+        hog.take()
+
+    response = await put_content(async_client, auth, item, body())
+    hog.join()
+
+    assert response.status_code == 200, response.text
+    assert response.json()["state"] == "ready"
+    assert await anyio.to_thread.run_sync(slot_count, factory) == 0
+
+
+async def test_vaga_do_envio_volta_mesmo_com_o_pool_recusando_na_devolucao(
+    async_client: httpx.AsyncClient,
+    sync_client: TestClient,
+    factory: sessionmaker[Session],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(uploads_api, "release_transfer_slot", refusing_pool(release_transfer_slot))
+    _, auth = new_account(factory)
+    item = create_upload(sync_client, auth, size=3)
+
+    response = await put_content(async_client, auth, item, b"abc")
+
+    assert response.status_code == 200, response.text
+    assert await anyio.to_thread.run_sync(slot_count, factory) == 0
+
+
+async def test_pool_esgotado_logo_depois_de_um_envio_curto_ainda_o_marca_falho_e_devolve_a_vaga(
+    app: FastAPI,
+    async_client: httpx.AsyncClient,
+    sync_client: TestClient,
+    factory: sessionmaker[Session],
+) -> None:
+    # A falha também encerra a transferência: sem esperar o pool, o upload ficaria `receiving`,
+    # com a reserva, até a retenção vencê-lo.
+    _, auth = new_account(factory)
+    item = create_upload(sync_client, auth, size=4)
+    hog = PoolHog(app)
+
+    async def body() -> AsyncIterator[bytes]:
+        yield b"abc"
+        hog.take()
+
+    response = await put_content(async_client, auth, item, body())
+    hog.join()
+
+    body_json = assert_problem(response, 422, "VALIDATION_FAILED")
+    assert [(e["field"], e["code"]) for e in body_json["errors"]] == [("body", "size_mismatch")]
+    assert state_of(sync_client, auth, item) == "failed"
     assert await anyio.to_thread.run_sync(slot_count, factory) == 0

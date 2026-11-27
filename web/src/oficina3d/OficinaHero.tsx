@@ -49,7 +49,8 @@ export interface SceneModule {
 
 /** `imagem` antes e no lugar da cena; `falhou` também mostra a imagem, que é o fallback. */
 type HeroState = "imagem" | "carregando" | "pronto" | "falhou";
-type MountState = "imagem" | "carregando" | "montado" | "falhou";
+/** `sem-cena`: economia de dados, movimento reduzido ou sem WebGL 2 na hora da carga; a imagem fica. */
+type MountState = "imagem" | "sem-cena" | "carregando" | "montado" | "falhou";
 
 /** O resultado da última carga de modelo, de qual goblin. */
 interface ModelResult {
@@ -64,11 +65,19 @@ interface OficinaHeroProps {
   readonly loadScene?: () => Promise<SceneModule>;
 }
 
+/** Só dão a proporção 4:5 da caixa reservada; o tamanho na tela vem das classes do palco. */
 const POSTER_WIDTH_PX = 640;
 const POSTER_HEIGHT_PX = 800;
-const POSTER_SIZES = "(min-width: 768px) 320px, 192px";
+/** Acompanha a largura do palco: 288 px no celular, 320 px a partir de 768 e 384 a partir de 1024. */
+const POSTER_SIZES = "(min-width: 1024px) 384px, (min-width: 768px) 320px, 288px";
 const THUMBNAIL_WIDTH_PX = 192;
 const THUMBNAIL_HEIGHT_PX = 240;
+/**
+ * Ponto de onde a miniatura amplia: o topo mostra o rosto. A Lua desce um pouco, para o sininho e
+ * a gola de bolinhas entrarem no círculo e ela não se confundir com a Nyx a 48 px.
+ */
+const THUMBNAIL_ORIGIN: Readonly<Partial<Record<CastId, string>>> = { lua: "origin-bust-low" };
+const DEFAULT_THUMBNAIL_ORIGIN = "origin-top";
 /** Teto da espera por um momento ocioso; passado isso, a carga começa de qualquer jeito. */
 const IDLE_TIMEOUT_MS = 2_000;
 const RESET_KEY = "Home";
@@ -85,7 +94,7 @@ const STEP_BUTTONS: readonly {
 ];
 
 /**
- * Palco 3D da abertura (ADR 027, 030 e 038): uma goblin por vez, escolhida numa fileira de cinco
+ * Palco 3D da abertura (ADR 027, 030 e 038): uma goblin por vez, escolhida numa fileira de seis
  * botões. A imagem estática da goblin escolhida aparece com a página e é o fallback; a cena chega
  * depois do `load` e de um momento ocioso, e nunca carrega com movimento reduzido, economia de
  * dados ou sem WebGL 2. Trocar de goblin baixa só o GLB dela, com a imagem dela enquanto carrega.
@@ -117,6 +126,7 @@ export function OficinaHero({
     let mounted: SceneHandle | null = null;
     const start = async (): Promise<void> => {
       if (!shouldLoad3D(environment)) {
+        setMount("sem-cena");
         return;
       }
       setMount("carregando");
@@ -182,6 +192,15 @@ export function OficinaHero({
   const state = heroStateOf(mount, model, selected);
   const member = castMember(selected);
   const sceneShown = state === "pronto";
+  // A imagem fica sem o halo do tema enquanto a cena pode chegar, para não saltar na troca; quando
+  // ela é o que fica (sem cena, movimento reduzido ou falha), ganha o halo como as goblins dos
+  // estados. Enquanto a troca pode acontecer, a imagem também fica a 93%: a cena enquadra com folga
+  // para o giro e mostra a goblin ~7% menor que o recorte rente da imagem (medido nas seis).
+  // Movimento reduzido e economia de dados se sabem já no render, sem esperar o idle; o WebGL 2,
+  // que pede criar um contexto, fica para o idle (`sem-cena`).
+  const sceneRuledOut = reducedMotion || environment.savesData();
+  const posterIsFinal =
+    state === "falhou" || mount === "sem-cena" || (mount === "imagem" && sceneRuledOut);
 
   const onStageKey = (event: KeyboardEvent<HTMLDivElement>): void => {
     if (handle === null) {
@@ -202,7 +221,7 @@ export function OficinaHero({
   };
 
   return (
-    <div className="mx-auto flex w-full max-w-xs shrink-0 flex-col items-center gap-4 md:mx-0">
+    <div className="mx-auto flex w-full max-w-72 shrink-0 flex-col items-center gap-4 md:mx-0 md:max-w-xs lg:max-w-sm">
       <div
         data-oficina-3d={state}
         data-goblin={selected}
@@ -215,7 +234,7 @@ export function OficinaHero({
               onKeyDown: onStageKey,
             }
           : {})}
-        className="relative aspect-4/5 w-full max-w-48 rounded-lg md:max-w-xs"
+        className="relative aspect-4/5 w-full max-w-72 rounded-lg md:max-w-xs lg:max-w-sm"
       >
         <picture>
           <source type="image/avif" srcSet={member.avif} sizes={POSTER_SIZES} />
@@ -227,7 +246,7 @@ export function OficinaHero({
             height={POSTER_HEIGHT_PX}
             fetchPriority="high"
             decoding="async"
-            className={`size-full object-contain motion-safe:transition-opacity ${sceneShown ? "opacity-0" : "opacity-100"}`}
+            className={`size-full object-contain motion-safe:transition-opacity ${sceneShown ? "opacity-0" : "opacity-100"} ${posterIsFinal ? "goblin-silhouette" : "scale-93"}`}
           />
         </picture>
         <div
@@ -337,6 +356,10 @@ function StepButton({ label, Icon, onStep }: StepButtonProps): ReactElement {
 }
 
 function heroStateOf(mount: MountState, model: ModelResult | null, selected: CastId): HeroState {
+  if (mount === "sem-cena") {
+    // Para o E2E e o CSS, é a mesma imagem de antes da carga.
+    return "imagem";
+  }
   if (mount !== "montado") {
     return mount;
   }
@@ -359,7 +382,8 @@ function CastButton({ goblin, pressed, onChoose }: CastButtonProps): ReactElemen
       className="flex min-h-11 cursor-pointer flex-col items-center gap-1 rounded-lg border-2 border-transparent p-1 text-sm font-semibold text-fg-muted transition hover:bg-surface hover:text-fg aria-pressed:border-primary aria-pressed:bg-surface aria-pressed:text-fg aria-pressed:shadow-card"
     >
       {/* A imagem é de corpo inteiro; o círculo mostra o rosto, ampliado a partir do topo. */}
-      <picture className="block size-12 overflow-hidden rounded-full bg-surface-sunken">
+      {/* O disco usa a superfície elevada: no claro a afundada tem a cor do painel e sumia. */}
+      <picture className="block size-12 overflow-hidden rounded-full bg-surface-raised">
         <source type="image/avif" srcSet={goblin.thumbnail.avif} />
         <img
           src={goblin.thumbnail.webp}
@@ -368,7 +392,7 @@ function CastButton({ goblin, pressed, onChoose }: CastButtonProps): ReactElemen
           height={THUMBNAIL_HEIGHT_PX}
           fetchPriority="low"
           decoding="async"
-          className="size-full origin-top scale-200 object-cover object-top"
+          className={`goblin-silhouette size-full scale-200 object-cover object-top ${THUMBNAIL_ORIGIN[goblin.id] ?? DEFAULT_THUMBNAIL_ORIGIN}`}
         />
       </picture>
       {goblin.name}

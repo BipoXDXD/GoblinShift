@@ -291,6 +291,7 @@ def test_ctl_que_nao_responde_a_tempo_vira_indisponivel(
         work_group=os.getgid(),
         call_timeout=SHORT_TIMEOUT,
         start_timeout=SHORT_TIMEOUT,
+        stop_base_timeout=SHORT_TIMEOUT,
         remove_timeout=SHORT_TIMEOUT,
     )
     attempt_id = prepared(runner)
@@ -315,6 +316,23 @@ def answer_always(
 ) -> None:
     """O falso responde `status` e `document` a qualquer chamada, sem passar pelo contrato."""
     monkeypatch.setattr(ctl, "handle", lambda _method, _path, _body: (status, document))
+
+
+def test_sonda_de_imagem_codifica_a_ref_na_query(
+    runner: ExecutorCtlRunner, ctl: FakeExecutorCtl, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    paths: list[str] = []
+
+    def record(_method: str, path: str, _body: bytes) -> tuple[int, dict[str, object]]:
+        paths.append(path)
+        return 200, {"present": True}
+
+    monkeypatch.setattr(ctl, "handle", record)
+
+    assert runner.image_present(IMAGE)
+    assert paths == [
+        "/v1/image?ref=ghcr.io%2Fbipoxdxd%2Fgoblinshift-executor%40sha256%3A" + "a" * 64
+    ]
 
 
 def padded_to(size: int, document: dict[str, object]) -> dict[str, object]:
@@ -423,6 +441,20 @@ def test_start_aceita_ctl_mais_lento_que_o_prazo_antigo_dentro_do_teto(
     assert ctl.operations(attempt_id) == ["start"]
 
 
+@pytest.fixture
+def recorded_timeouts(monkeypatch: pytest.MonkeyPatch) -> list[float]:
+    """Timeout de cada conexão aberta com o ctl, na ordem."""
+    timeouts: list[float] = []
+
+    class RecordingConnection(executor_ctl_runner._UnixConnection):
+        def __init__(self, socket_path: Path, timeout_s: float) -> None:
+            timeouts.append(timeout_s)
+            super().__init__(socket_path, timeout_s)
+
+    monkeypatch.setattr(executor_ctl_runner, "_UnixConnection", RecordingConnection)
+    return timeouts
+
+
 @pytest.mark.parametrize(
     ("operation", "timeout_s"),
     [
@@ -436,23 +468,27 @@ def test_start_aceita_ctl_mais_lento_que_o_prazo_antigo_dentro_do_teto(
 def test_operacao_espera_por_padrao_o_prazo_derivado_do_ctl(
     ctl: FakeExecutorCtl,
     area: Path,
-    monkeypatch: pytest.MonkeyPatch,
+    recorded_timeouts: list[float],
     operation: str,
     timeout_s: float,
 ) -> None:
-    timeouts: list[float] = []
-
-    class RecordingConnection(executor_ctl_runner._UnixConnection):
-        def __init__(self, socket_path: Path, timeout_s: float) -> None:
-            timeouts.append(timeout_s)
-            super().__init__(socket_path, timeout_s)
-
-    monkeypatch.setattr(executor_ctl_runner, "_UnixConnection", RecordingConnection)
     runner = ExecutorCtlRunner(ctl.socket_path, area, work_group=os.getgid())
 
     _call(runner, operation, prepared(runner))
 
-    assert timeouts == [timeout_s]
+    assert recorded_timeouts == [timeout_s]
+
+
+def test_stop_espera_por_padrao_o_prazo_derivado_do_ctl_mais_a_carencia(
+    ctl: FakeExecutorCtl, area: Path, recorded_timeouts: list[float]
+) -> None:
+    runner = ExecutorCtlRunner(ctl.socket_path, area, work_group=os.getgid())
+
+    runner.stop(prepared(runner), timedelta(seconds=7))
+
+    # 5 chamadas do stop (inspect, stop, inspect, inspect, rm) x 30 s do Docker, 10 s de margem
+    # (lock de 5 s e o HTTP) e os 7 s de carência.
+    assert recorded_timeouts == [5 * 30 + 10 + 7]
 
 
 def test_executor_real_roda_ate_o_fim_pelo_ctl(area: Path) -> None:

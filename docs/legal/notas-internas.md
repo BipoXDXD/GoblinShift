@@ -281,7 +281,7 @@ o especificado para a abertura pública. Os caminhos citados estão na `main`, c
 | Log de acesso do Nginx: IP truncado /24 e /48, só o caminho, sem Referer nem User-Agent; Uvicorn sem log de acesso | `docker/nginx/templates/access-log.conf.template` (`log_format privacy`); `docker/nginx/templates/default.conf.template:86`; `docker/app.Dockerfile:52` (`--no-access-log`); `tests/test_nginx_logs.py`; PR #12 |
 | Log de erro do Nginx só com falhas graves (`crit`), que ainda gravam o IP completo, o endereço pedido com a query e o Referer | `docker/nginx/templates/default.conf.template:53-65` (`error_log ... crit`; disco cheio no `proxy_temp`, EMFILE, malloc); `client:` é o cliente real por `default.conf.template:5-11` (`set_real_ip_from`, `real_ip_header`); campos da linha (`client:`, `server:`, `request:`, `upstream:`, `host:`, `referrer:`) em `ngx_http_log_error` e `ngx_http_log_error_handler`, `src/http/ngx_http_request.c` do Nginx `release-1.30.6` (a imagem de `docker/web.Dockerfile:15`); `tests/test_nginx_logs.py`, `tests/test_nginx_edge_limits.py`; PR #239 |
 | Log de acesso com o status e os tempos da aplicação | `docker/nginx/templates/access-log.conf.template:24-28` (`upstream_status`, `upstream_response_time`, `upstream_connect_time`) |
-| Proxy de borda sem log de acesso | `deploy/edge/Caddyfile` e `deploy/edge/conf.d/goblinshift.caddy` (sem diretiva `log`); `docker/gateway/Caddyfile` e `docker/gateway/sites/goblinshift.dev.caddy` (sem diretiva `log`) |
+| Proxy de borda sem log de acesso | `deploy/edge/Caddyfile` e `deploy/edge/conf.d/goblinshift.caddy` (sem diretiva `log`); `docker/gateway/sites/goblinshift.dev.caddy` (sem diretiva `log`); `docker/gateway/Caddyfile` (o `log` global só filtra o log padrão, sem ligar o de acesso) |
 | Logs: 5 × 10 MiB por serviço, cerca de 14 dias no volume previsto, somem ao recriar o container | `compose.yaml:11-15` (`x-logging`); plano 1.7 (Retenção e "Logs dos containers"); `tests/test_container_logs.py` |
 
 ### Divergências entre plano e código encontradas ao redigir
@@ -308,7 +308,10 @@ Todas as três encontradas no primeiro rascunho estão resolvidas na `main` (con
 
 Nota operacional: nem `deploy/edge/compose.yaml` nem `deploy/coolify/gateway.json`, de
 infraestrutura compartilhada, declaram rotação própria de logs. O Caddy da borda não grava log de
-acesso, e o item 5 do Aviso declara as mensagens técnicas dele à parte.
+acesso, e o item 5 do Aviso declara as mensagens técnicas dele à parte. O `log` global de
+`docker/gateway/Caddyfile` filtra essas mensagens (#442): IP truncado (/24 e /48), caminho sem a
+query e nenhum cabeçalho do pedido, como o formato `privacy` do Nginx
+(`tests/test_gateway_logs.py`).
 
 ## Decisões aplicadas em 2026-10-15
 

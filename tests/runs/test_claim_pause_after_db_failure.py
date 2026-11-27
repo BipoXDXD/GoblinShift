@@ -384,7 +384,7 @@ def test_sem_a_pausa_a_run_seguinte_gasta_claim_com_area_suja(
         None,
     )
     [refusal] = [r for r in caplog.records if r.getMessage() == START_REFUSED]
-    assert "work_area_dirty" in str(refusal.__dict__["fields"]["error"])
+    assert refusal.__dict__["fields"]["error_reason"] == "work_area_dirty"
 
 
 @pytest.mark.parametrize("point", POINTS)

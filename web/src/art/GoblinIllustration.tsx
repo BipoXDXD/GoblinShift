@@ -8,8 +8,11 @@ export type GoblinState = (typeof GOBLIN_STATES)[number];
 
 type GoblinId = keyof typeof TEXT.art.goblins;
 
-/** Larguras geradas por scripts/arte/gerar-imagens.sh: a caixa de 192 a 256 px CSS, de 1× a 3×. */
-const WIDTHS = [256, 384, 512, 768] as const;
+/**
+ * Larguras geradas por scripts/arte/gerar-imagens.sh: cobrem a caixa do estado (256 a 384 px CSS)
+ * e a grade dos créditos, de 1× a 3×.
+ */
+const WIDTHS = [256, 384, 512, 768, 1024, 1280] as const;
 const FALLBACK_WIDTH = 384;
 
 const FILES = import.meta.glob<string>("../assets/art/goblins/*.{avif,webp}", {
@@ -56,20 +59,21 @@ const GOBLINS: Readonly<Record<GoblinId, Goblin>> = {
   fagulha: goblinFrom("fagulha"),
   ferrugem: goblinFrom("ferrugem"),
   jade: goblinFrom("jade"),
+  lua: goblinFrom("lua"),
   nyx: goblinFrom("nyx"),
 };
 
-/** As cinco goblins publicadas, para quem as apresenta todas (créditos). */
+/** As seis goblins publicadas, para quem as apresenta todas (créditos). */
 export const CAST: readonly Goblin[] = Object.values(GOBLINS);
 
 /**
- * As goblins de cada estado (ADR 030): a Jade, tranquila, espera no vazio; a Rúbia,
+ * As goblins de cada estado (ADR 030): a Lua e a Jade, tranquilas, esperam no vazio; a Rúbia,
  * mascote da oficina, e a Fagulha, de couro e luvas de trabalho, trabalham enquanto carrega; a
  * Nyx, sombria, acompanha o erro; a Ferrugem, a mais expansiva, comemora o sucesso. A Ada saiu do
- * site em 2026-10-15 e a Lua em 2026-10-16, por decisão do usuário.
+ * site em 2026-10-15, por decisão do usuário.
  */
 const GOBLINS_OF_STATE: Readonly<Record<GoblinState, readonly [GoblinId, ...GoblinId[]]>> = {
-  vazio: ["jade"],
+  vazio: ["lua", "jade"],
   carregando: ["rubia", "fagulha"],
   erro: ["nyx"],
   sucesso: ["ferrugem"],
@@ -104,12 +108,15 @@ function stableHash(key: string): number {
 }
 
 /**
- * Caixa reservada em px CSS (4:5, como os arquivos): 192×240 no celular e 256×320 a partir de
- * 768 px. Com width e height no `<img>`, o navegador guarda o lugar antes de baixar (sem CLS).
+ * Caixa do estado em px CSS (4:5, como os arquivos): 256×320 no celular e 320×400 a partir de
+ * 768 px. Não cresce mais no desktop: com 480 px a goblin empurrava o Baixar e a ação do vazio
+ * para fora da primeira tela de 1280×800 e virava o assunto do cartão. Com width e height no
+ * `<img>`, o navegador guarda o lugar antes de baixar (sem CLS); o `sizes` acompanha as classes,
+ * para cada tela baixar só a largura que cobre a caixa.
  */
-const WIDTH_PX = 256;
-const HEIGHT_PX = 320;
-const STATE_SIZES = "(min-width: 768px) 256px, 192px";
+const STATE_WIDTH_PX = 320;
+const STATE_HEIGHT_PX = 400;
+const STATE_SIZES = "(min-width: 768px) 320px, 256px";
 
 /**
  * A goblin de um estado. Reforça o texto e nunca o substitui: o estado continua dito em texto e
@@ -128,14 +135,19 @@ export function GoblinIllustration({ state, rotationKey }: GoblinIllustrationPro
       goblin={goblin}
       alt={goblin.alt}
       sizes={STATE_SIZES}
+      width={STATE_WIDTH_PX}
+      height={STATE_HEIGHT_PX}
       pictureClassName="shrink-0 self-center"
-      imgClassName="h-60 w-48 md:h-80 md:w-64"
+      imgClassName="h-80 w-64 md:h-100 md:w-80"
     />
   );
 }
 
 /** Na grade dos créditos: duas colunas no celular, três a partir de 768 px. */
 const CAST_SIZES = "(min-width: 768px) 224px, 45vw";
+/** A proporção reservada na grade (4:5); a largura exibida vem da coluna. */
+const CAST_WIDTH_PX = 256;
+const CAST_HEIGHT_PX = 320;
 
 /** O elenco inteiro, cada goblin com o nome na legenda (página de créditos). */
 export function GoblinCast(): ReactElement {
@@ -154,6 +166,8 @@ export function GoblinCast(): ReactElement {
                 goblin={goblin}
                 alt=""
                 sizes={CAST_SIZES}
+                width={CAST_WIDTH_PX}
+                height={CAST_HEIGHT_PX}
                 pictureClassName="w-full"
                 imgClassName="h-auto w-full"
               />
@@ -172,16 +186,25 @@ interface GoblinPictureProps {
   readonly goblin: Goblin;
   readonly alt: string;
   readonly sizes: string;
+  /** Caixa reservada em px CSS, antes de a imagem chegar (sem CLS). */
+  readonly width: number;
+  readonly height: number;
   /** Posição no layout de quem usa. */
   readonly pictureClassName: string;
   /** Tamanho exibido; a proporção já vem reservada por width e height. */
   readonly imgClassName: string;
 }
 
+/**
+ * Toda goblin desenhada passa por aqui, com `goblin-silhouette`: no tema escuro o token põe um fio
+ * de luz e um halo atrás da figura, para roupa e cabelo pretos não sumirem no cartão (tokens.css).
+ */
 function GoblinPicture({
   goblin,
   alt,
   sizes,
+  width,
+  height,
   pictureClassName,
   imgClassName,
 }: GoblinPictureProps): ReactElement {
@@ -192,11 +215,11 @@ function GoblinPicture({
       <img
         src={goblin.fallback}
         alt={alt}
-        width={WIDTH_PX}
-        height={HEIGHT_PX}
+        width={width}
+        height={height}
         loading="lazy"
         decoding="async"
-        className={`object-contain ${imgClassName}`}
+        className={`goblin-silhouette object-contain ${imgClassName}`}
       />
     </picture>
   );

@@ -10,13 +10,20 @@ from fastapi.testclient import TestClient
 from sqlalchemy import func, select, update
 from sqlalchemy.orm import Session, sessionmaker
 
-from goblinshift.identity import MAX_ACTIVE_KEYS, MAX_KEY_DAYS, authenticate_api_key
+from goblinshift.identity import (
+    MAX_ACTIVE_KEYS,
+    MAX_KEY_DAYS,
+    MAX_STORED_KEYS,
+    Scope,
+    authenticate_api_key,
+    issue_key,
+)
 from goblinshift.identity.keys import MIN_KEY_DAYS
 from goblinshift.identity.tables import api_key, app_user, audit_event
 from goblinshift.platform.db import unit_of_work
 from tests.api.simulated_session import SimulatedSessions
 from tests.api.support import assert_problem
-from tests.identity.support import new_user
+from tests.identity.support import HASHER, new_user
 
 pytestmark = pytest.mark.integration
 
@@ -66,7 +73,7 @@ def audit_events(factory: sessionmaker[Session], owner_id: UUID) -> list[tuple[s
 
 def authenticates(factory: sessionmaker[Session], token: str) -> bool:
     with unit_of_work(factory) as session:
-        return authenticate_api_key(session, token, NOW) is not None
+        return authenticate_api_key(session, token, NOW, hasher=HASHER) is not None
 
 
 # --- Emissão ----------------------------------------------------------------------------------
@@ -232,6 +239,24 @@ def test_sexta_chave_ativa_409(
 
     assert_problem(response, 409, "STATE_CONFLICT")
     assert key_count(factory, owner) == MAX_ACTIVE_KEYS
+
+
+def test_centesima_primeira_chave_guardada_409_com_mensagem_propria(
+    client: TestClient, factory: sessionmaker[Session], sessions: SimulatedSessions
+) -> None:
+    owner = new_user(factory)
+    sessions.sign_in(owner)
+    with unit_of_work(factory) as session:
+        for _ in range(MAX_STORED_KEYS):
+            issue_key(session, owner_id=owner, scopes=frozenset({Scope.FILES_READ}), now=NOW)
+        session.execute(update(api_key).where(api_key.c.owner_id == owner).values(revoked_at=NOW))
+
+    response = client.post(KEYS, json=VALID)
+
+    body = assert_problem(response, 409, "STATE_CONFLICT")
+    # Revogar não abre vaga: a mensagem diz que as inativas saem com o tempo.
+    assert f"{MAX_STORED_KEYS} chaves guardadas" in body["detail"]
+    assert key_count(factory, owner) == MAX_STORED_KEYS
 
 
 def test_emitir_chave_com_login_de_11_min_401_reauth_required(

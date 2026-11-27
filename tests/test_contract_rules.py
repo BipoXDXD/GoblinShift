@@ -373,7 +373,7 @@ def test_413_sem_corpo_realmente_grande_continua_falha(
 
 @pytest.mark.parametrize("operation", [CREATE_PRESET, REPLACE_PRESET, CREATE_RUN, RUN_PRESET])
 def test_aceita_413_de_comando_acima_do_teto_na_recusa_de_dado_valido(operation: str) -> None:
-    """Sem `maxLength` nos nomes de coluna, a spec permite um comando maior que o teto de bytes."""
+    """Mesmo com `maxLength` nos nomes de coluna, a spec permite um comando acima do teto."""
     rejection = _rejection(
         operation,
         413,
@@ -426,4 +426,34 @@ def test_aceita_upload_do_select_do_preset_fora_das_entradas_da_execucao() -> No
 def test_recusa_do_preset_fora_do_select_continua_falha(errors: list[tuple[str, str]]) -> None:
     rejection = _rejection(RUN_PRESET, 422, _problem("VALIDATION_FAILED", *errors))
 
+    assert not is_expected_rejection(rejection)
+
+
+def test_chave_reutilizada_no_lote_de_uploads_depende_do_estado() -> None:
+    # O fuzzer repete a mesma Idempotency-Key com outro corpo: quem decide é o lote que a chave já
+    # criou, não o schema.
+    assert is_expected_rejection(
+        _rejection(
+            CREATE_UPLOADS,
+            422,
+            _problem("IDEMPOTENCY_KEY_REUSED"),
+            headers={"Idempotency-Key": "k" * 16},
+        )
+    )
+
+
+@pytest.mark.parametrize(
+    "rejection",
+    [
+        _rejection(CREATE_UPLOADS, 422, _problem("IDEMPOTENCY_KEY_REUSED")),
+        _rejection(
+            CREATE_RUN,
+            422,
+            _problem("IDEMPOTENCY_KEY_REUSED"),
+            headers={"Idempotency-Key": "k" * 16},
+        ),
+    ],
+    ids=["sem-chave", "fora-dos-uploads"],
+)
+def test_chave_reutilizada_so_vale_com_a_chave_e_nos_uploads(rejection: Rejection) -> None:
     assert not is_expected_rejection(rejection)

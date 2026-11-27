@@ -8,7 +8,7 @@ x-executor-env: &executor-env
   GS_EXECUTOR_IMAGE: ${GS_EXECUTOR_IMAGE:?gravada no .env pelo scripts/e2e-gvisor.sh (imagem do executor por digest)}
 
 x-executor-client: &executor-client
-  group_add: ["61001"]
+  group_add: ["61001", "61002"]
   volumes:
     - type: bind
       source: /run/goblinshift

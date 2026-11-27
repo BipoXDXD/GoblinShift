@@ -19,8 +19,10 @@ from sqlalchemy.orm import Session
 
 from goblinshift import capacity
 from goblinshift.files.errors import (
+    DailyUploadLimitError,
     InputNotAvailableError,
     InvalidUploadRequestError,
+    LiveUploadLimitError,
     UploadContentTooLargeError,
     UploadGoneError,
     UploadNotFoundError,
@@ -32,15 +34,19 @@ from goblinshift.files.limits import (
     INCOMPLETE_UPLOAD_TTL,
     MAX_BATCH_BYTES,
     MAX_BATCH_FILES,
+    MAX_LIVE_UPLOADS_PER_ACCOUNT,
     MAX_NAME_CHARS,
+    MAX_UPLOADS_CREATED_PER_DAY,
     MIN_INTENT_RESERVED_BYTES,
     READY_UPLOAD_TTL,
+    UPLOAD_CREATION_WINDOW,
     max_file_bytes_for,
 )
 from goblinshift.files.objects import request_deletion_of_unreferenced
 from goblinshift.files.states import Availability, ObjectState, UploadState
 from goblinshift.files.storage import ContentTooLargeError, FileStorage
 from goblinshift.files.tables import stored_object, upload
+from goblinshift.platform.db import retry_on_pool_timeout
 from goblinshift.processing.names import has_unsafe_char
 
 logger = logging.getLogger(__name__)
@@ -67,6 +73,11 @@ _FORBIDDEN_NAME_CHAR = re.compile(rf"[{_CONTROL_CHARS}\ud800-\udfff]")
 # plano básico (U+E0001 e afins), que sem a flag `u` o ECMA-262 só escreve como par de
 # surrogates. Todos seguem recusados aqui.
 UPLOAD_NAME_PATTERN = rf"^[^/\\{_CONTROL_CHARS}{_BMP_FORMAT_CHARS}]*$"
+
+_LIVE_STATES = (UploadState.CREATED, UploadState.RECEIVING, UploadState.READY)
+# Classe do advisory lock, ao lado das de `runs.acceptance` (0x6773_0001 e 0x6773_0002) e de
+# `upload_requests` (0x6773_0003).
+ADVISORY_CLASS_LIVE_UPLOADS = 0x6773_0004
 
 # Só o que `_view` lê: uma coluna nova na tabela não entra na projeção sem que alguém a use.
 _VIEW_COLUMNS = (
@@ -111,6 +122,14 @@ class UploadView:
 
 
 @dataclass(frozen=True)
+class IdempotentRequest:
+    """Idempotency-Key do pedido e o SHA-256 do corpo, gravados em cada linha do lote."""
+
+    key: str
+    body_hash: bytes
+
+
+@dataclass(frozen=True)
 class ReadyUpload:
     upload_id: uuid.UUID
     object_id: uuid.UUID
@@ -120,15 +139,23 @@ class ReadyUpload:
 
 
 def create_intents(
-    session: Session, owner_id: uuid.UUID, items: Sequence[tuple[str, int]]
+    session: Session,
+    owner_id: uuid.UUID,
+    items: Sequence[tuple[str, int]],
+    request: IdempotentRequest | None = None,
 ) -> list[UploadView]:
     """Cria um lote de intenções de upload, na ordem recebida, cada uma com seu objeto pendente.
 
-    Reserva o tamanho declarado de cada intenção, no mínimo `MIN_INTENT_RESERVED_BYTES` (detentor
-    `upload`), tudo ou nada: acima do teto levanta `AccountCapacityExceededError` ou
-    `GlobalCapacityExceededError`, e quem chama desfaz.
+    O lote que passaria de `MAX_LIVE_UPLOADS_PER_ACCOUNT` uploads vivos é recusado inteiro com
+    `LiveUploadLimitError`, e o que passaria de `MAX_UPLOADS_CREATED_PER_DAY` criados em 24 h, com
+    `DailyUploadLimitError`. Reserva o tamanho declarado de cada intenção, no mínimo
+    `MIN_INTENT_RESERVED_BYTES` (detentor `upload`), tudo ou nada: acima do teto levanta
+    `AccountCapacityExceededError` ou `GlobalCapacityExceededError`, e quem chama desfaz. Com
+    `request`, cada linha guarda a chave, o hash do corpo e a própria posição no pedido, para
+    `upload_requests` achar o lote de novo.
     """
-    intents = _parse_intents(items)
+    intents = parse_intents(items)
+    _ensure_creation_room(session, owner_id, len(intents))
     object_ids = session.execute(
         insert(stored_object).returning(stored_object.c.id, sort_by_parameter_order=True),
         [{"owner_id": owner_id, "storage_key": _new_upload_key()} for _ in intents],
@@ -143,8 +170,9 @@ def create_intents(
                 "object_id": object_id,
                 "original_name": intent.name,
                 "expected_size": intent.expected_size,
+                **_request_columns(request, index),
             }
-            for intent, object_id in zip(intents, object_ids, strict=True)
+            for index, (intent, object_id) in enumerate(zip(intents, object_ids, strict=True))
         ],
     ).all()
     capacity.reserve_many(
@@ -168,6 +196,7 @@ def receive_content(
     chunks: Iterable[bytes],
     *,
     clock: Callable[[], float] = time.monotonic,
+    pool_patience_s: float = 0.0,
 ) -> UploadView:
     """Grava o conteúdo de um upload `created` e o deixa `ready`.
 
@@ -181,6 +210,10 @@ def receive_content(
     bloco seguinte e falha com `UploadGoneError`, porque a retenção já pode ter liberado a reserva.
     `clock` (segundos, monotônico) mede esse prazo a partir de antes do claim, então o escritor
     não inicia bloco depois do vencimento visto pelo banco.
+
+    As transações depois da transferência (concluir, falhar, ler o resultado) esperam o pool por
+    até `pool_patience_s`: com o conteúdo já no disco, um pico curto de requisições não pode
+    derrubar o envio.
     """
     started = clock()
     with session.begin():
@@ -192,27 +225,44 @@ def receive_content(
             storage_key, _until_expiry(chunks, deadline, clock), max_bytes=expected_size
         )
     except ContentTooLargeError:
-        _fail(session, storage, owner_id, upload_id, storage_key)
+        _fail(session, storage, owner_id, upload_id, storage_key, pool_patience_s)
         raise UploadContentTooLargeError(expected_size) from None
     except Exception:
-        _fail(session, storage, owner_id, upload_id, storage_key)
+        _fail(session, storage, owner_id, upload_id, storage_key, pool_patience_s)
         raise
     if size != expected_size:
-        _fail(session, storage, owner_id, upload_id, storage_key)
+        _fail(session, storage, owner_id, upload_id, storage_key, pool_patience_s)
         raise UploadSizeMismatchError(expected_size)
-    with session.begin():
-        completed = _complete(session, owner_id, upload_id, sha256, size)
-    if not completed:
+
+    def complete() -> bool:
+        with session.begin():
+            return _complete(session, owner_id, upload_id, sha256, size)
+
+    if not retry_on_pool_timeout(complete, patience_s=pool_patience_s):
         # Excluído ou expirado durante a transferência: o arquivo novo não tem dono.
-        _fail(session, storage, owner_id, upload_id, storage_key)
+        _fail(session, storage, owner_id, upload_id, storage_key, pool_patience_s)
         with session.begin():
             _raise_unavailable(session, owner_id, upload_id)
-    with session.begin():
-        return get_upload(session, owner_id, upload_id)
+
+    def current() -> UploadView:
+        with session.begin():
+            return get_upload(session, owner_id, upload_id)
+
+    return retry_on_pool_timeout(current, patience_s=pool_patience_s)
 
 
 def get_upload(session: Session, owner_id: uuid.UUID, upload_id: uuid.UUID) -> UploadView:
-    row = session.execute(
+    views = get_uploads(session, owner_id, [upload_id])
+    if not views:
+        raise UploadNotFoundError
+    return views[0]
+
+
+def get_uploads(
+    session: Session, owner_id: uuid.UUID, upload_ids: Sequence[uuid.UUID]
+) -> list[UploadView]:
+    """Estado atual dos uploads do dono, na ordem pedida; os que não existem ficam de fora."""
+    rows = session.execute(
         select(
             *_VIEW_COLUMNS,
             stored_object.c.size_bytes,
@@ -221,21 +271,10 @@ def get_upload(session: Session, owner_id: uuid.UUID, upload_id: uuid.UUID) -> U
             (upload.c.expires_at <= func.now()).label("expired"),
         )
         .join(stored_object, stored_object.c.id == upload.c.object_id)
-        .where(upload.c.id == upload_id, upload.c.owner_id == owner_id)
-    ).one_or_none()
-    if row is None:
-        raise UploadNotFoundError
-    return _view(
-        row,
-        size_bytes=row.size_bytes,
-        sha256=row.sha256,
-        availability=Availability.of(
-            deleted_at=row.deleted_at,
-            expires_at=row.expires_at,
-            expired=row.expired,
-            object_missing=row.object_state == ObjectState.MISSING,
-        ),
-    )
+        .where(upload.c.id.in_(upload_ids), upload.c.owner_id == owner_id)
+    ).all()
+    by_id = {row.id: _current_view(row) for row in rows}
+    return [by_id[upload_id] for upload_id in upload_ids if upload_id in by_id]
 
 
 def request_deletion(session: Session, owner_id: uuid.UUID, upload_id: uuid.UUID) -> None:
@@ -312,7 +351,142 @@ def stored_size_of(upload_id: ColumnElement[uuid.UUID]) -> ColumnElement[int]:
     )
 
 
-def _parse_intents(items: Sequence[tuple[str, int]]) -> list[UploadIntent]:
+def _ensure_creation_room(session: Session, owner_id: uuid.UUID, batch_size: int) -> None:
+    """Recusa o lote que passaria do teto de uploads vivos ou do de criados em 24 h da conta.
+
+    `LiveUploadLimitError` para o primeiro, `DailyUploadLimitError` para o segundo; se os dois
+    estouram, vai o de espera maior, para o cliente não voltar cedo e levar outro 429. A trava vale
+    até o fim da transação e serializa só as criações de lote da mesma conta: cada lote conta e
+    insere antes que o próximo conte, então dois lotes paralelos não passam juntos de um teto.
+    Ordem das travas: chave do lote (`upload_requests`) → vivos → pools do `capacity`. O objeto
+    da trava é um hash de 32 bits; uma colisão só faz duas contas esperarem uma pela outra.
+    """
+    session.execute(
+        select(
+            func.pg_advisory_xact_lock(ADVISORY_CLASS_LIVE_UPLOADS, func.hashtext(str(owner_id)))
+        )
+    )
+    refusals = [
+        refusal
+        for refusal in (
+            _live_refusal(session, owner_id, batch_size),
+            _daily_refusal(session, owner_id, batch_size),
+        )
+        if refusal is not None
+    ]
+    if refusals:
+        raise max(refusals, key=lambda refusal: refusal.retry_after)
+
+
+def _live_refusal(
+    session: Session, owner_id: uuid.UUID, batch_size: int
+) -> LiveUploadLimitError | None:
+    live = session.execute(select(func.count()).where(*_live_uploads_of(owner_id))).scalar_one()
+    excess = live + batch_size - MAX_LIVE_UPLOADS_PER_ACCOUNT
+    if excess <= 0:
+        return None
+    wait = _wait_until_nth(
+        session,
+        upload.c.expires_at - func.now(),
+        _live_uploads_of(owner_id),
+        upload.c.expires_at,
+        min(excess, live),
+    )
+    return LiveUploadLimitError(wait)
+
+
+def _daily_refusal(
+    session: Session, owner_id: uuid.UUID, batch_size: int
+) -> DailyUploadLimitError | None:
+    """Conta toda linha da janela, excluída ou falha, pelo índice `(owner_id, created_at)`."""
+    created = session.execute(
+        select(func.count()).where(*_created_in_window_of(owner_id))
+    ).scalar_one()
+    excess = created + batch_size - MAX_UPLOADS_CREATED_PER_DAY
+    if excess <= 0:
+        return None
+    wait = _wait_until_nth(
+        session,
+        upload.c.created_at + UPLOAD_CREATION_WINDOW - func.now(),
+        _created_in_window_of(owner_id),
+        upload.c.created_at,
+        min(excess, created),
+    )
+    return DailyUploadLimitError(wait)
+
+
+def _wait_until_nth(
+    session: Session,
+    time_left: ColumnElement[timedelta],
+    where: tuple[ColumnElement[bool], ...],
+    order_by: ColumnElement[Any],
+    count: int,
+) -> timedelta:
+    """`time_left` da `count`-ésima linha de `where` na ordem de `order_by`, nunca negativo.
+
+    Outra instrução, outro snapshot, sem trava sobre as linhas: se elas vencem, são excluídas ou a
+    retenção as remove depois da contagem, não há a `count`-ésima, e a espera fica em zero; quem
+    chama aplica o piso.
+    """
+    if count == 0:
+        return timedelta(0)
+    wait: timedelta | None = session.execute(
+        select(time_left).where(*where).order_by(order_by).offset(count - 1).limit(1)
+    ).scalar_one_or_none()
+    return max(wait or timedelta(0), timedelta(0))
+
+
+def _created_in_window_of(owner_id: uuid.UUID) -> tuple[ColumnElement[bool], ...]:
+    return (
+        upload.c.owner_id == owner_id,
+        upload.c.created_at > func.now() - UPLOAD_CREATION_WINDOW,
+    )
+
+
+def _live_uploads_of(owner_id: uuid.UUID) -> tuple[ColumnElement[bool], ...]:
+    """Vivo: ainda pode receber conteúdo ou servir de entrada, pelo relógio do banco.
+
+    `deleted_at IS NULL` sem parâmetro casa com o predicado do índice parcial
+    `upload_owner_id_expires_at_idx`, que limita a varredura às linhas ainda não vencidas da conta.
+    """
+    return (
+        upload.c.owner_id == owner_id,
+        upload.c.deleted_at.is_(None),
+        upload.c.expires_at > func.now(),
+        upload.c.state.in_(_LIVE_STATES),
+    )
+
+
+def _request_columns(request: IdempotentRequest | None, index: int) -> dict[str, object]:
+    if request is None:
+        return {}
+    return {
+        "request_key": request.key,
+        "request_hash": request.body_hash,
+        "request_index": index,
+    }
+
+
+def _current_view(row: Row[Any, *tuple[Any, ...]]) -> UploadView:
+    return _view(
+        row,
+        size_bytes=row.size_bytes,
+        sha256=row.sha256,
+        availability=Availability.of(
+            deleted_at=row.deleted_at,
+            expires_at=row.expires_at,
+            expired=row.expired,
+            object_missing=row.object_state == ObjectState.MISSING,
+        ),
+    )
+
+
+def parse_intents(items: Sequence[tuple[str, int]]) -> list[UploadIntent]:
+    """Confere o lote (contagem, nomes, tamanhos) e o devolve como intenções.
+
+    Levanta `InvalidUploadRequestError` com o caminho do item. `upload_requests` chama antes de
+    olhar a chave, para um lote inválido não virar recusa de chave nem quebrar o hash do corpo.
+    """
     if not 1 <= len(items) <= MAX_BATCH_FILES:
         raise InvalidUploadRequestError("items", f"o lote deve ter de 1 a {MAX_BATCH_FILES} itens")
     intents = [UploadIntent(*item) for item in items]
@@ -451,6 +625,7 @@ def _fail(
     owner_id: uuid.UUID,
     upload_id: uuid.UUID,
     storage_key: str,
+    pool_patience_s: float,
 ) -> None:
     """Remove o que tiver chegado ao disco e só então faz `receiving → failed` e libera a reserva.
 
@@ -459,19 +634,23 @@ def _fail(
     `pending` até a retenção remover linha e objeto.
     """
     storage.delete(storage_key)
-    with session.begin():
-        failed = session.execute(
-            update(upload)
-            .where(
-                upload.c.id == upload_id,
-                upload.c.owner_id == owner_id,
-                upload.c.state == UploadState.RECEIVING,
-            )
-            .values(state=UploadState.FAILED)
-            .returning(upload.c.id)
-        ).scalar_one_or_none()
-        if failed is not None:
-            capacity.release(session, holder=capacity.HolderKind.UPLOAD, holder_id=upload_id)
+
+    def mark_failed() -> None:
+        with session.begin():
+            failed = session.execute(
+                update(upload)
+                .where(
+                    upload.c.id == upload_id,
+                    upload.c.owner_id == owner_id,
+                    upload.c.state == UploadState.RECEIVING,
+                )
+                .values(state=UploadState.FAILED)
+                .returning(upload.c.id)
+            ).scalar_one_or_none()
+            if failed is not None:
+                capacity.release(session, holder=capacity.HolderKind.UPLOAD, holder_id=upload_id)
+
+    retry_on_pool_timeout(mark_failed, patience_s=pool_patience_s)
 
 
 def _raise_unavailable(session: Session, owner_id: uuid.UUID, upload_id: uuid.UUID) -> NoReturn:

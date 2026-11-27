@@ -132,8 +132,9 @@ run_input = Table(
     Column("upload_id", Uuid, nullable=False),
     Column("outcome", Text),
     Column("error_code", Text),
-    # Avisos (códigos), contagens e duplicata do item, já conferidos pela coleta; sem texto do
-    # arquivo. Anulado com os demais detalhes por item na retenção de 30 dias (1.7).
+    # Avisos (códigos), contagens, duplicata e comparação (ADR 059) do item, já conferidos pela
+    # coleta; sem texto do arquivo. Anulado com os demais detalhes por item na retenção de 30 dias
+    # (1.7).
     Column("details", JSONB),
     PrimaryKeyConstraint("run_id", "position"),
     UniqueConstraint("run_id", "upload_id"),

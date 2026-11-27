@@ -19,6 +19,8 @@ const CSRF_HEADER = "x-csrf-token";
 const SAFE_METHODS = new Set(["GET", "HEAD", "OPTIONS"]);
 const TERMS_VERSION = "v5";
 const MAX_ACTIVE_KEYS = 5;
+// Guardadas = ativas, revogadas e vencidas (identity/accounts.py, MAX_STORED_KEYS).
+const MAX_STORED_KEYS = 100;
 const NOW = "2026-10-14T12:00:00Z";
 const DAY_MS = 86_400_000;
 const SEED_KEY_DAYS = 30;
@@ -367,7 +369,7 @@ export class FakeAccount {
       return;
     }
     const active = [...this.keys.values()].filter((stored) => stored.key.revoked_at === null);
-    if (active.length >= MAX_ACTIVE_KEYS) {
+    if (active.length >= MAX_ACTIVE_KEYS || this.keys.size >= MAX_STORED_KEYS) {
       await fulfillProblem(route, { status: 409, code: "STATE_CONFLICT" });
       return;
     }

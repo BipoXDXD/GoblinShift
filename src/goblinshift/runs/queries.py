@@ -23,6 +23,7 @@ from goblinshift.processing.recipe import (
     ItemRejectionCode,
     ItemWarningCode,
 )
+from goblinshift.runs.comparison import ItemComparison, comparison_from_json
 from goblinshift.runs.cursor import Position, decode_cursor, encode_cursor
 from goblinshift.runs.formula_cells import FormulaCells
 from goblinshift.runs.lifecycle import TERMINAL_STATUSES, ErrorCode, Phase, Status
@@ -92,6 +93,8 @@ class RunItem:
     duplicate_of: int | None
     # Única exceção ao "nada do arquivo": nomes de coluna do aviso de fórmula (1.3; ADR 039).
     formula_cells: FormulaCells | None
+    # Antes → depois que a receita já mede; nulo em Run antiga, fora da forma e depois de 30 dias.
+    comparison: ItemComparison | None
 
 
 @dataclass(frozen=True)
@@ -428,6 +431,7 @@ def _item(row: Any) -> RunItem:
         counts=_counts(details.get("counts")),
         duplicate_of=duplicate_of,
         formula_cells=FormulaCells.from_json(details.get("formula_cells")),
+        comparison=comparison_from_json(details.get("comparison")),
     )
 
 

@@ -17,9 +17,12 @@ from goblinshift.identity import (
 from goblinshift.identity.tables import app_user
 from goblinshift.platform.db import unit_of_work
 from goblinshift.platform.settings import Settings
+from goblinshift.platform.telemetry import UserHasher
 from tests.conftest import restore_capacity_seed, run_migrations
 
 ALL_SCOPES = frozenset(Scope)
+# O `user.hash` dos logs de `authenticate_api_key`; a chave só precisa ser fixa no teste.
+HASHER = UserHasher(b"t" * 32)
 
 
 def prepare_database(settings: Settings, engine: Engine) -> None:

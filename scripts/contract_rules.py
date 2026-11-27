@@ -176,7 +176,8 @@ _RULES = (
     # todo texto; o decodificador dos comandos o recusa com 400 (`json_command`).
     _Rule(_ANY_OPERATION, _BAD_REQUEST, "JSON_INVALID", lambda rejection: _has_nul(rejection.body)),
     # O teto do corpo em bytes (`json_command`) é do envelope, não de um campo: o JSON Schema não
-    # tem como limitar o tamanho serializado, e as listas de nomes de coluna não têm `maxLength`.
+    # tem como limitar o tamanho serializado, e as listas de nomes de coluna passam dele mesmo com
+    # o `maxLength` de cada nome.
     _Rule(
         _ANY_OPERATION,
         _CONTENT_TOO_LARGE,
@@ -186,6 +187,14 @@ _RULES = (
     _Rule("POST /api/v1/uploads", _UNPROCESSABLE, "VALIDATION_FAILED", _only_unpublished_names),
     _Rule(
         "POST /api/v1/uploads", _UNPROCESSABLE, "VALIDATION_FAILED", _only_oversized_common_files
+    ),
+    # O fuzzer repete a mesma Idempotency-Key com outro corpo: o lote que a chave já criou, não o
+    # schema, decide (como o `If-Match` vencido dos presets).
+    _Rule(
+        "POST /api/v1/uploads",
+        _UNPROCESSABLE,
+        "IDEMPOTENCY_KEY_REUSED",
+        lambda rejection: rejection.has_header("Idempotency-Key"),
     ),
     # A chave só é exigida sem `validate_only`, e OpenAPI não tem parâmetro condicional. Enviada
     # no formato publicado, a recusa seria defeito.

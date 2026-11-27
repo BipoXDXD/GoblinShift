@@ -38,7 +38,7 @@ from goblinshift.platform.settings import Settings
 from goblinshift.platform.telemetry import (
     JsonFormatter,
     make_span_processor,
-    omit_database_error_detail,
+    omit_exception_detail,
 )
 from goblinshift.runs.worker import attempt_event
 from goblinshift.runs.worker.claim import ClaimedAttempt
@@ -48,6 +48,7 @@ TEST_ROUTES = "/api/v1/_test"
 TIMEOUTS = TransferTimeouts(total=timedelta(seconds=10), idle=timedelta(seconds=10))
 FIRST_CHUNK = b"primeiro pedaco"
 OPERATIONAL_ERROR_TYPE = "sqlalchemy.exc.OperationalError"
+STORAGE_ERROR_TYPE = "builtins.OSError"
 REDACTED = "exception detail redacted"
 
 
@@ -359,14 +360,15 @@ def test_log_do_erro_de_banco_mantem_o_tipo_e_os_frames(
     "route",
     ["interrupted", "plain-fails-outside-database"],
 )
-def test_excecao_que_nao_e_de_banco_continua_no_log_por_inteiro(
+def test_excecao_que_nao_e_de_banco_sai_no_log_so_com_o_tipo(
     traced: Traced, caplog: pytest.LogCaptureFixture, route: str
 ) -> None:
     caplog.set_level(logging.ERROR)
 
     traced.client.get(f"{TEST_ROUTES}/{route}")
 
-    assert f"OSError: falha ao ler {traced.canaries.path}" in traced.log.getvalue()
+    assert STORAGE_ERROR_TYPE in traced.log.getvalue()
+    assert traced.canaries.path not in traced.log.getvalue()
 
 
 def test_uvicorn_nao_escreve_o_detalhe_do_erro_de_banco(
@@ -379,12 +381,13 @@ def test_uvicorn_nao_escreve_o_detalhe_do_erro_de_banco(
     assert "Exception in ASGI application" in output
 
 
-def test_uvicorn_escreve_por_inteiro_a_excecao_que_nao_e_de_banco(
+def test_uvicorn_escreve_sem_a_mensagem_a_excecao_que_nao_e_de_banco(
     traced: Traced, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     output = _uvicorn_log(monkeypatch, _raised(traced.canaries.storage_error()))
 
-    assert f"OSError: falha ao ler {traced.canaries.path}" in output
+    assert STORAGE_ERROR_TYPE in output
+    assert traced.canaries.path not in output
 
 
 def _wrapped_with_cause(canaries: Canaries) -> Exception:
@@ -438,7 +441,7 @@ def test_erro_de_banco_em_qualquer_ponto_da_cadeia_tira_as_mensagens(
     assert OPERATIONAL_ERROR_TYPE in output
 
 
-def test_excecao_que_descarta_o_erro_de_banco_com_from_none_fica_inteira(
+def test_excecao_que_descarta_o_erro_de_banco_com_from_none_sai_sem_mensagem(
     traced: Traced, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     canaries = traced.canaries
@@ -450,8 +453,8 @@ def test_excecao_que_descarta_o_erro_de_banco_com_from_none_fica_inteira(
         except ValueError as replaced:
             output = _uvicorn_log(monkeypatch, replaced)
 
-    assert f"ValueError: sem relação {canaries.path}" in output
-    assert canaries.sql not in output
+    assert "builtins.ValueError" in output
+    assert [canary for canary in canaries.all() if canary in output] == []
 
 
 # Log: o filtro vale para qualquer logger do processo
@@ -482,12 +485,13 @@ def test_log_de_processo_fora_da_api_nao_traz_o_detalhe_do_erro_de_banco(
 
 
 @pytest.mark.parametrize("logger_name", NON_API_LOGGERS)
-def test_log_de_processo_fora_da_api_mantem_excecao_que_nao_e_de_banco(
+def test_log_de_processo_fora_da_api_tira_a_mensagem_da_excecao_que_nao_e_de_banco(
     traced: Traced, logger_name: str
 ) -> None:
     _log_exception(logger_name, ValueError(traced.canaries.path))
 
-    assert f"ValueError: {traced.canaries.path}" in traced.log.getvalue()
+    assert "builtins.ValueError" in traced.log.getvalue()
+    assert traced.canaries.path not in traced.log.getvalue()
 
 
 def test_log_nao_traz_o_detalhe_de_erro_cru_do_psycopg(traced: Traced) -> None:
@@ -525,7 +529,7 @@ def test_filtro_troca_o_texto_ja_em_cache_no_registro(traced: Traced) -> None:
     record = logging.LogRecord("x", logging.ERROR, "x", 1, "m", None, (type(error), error, None))
     record.exc_text = traced.canaries.sql
 
-    omit_database_error_detail(record)
+    omit_exception_detail(record)
 
     assert traced.canaries.sql not in (record.exc_text or "")
 
@@ -637,7 +641,7 @@ def test_erro_de_banco_que_escapa_do_listener_sai_com_erro_e_sem_o_detalhe(
 
 
 @pytest.mark.usefixtures("worker_offline")
-def test_worker_mantem_inteira_a_excecao_que_nao_e_de_banco(
+def test_worker_tira_a_mensagem_da_excecao_que_nao_e_de_banco(
     monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
 ) -> None:
     canary = _new_canary()
@@ -648,7 +652,9 @@ def test_worker_mantem_inteira_a_excecao_que_nao_e_de_banco(
     monkeypatch.setattr(worker, "serve", fail)
 
     assert worker.main() != 0
-    assert f"ValueError: {canary}" in capsys.readouterr().err
+    err = capsys.readouterr().err
+    assert "builtins.ValueError" in err
+    assert canary not in err
 
 
 @pytest.mark.usefixtures("restored_root_logging")

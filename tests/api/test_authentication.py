@@ -13,6 +13,7 @@ from sqlalchemy.orm import Session, sessionmaker
 from goblinshift.entrypoints.api.dependencies import current_time
 from goblinshift.identity import Scope, revoke_key
 from goblinshift.platform.db import unit_of_work
+from goblinshift.platform.telemetry import UserHasher
 from tests.api.support import assert_problem
 from tests.identity.support import new_key, new_user
 
@@ -165,11 +166,15 @@ def test_escopo_sem_credencial_responde_401_e_nao_403(client: TestClient) -> Non
 
 
 def test_segredo_da_chave_nunca_aparece_nos_logs(
-    client: TestClient, factory: sessionmaker[Session], caplog: pytest.LogCaptureFixture
+    app: FastAPI,
+    client: TestClient,
+    factory: sessionmaker[Session],
+    caplog: pytest.LogCaptureFixture,
 ) -> None:
     caplog.set_level(logging.DEBUG)
     valid = new_key(factory, new_user(factory))
-    revoked = new_key(factory, new_user(factory))
+    revoked_owner = new_user(factory)
+    revoked = new_key(factory, revoked_owner)
     with unit_of_work(factory) as session:
         revoke_key(session, revoked.public_id, datetime.now(UTC))
     # Canário com o formato de uma chave real, gerado na hora para não ir parar no git.
@@ -183,9 +188,19 @@ def test_segredo_da_chave_nunca_aparece_nos_logs(
     ]
 
     assert [response.status_code for response in responses] == [200, 401, 401, 401]
-    # Controle positivo: a recusa da chave revogada foi registrada, só pelo identificador.
-    assert revoked.public_id in caplog.text
-    captured = caplog.text + "".join(repr(record.args) for record in caplog.records)
+    # Controle positivo: a recusa da chave revogada foi registrada, pelo `user.hash` do dono e
+    # com a chave do servidor (#442).
+    [refused] = [r for r in caplog.records if r.getMessage() == "chave de API recusada"]
+    hasher = UserHasher(app.state.settings.user_hash_key())
+    assert getattr(refused, "fields", None) == {
+        "user.hash": hasher.hash(revoked_owner),
+        "reason": "expired_or_revoked",
+    }
+    captured = caplog.text + "".join(
+        repr(record.args) + repr(getattr(record, "fields", None)) for record in caplog.records
+    )
+    # Nem o identificador da chave vai ao log: com outro vazamento, ele ajuda a montar o token.
+    assert revoked.public_id not in captured
     for token in (valid.token, revoked.token, canary):
         # Tamanho fixo: o base64url do segredo também pode conter "_".
         secret = token[-43:]

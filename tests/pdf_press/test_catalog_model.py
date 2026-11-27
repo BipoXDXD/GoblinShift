@@ -151,8 +151,8 @@ def test_referencias_a_uploads_saem_dos_parametros_resolvidos() -> None:
     resolved = CATALOG.resolve("pdf-press", 1, selection((UPLOAD_B, 1), (UPLOAD_A, 2)))
 
     assert upload_references(resolved) == (
-        UploadReference("select.0.upload_id", uuid.UUID(UPLOAD_B)),
-        UploadReference("select.1.upload_id", uuid.UUID(UPLOAD_A)),
+        UploadReference(("select", "0", "upload_id"), uuid.UUID(UPLOAD_B)),
+        UploadReference(("select", "1", "upload_id"), uuid.UUID(UPLOAD_A)),
     )
 
 
@@ -169,7 +169,10 @@ def test_selecao_de_upload_fora_das_entradas_e_recusada_com_o_campo() -> None:
         validate_run(command(selection((UPLOAD_A, 1), (UPLOAD_B, 1)), [UPLOAD_A]))
 
     assert [(e.location, e.message) for e in caught.value.errors] == [
-        ("parameters.select.1.upload_id", "o upload não está entre as entradas da execução")
+        (
+            ("parameters", "select", "1", "upload_id"),
+            "o upload não está entre as entradas da execução",
+        )
     ]
 
 
@@ -192,4 +195,4 @@ def test_entradas_acima_de_20_sao_recusadas() -> None:
     with pytest.raises(InvalidRunCommandError) as caught:
         validate_run(command({}, inputs))
 
-    assert caught.value.errors[0].location == "input_upload_ids"
+    assert caught.value.errors[0].location == ("input_upload_ids",)

@@ -135,6 +135,28 @@ describe("papéis de cor", () => {
   );
 });
 
+describe("silhueta das goblins", () => {
+  // Renders realistas sem contorno: no escuro, roupa e cabelo pretos somem no cartão sem o filtro.
+  it("não tem filtro no tema claro", () => {
+    expect(declarationLines(css, ":root {")).toContain("--goblin-silhouette: none;");
+  });
+
+  it.each(['[data-theme="dark"]', ":root:not([data-theme])"])(
+    "tem fio de luz e halo de tons da paleta em %s",
+    (selector) => {
+      const block = blockText(css, `${selector} {`);
+      const value = /--goblin-silhouette:([^;]+);/.exec(block)?.[1] ?? "";
+      expect(value.match(/drop-shadow\(/g)).toHaveLength(2);
+      expect(value).toContain("var(--color-wood-");
+      expect(value).toContain("var(--color-copper-");
+    },
+  );
+
+  it("vira o utilitário goblin-silhouette", () => {
+    expect(css).toMatch(/@utility goblin-silhouette \{\s*filter: var\(--goblin-silhouette\);/);
+  });
+});
+
 describe("fallback do tema escuro", () => {
   // Sem theme-init.js (bloqueado, falha de rede) não há data-theme, e o sistema escuro precisa
   // do mesmo bloco: as duas cópias não podem divergir.
@@ -146,15 +168,18 @@ describe("fallback do tema escuro", () => {
 });
 
 function declarationLines(source: string, opening: string): string[] {
+  return blockText(source, opening)
+    .split("\n")
+    .map((line) => line.trim())
+    .filter((line) => line.startsWith("--") || line.startsWith("color-scheme"));
+}
+
+function blockText(source: string, opening: string): string {
   const start = source.indexOf(opening);
   if (start === -1) {
     throw new Error(`tokens.css não tem o bloco ${opening}`);
   }
-  const body = source.slice(start + opening.length, source.indexOf("}", start));
-  return body
-    .split("\n")
-    .map((line) => line.trim())
-    .filter((line) => line.startsWith("--") || line.startsWith("color-scheme"));
+  return source.slice(start + opening.length, source.indexOf("}", start));
 }
 
 function colorOf(colors: ReadonlyMap<string, string>, token: string): string {

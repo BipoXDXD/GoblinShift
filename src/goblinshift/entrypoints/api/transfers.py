@@ -21,7 +21,12 @@ from starlette.responses import StreamingResponse
 from starlette.types import Receive, Scope, Send
 
 from goblinshift.entrypoints.api.problems import ApiProblem, ProblemCode
-from goblinshift.files.limits import TRANSFER_IDLE_TIMEOUT, TRANSFER_MAX_DURATION
+from goblinshift.files.limits import (
+    TRANSFER_IDLE_TIMEOUT,
+    TRANSFER_MAX_DURATION,
+    TRANSFER_MIN_RATE_BYTES_PER_S,
+    TRANSFER_MIN_RATE_GRACE,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -55,10 +60,21 @@ class TransferTimeouts:
 
     total: timedelta = TRANSFER_MAX_DURATION
     idle: timedelta = TRANSFER_IDLE_TIMEOUT
+    min_rate_bytes_per_s: int = TRANSFER_MIN_RATE_BYTES_PER_S
+    min_rate_grace: timedelta = TRANSFER_MIN_RATE_GRACE
 
 
 class TransferTimeoutError(Exception):
-    """A transferência passou do prazo total ou ficou parada além do prazo sem progresso."""
+    """A transferência passou do prazo total, ficou parada ou ficou abaixo da vazão mínima."""
+
+
+def is_below_min_rate(received: int, elapsed_s: float, timeouts: TransferTimeouts) -> bool:
+    """`True` se, passada a carência, a média do envio ficou abaixo da vazão mínima.
+
+    Único lugar que decide a vazão exigida: quem mudar a regra muda só aqui.
+    """
+    past_grace = elapsed_s > timeouts.min_rate_grace.total_seconds()
+    return past_grace and received < timeouts.min_rate_bytes_per_s * elapsed_s
 
 
 def transfer_limit_problem() -> ApiProblem:
@@ -86,22 +102,41 @@ def request_body_chunks(request: Request, timeouts: TransferTimeouts) -> Iterato
 
     O serviço de upload é síncrono e recebe um iterável; cada pedaço é buscado no event loop
     com `from_thread.run`, sem acumular o corpo em memória. Estoura `TransferTimeoutError` se
-    um pedaço demorar mais que o prazo sem progresso ou se o prazo total acabar.
+    um pedaço demorar mais que o prazo sem progresso, se o prazo total acabar ou se a média
+    ficar abaixo da vazão mínima.
+
+    A média é de relógio desde o início da leitura, e a espera pelo primeiro byte entra nela. O
+    tempo do servidor entre os pedaços (gravação e hash) também conta: medida só pela espera, um
+    cliente com pedaços minúsculos esconderia um envio lento atrás desse tempo e seguraria a vaga.
+    O custo é um envio bem na borda do piso, com o disco lento, poder levar 408. O relógio é lido
+    dentro de `next_chunk`, que já roda no event loop. O `b""` final só marca o fim do corpo, já
+    recebido inteiro, e não é cobrado.
     """
     stream = request.stream()
-    deadline = anyio.from_thread.run_sync(anyio.current_time) + timeouts.total.total_seconds()
+    started = anyio.from_thread.run_sync(anyio.current_time)
+    deadline = started + timeouts.total.total_seconds()
+    elapsed_s = 0.0
 
     async def next_chunk() -> bytes | None:
-        remaining = deadline - anyio.current_time()
+        nonlocal elapsed_s
         try:
-            with anyio.fail_after(min(timeouts.idle.total_seconds(), remaining)):
+            with anyio.fail_after(
+                min(timeouts.idle.total_seconds(), deadline - anyio.current_time())
+            ):
                 return await anext(stream, None)
         except TimeoutError:
             raise TransferTimeoutError("o envio passou do prazo") from None
+        finally:
+            elapsed_s = anyio.current_time() - started
 
+    received = 0
     while (chunk := anyio.from_thread.run(next_chunk)) is not None:
-        if chunk:
-            yield chunk
+        if not chunk:
+            continue
+        received += len(chunk)
+        if is_below_min_rate(received, elapsed_s, timeouts):
+            raise TransferTimeoutError("o envio ficou abaixo da vazão mínima")
+        yield chunk
 
 
 def content_disposition(filename: str) -> str:
@@ -137,6 +172,9 @@ class DownloadResponse(StreamingResponse):
                 "Content-Disposition": content_disposition(filename),
                 # O cliente percebe um download cortado pelo tamanho que faltou.
                 "Content-Length": str(size),
+                # Sem buffer no proxy: o prazo de leitura e a vaga acompanham o cliente real, não
+                # o Nginx, que esvaziaria a API em segundos para o `proxy_temp`.
+                "X-Accel-Buffering": "no",
                 **DOWNLOAD_PROTECTION_HEADERS,
             },
         )

@@ -36,7 +36,12 @@ from sqlalchemy import (
 from sqlalchemy.orm import Session
 
 from goblinshift import capacity
-from goblinshift.files.limits import EXPIRY_BATCH_SIZE, PURGE_MAX_BYTES, PURGE_MAX_OBJECTS
+from goblinshift.files.limits import (
+    EXPIRY_BATCH_SIZE,
+    PURGE_MAX_BYTES,
+    PURGE_MAX_OBJECTS,
+    UPLOAD_REQUEST_KEY_TTL,
+)
 from goblinshift.files.objects import (
     has_valid_reference,
     request_deletion_of_unreferenced,
@@ -46,6 +51,7 @@ from goblinshift.files.states import ObjectState, UploadState
 from goblinshift.files.storage import FileStorage, ObjectTamperedError
 from goblinshift.files.tables import artifact, object_use, stored_object, upload
 from goblinshift.platform.sql import skip_locked_batch
+from goblinshift.platform.telemetry import exception_fields
 
 logger = logging.getLogger(__name__)
 
@@ -93,11 +99,17 @@ def remove_file_after_commit(storage: FileStorage, key: str) -> bool:
     """
     try:
         storage.delete(key)
-    except OSError, ObjectTamperedError:
+    except (OSError, ObjectTamperedError) as error:
         logger.warning(
             "arquivo não removido do disco",
             exc_info=True,
-            extra={"fields": {"alert": "purge_file_not_removed", "storage_key": key}},
+            extra={
+                "fields": {
+                    "alert": "purge_file_not_removed",
+                    "storage_key": key,
+                    **exception_fields(error),
+                }
+            },
         )
         return False
     return True
@@ -255,6 +267,34 @@ def anonymize_deleted_uploads(session: Session, now: datetime, limit: int) -> in
     return len(chosen)
 
 
+def forget_upload_request_keys(session: Session, now: datetime, limit: int) -> int:
+    """Anula a chave de idempotência dos lotes criados há `UPLOAD_REQUEST_KEY_TTL` ou mais.
+
+    As três colunas saem juntas, como o CHECK `upload_request` exige. O replay só alcança o lote
+    vigente (1 h), então anular depois de 24 h não muda resposta nenhuma; o índice parcial
+    `upload_request_created_at_idx` limita a varredura às linhas que ainda têm chave.
+    """
+    chosen = list(
+        session.execute(
+            select(upload.c.id)
+            .where(
+                upload.c.request_key.is_not(None),
+                upload.c.created_at <= now - UPLOAD_REQUEST_KEY_TTL,
+            )
+            .order_by(upload.c.created_at, upload.c.id)
+            .limit(limit)
+            .with_for_update(skip_locked=True)
+        ).scalars()
+    )
+    if chosen:
+        session.execute(
+            update(upload)
+            .where(upload.c.id.in_(chosen))
+            .values(request_key=None, request_hash=None, request_index=None)
+        )
+    return len(chosen)
+
+
 @dataclass(frozen=True)
 class HistoryReferences:
     """Como `runs` diz se o histórico ainda aponta para um upload ou artefato.
@@ -323,7 +363,12 @@ def delete_old_file_rows(
 
 
 def file_backlog(session: Session, now: datetime) -> dict[str, int]:
-    """O que ainda falta anular ou apagar em `files`: a métrica do tamanho do acúmulo."""
+    """O que ainda falta anular, expirar ou apagar em `files`: a métrica do tamanho do acúmulo.
+
+    Os vencidos usam o mesmo predicado dos passos que os expiram; o que sobra depois do ciclo é o
+    que o lote não alcançou. `objects_to_purge` conta todo pedido de exclusão, inclusive o que um
+    download aberto ainda segura.
+    """
     deleted_before = (upload.c.deleted_at.is_not(None),)
     to_anonymize: int = session.execute(
         select(func.count()).where(
@@ -335,7 +380,25 @@ def file_backlog(session: Session, now: datetime) -> dict[str, int]:
     to_delete: int = session.execute(
         select(func.count()).where(*deleted_before, upload.c.created_at <= now - FILE_ROWS_AFTER)
     ).scalar_one()
-    return {"uploads_to_anonymize": to_anonymize, "uploads_to_delete": to_delete}
+    incomplete: int = session.execute(
+        select(func.count()).where(
+            upload.c.state != UploadState.READY,
+            or_(upload.c.expires_at <= now, upload.c.deleted_at.is_not(None)),
+        )
+    ).scalar_one()
+    artifacts: int = session.execute(
+        select(func.count()).where(artifact.c.deleted_at.is_(None), artifact.c.expires_at <= now)
+    ).scalar_one()
+    to_purge: int = session.execute(
+        select(func.count()).where(stored_object.c.state == ObjectState.DELETE_REQUESTED)
+    ).scalar_one()
+    return {
+        "uploads_to_anonymize": to_anonymize,
+        "uploads_to_delete": to_delete,
+        "incomplete_uploads_to_expire": incomplete,
+        "artifacts_to_expire": artifacts,
+        "objects_to_purge": to_purge,
+    }
 
 
 def has_unsettled_candidate(attempt_id: ColumnElement[uuid.UUID]) -> ColumnElement[bool]:
@@ -378,6 +441,12 @@ def reconcile_capacity(session: Session, *, limit: int) -> capacity.ReconcileRep
     Durante o deploy da 0006, a API anterior cria uploads e o worker anterior publica artefatos
     sem reserva. Candidatos de uma tentativa ainda sem artefato ficam de fora: a reserva da Run
     os cobre. Numa transação própria e curta.
+
+    Os órfãos ficam travados até a adoção: sem isso, o expurgo (`deleted`) ou a varredura
+    (`missing`) confirmariam entre a leitura e o INSERT, e a reserva nova ficaria presa a um
+    objeto removido. Ordem de travas de 3.4: objetos, depois pools, a mesma do expurgo. Com
+    `SKIP LOCKED`, um objeto que outro já travou fica para o próximo ciclo; e a releitura do
+    READ COMMITTED depois da trava descarta o que mudou de estado entrementes.
     """
     with session.begin():
         orphans = session.execute(
@@ -389,6 +458,7 @@ def reconcile_capacity(session: Session, *, limit: int) -> capacity.ReconcileRep
             )
             .order_by(stored_object.c.id)
             .limit(limit)
+            .with_for_update(of=stored_object, skip_locked=True)
         ).all()
         return capacity.reconcile(
             session,

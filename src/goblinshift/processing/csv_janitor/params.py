@@ -55,9 +55,9 @@ class Filter:
 
     def __post_init__(self) -> None:
         if self.op is FilterOp.IS_EMPTY and self.value is not None:
-            raise InvalidParametersError(f"o filtro is_empty de {self.column!r} não usa valor")
+            raise InvalidParametersError("o filtro is_empty não usa valor")
         if self.op is not FilterOp.IS_EMPTY and self.value is None:
-            raise InvalidParametersError(f"o filtro {self.op} de {self.column!r} exige um valor")
+            raise InvalidParametersError("o filtro exige um valor")
 
     def matches(self, text: str) -> bool:
         match self.op:
@@ -110,9 +110,8 @@ class Params:
 
 
 def _require_distinct(option: str, columns: Sequence[str]) -> None:
-    repeated = sorted({c for c in columns if columns.count(c) > 1})
-    if repeated:
-        raise InvalidParametersError(f"{option} repete colunas: {repeated}")
+    if len(set(columns)) < len(columns):
+        raise InvalidParametersError(f"{option} repete colunas")
 
 
 _KNOWN_OPTIONS = frozenset(
@@ -131,9 +130,8 @@ _KNOWN_OPTIONS = frozenset(
 
 def params_from_mapping(raw: Mapping[str, object]) -> Params:
     """Converte a configuração decodificada de JSON; recusa campos desconhecidos e tipos errados."""
-    unknown = sorted(set(raw) - _KNOWN_OPTIONS)
-    if unknown:
-        raise InvalidParametersError(f"opções desconhecidas: {unknown}")
+    if not set(raw) <= _KNOWN_OPTIONS:
+        raise InvalidParametersError("opções desconhecidas")
     output_columns = raw.get("output_columns")
     return Params(
         input_delimiter=_enum(Delimiter, raw.get("input_delimiter", ","), "input_delimiter"),
@@ -172,10 +170,8 @@ def _filter(raw: Mapping[str, object]) -> Filter:
 def _require_keys(
     raw: Mapping[str, object], *, required: set[str], optional: set[str], option: str
 ) -> None:
-    missing = sorted(required - set(raw))
-    unknown = sorted(set(raw) - required - optional)
-    if missing or unknown:
-        raise InvalidParametersError(f"{option}: faltando {missing}, desconhecidos {unknown}")
+    if not required <= set(raw) <= required | optional:
+        raise InvalidParametersError(f"{option}: chaves faltando ou desconhecidas")
 
 
 def _enum[E: StrEnum](kind: type[E], raw: object, option: str) -> E:

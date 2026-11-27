@@ -35,8 +35,6 @@ MAINTENANCE_LOGGER = "goblinshift.runs.maintenance"
 CYCLE_MESSAGE = "ciclo de manutenção"
 ITEMS_LEFT_MESSAGE = "parada pedida; itens restantes do passo pulados"
 BATCH = 3
-# Passos do ciclo depois da reconciliação de leases.
-STEPS_AFTER_RECONCILE = 9
 
 
 class RecordingRunner:
@@ -135,7 +133,9 @@ def test_parada_no_stop_termina_a_tentativa_em_curso_e_nao_comeca_a_seguinte(
     ]
     assert decided == [first.run_id]
     assert counts["leases_reconciled"] == 1
-    assert (counts[STEPS_FAILED], counts[STEPS_SKIPPED]) == (0, STEPS_AFTER_RECONCILE)
+    # Todos os passos do ciclo depois da reconciliação de leases ficam pulados.
+    steps_after_reconcile = len(janitor._cycle_steps(shutdown.is_set)) - 1
+    assert (counts[STEPS_FAILED], counts[STEPS_SKIPPED]) == (0, steps_after_reconcile)
     # A volta fecha com o evento do ciclo, e o log diz quantos itens ficaram.
     [cycle] = [r for r in caplog.records if r.getMessage() == CYCLE_MESSAGE]
     assert cycle.fields["leases_reconciled"] == 1  # type: ignore[attr-defined]

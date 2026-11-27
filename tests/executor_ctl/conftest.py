@@ -5,6 +5,7 @@ import json
 import os
 import tempfile
 import threading
+import uuid
 from collections.abc import Iterator
 from contextlib import contextmanager
 from pathlib import Path
@@ -14,14 +15,32 @@ import pytest
 
 from executor_ctl import images
 from executor_ctl.config import Config
-from executor_ctl.docker_cli import DockerCli
-from executor_ctl.server import bind_server
+from executor_ctl.docker_cli import ContainerIdentity, ContainerStatus, DockerCli, State
+from executor_ctl.server import MAX_CONNECTIONS, REQUEST_READ_DEADLINE_S, bind_server
 from executor_ctl.service import AREA_LOCK_WAIT_S, ExecutorService
+
+IMAGE = "ghcr.io/bipoxdxd/goblinshift-executor@sha256:" + "a" * 64
 
 
 def current_group() -> str:
     """Grupo primário de quem roda o teste; no host, o equivalente é o gs-exec."""
     return grp.getgrgid(os.getgid()).gr_name
+
+
+def container_id(attempt_id: uuid.UUID) -> str:
+    """`Id` de teste do container da tentativa: 64 hex, como o do Docker, e fixo por tentativa."""
+    return attempt_id.hex * 2
+
+
+def owned_status(state: State, attempt_id: uuid.UUID, image: str = IMAGE) -> ContainerStatus:
+    """Estado do container que o ctl criou: label da tentativa e a imagem pedida ao `docker run`."""
+    if state == "absent":
+        return ContainerStatus.absent()
+    identity = ContainerIdentity(
+        container_id=container_id(attempt_id), attempt_label=str(attempt_id), image=image
+    )
+    exit_code = 0 if state == "exited" else None
+    return ContainerStatus(state, exit_code, False, None, None, identity)
 
 
 def make_config(
@@ -35,6 +54,9 @@ def make_config(
     return Config(
         socket=socket_dir / "ctl.sock",
         group=current_group(),
+        # Sem root, o chown do socket só aceita um grupo de quem roda o teste; o arquivo do host
+        # é que exige grupos distintos (config._parse_config).
+        socket_group=current_group(),
         work_area=area,
         runtime=runtime,
         images_file=images_file,
@@ -57,11 +79,24 @@ POLL_INTERVAL_S = 0.01
 
 @contextmanager
 def running_server(
-    config: Config, docker: DockerCli, *, area_lock_wait_s: float = AREA_LOCK_WAIT_S
+    config: Config,
+    docker: DockerCli,
+    *,
+    area_lock_wait_s: float = AREA_LOCK_WAIT_S,
+    read_timeout_s: float = TEST_READ_TIMEOUT_S,
+    max_connections: int = MAX_CONNECTIONS,
+    read_deadline_s: float = REQUEST_READ_DEADLINE_S,
 ) -> Iterator[Path]:
     group_id = grp.getgrnam(config.group).gr_gid
     service = ExecutorService(config, docker, group_id, area_lock_wait_s=area_lock_wait_s)
-    server = bind_server(config, service, group_id, read_timeout_s=TEST_READ_TIMEOUT_S)
+    server = bind_server(
+        config,
+        service,
+        grp.getgrnam(config.socket_group).gr_gid,
+        read_timeout_s=read_timeout_s,
+        max_connections=max_connections,
+        read_deadline_s=read_deadline_s,
+    )
     thread = threading.Thread(
         target=server.serve_forever, kwargs={"poll_interval": POLL_INTERVAL_S}, daemon=True
     )

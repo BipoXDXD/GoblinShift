@@ -15,7 +15,9 @@ from sqlalchemy import func, select, update
 from sqlalchemy.orm import Session, sessionmaker
 
 from goblinshift.capacity.tables import capacity_pool
+from goblinshift.files import uploads as uploads_module
 from goblinshift.files.limits import MIN_INTENT_RESERVED_BYTES as MIN
+from goblinshift.files.limits import UPLOAD_CREATION_WINDOW
 from goblinshift.files.tables import upload
 from goblinshift.platform.db import unit_of_work
 from goblinshift.runs.quotas import MAX_RUNS_PER_WINDOW
@@ -133,6 +135,93 @@ def test_retry_after_da_conta_aponta_a_proxima_expiracao(
     assert_problem(response, 429, "QUOTA_EXCEEDED")
     retry_after = int(response.headers["Retry-After"])
     assert 7200 - 60 <= retry_after <= 7200
+
+
+def account_with_live_upload_expiring_in(
+    client: TestClient, factory: sessionmaker[Session], wait: timedelta
+) -> dict[str, str]:
+    """Conta com um upload vivo que vence em `wait` e pool de bytes folgado.
+
+    Com o pool folgado, uma recusa só pode vir do teto de uploads vivos.
+    """
+    owner, auth = new_account(factory)
+    create_account_pool(factory, owner, 1024 * MIN)
+    upload_id = create_upload(client, auth)["id"]
+    with unit_of_work(factory) as session:
+        session.execute(
+            update(upload)
+            .where(upload.c.id == uuid.UUID(upload_id))
+            .values(expires_at=func.now() + wait)
+        )
+    return auth
+
+
+def test_conta_no_teto_de_uploads_vivos_recebe_429_quota_exceeded_com_retry_after(
+    client: TestClient, factory: sessionmaker[Session], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(uploads_module, "MAX_LIVE_UPLOADS_PER_ACCOUNT", 1)
+    auth = account_with_live_upload_expiring_in(client, factory, timedelta(hours=2))
+
+    response = upload_batch(client, auth, 0)
+
+    assert_problem(response, 429, "QUOTA_EXCEEDED")
+    assert 7200 - 60 <= int(response.headers["Retry-After"]) <= 7200
+
+
+def test_teto_de_uploads_vivos_com_vencimento_proximo_espera_o_minimo(
+    client: TestClient, factory: sessionmaker[Session], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(uploads_module, "MAX_LIVE_UPLOADS_PER_ACCOUNT", 1)
+    auth = account_with_live_upload_expiring_in(client, factory, timedelta(seconds=5))
+
+    response = upload_batch(client, auth, 0)
+
+    assert_problem(response, 429, "QUOTA_EXCEEDED")
+    assert int(response.headers["Retry-After"]) == MIN_RETRY_AFTER_S
+
+
+def account_with_deleted_upload_leaving_window_in(
+    client: TestClient, factory: sessionmaker[Session], wait: timedelta
+) -> dict[str, str]:
+    """Conta com um upload excluído que sai da janela de 24 h em `wait` e pool de bytes folgado.
+
+    Excluído, ele não conta no teto de vivos: uma recusa só pode vir do teto de criações.
+    """
+    owner, auth = new_account(factory)
+    create_account_pool(factory, owner, 1024 * MIN)
+    upload_id = create_upload(client, auth)["id"]
+    assert client.delete(f"{UPLOADS}/{upload_id}", headers=auth).status_code == 202
+    with unit_of_work(factory) as session:
+        session.execute(
+            update(upload)
+            .where(upload.c.id == uuid.UUID(upload_id))
+            .values(created_at=func.now() - UPLOAD_CREATION_WINDOW + wait)
+        )
+    return auth
+
+
+def test_conta_no_teto_de_criacoes_em_24h_recebe_429_quota_exceeded_com_retry_after(
+    client: TestClient, factory: sessionmaker[Session], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(uploads_module, "MAX_UPLOADS_CREATED_PER_DAY", 1)
+    auth = account_with_deleted_upload_leaving_window_in(client, factory, timedelta(hours=2))
+
+    response = upload_batch(client, auth, 0)
+
+    assert_problem(response, 429, "QUOTA_EXCEEDED")
+    assert 7200 - 60 <= int(response.headers["Retry-After"]) <= 7200
+
+
+def test_teto_de_criacoes_com_saida_proxima_espera_o_minimo(
+    client: TestClient, factory: sessionmaker[Session], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(uploads_module, "MAX_UPLOADS_CREATED_PER_DAY", 1)
+    auth = account_with_deleted_upload_leaving_window_in(client, factory, timedelta(seconds=5))
+
+    response = upload_batch(client, auth, 0)
+
+    assert_problem(response, 429, "QUOTA_EXCEEDED")
+    assert int(response.headers["Retry-After"]) == MIN_RETRY_AFTER_S
 
 
 def test_upload_acima_do_teto_do_ambiente_503_com_retry_after(

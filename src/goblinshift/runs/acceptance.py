@@ -31,7 +31,7 @@ import hashlib
 import json
 import re
 from collections.abc import Sequence
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from datetime import datetime, timedelta
 from typing import NoReturn
 from uuid import UUID
@@ -113,12 +113,12 @@ class IdempotencyKeyInvalidError(AcceptanceError):
 class InvalidRunCommandError(AcceptanceError):
     """Comando semanticamente inválido (→ 422 `VALIDATION_FAILED`), com um erro por campo.
 
-    `location` é o caminho com pontos a partir da raiz do comando, como `parameters.filters.0`.
+    `location` é o caminho a partir da raiz do comando, como `("parameters", "filters", "0")`.
     """
 
     def __init__(self, errors: Sequence[FieldError]) -> None:
         self.errors = tuple(errors)
-        super().__init__("; ".join(f"{e.location}: {e.message}" for e in self.errors))
+        super().__init__("; ".join(map(str, self.errors)))
 
 
 class IdempotencyKeyReusedError(AcceptanceError):
@@ -140,7 +140,8 @@ class ActiveRunLimitError(AcceptanceError):
 class DailyQuotaExceededError(AcceptanceError):
     """Cota diária de execuções ou de bytes de entrada (→ 429 `QUOTA_EXCEEDED`).
 
-    `retry_after` é o tempo até a Run mais antiga da janela sair dela.
+    `retry_after` é o tempo até a janela devolver o que falta: a saída da Run mais antiga, na
+    cota de execuções; na de bytes, a da Run que, somada às anteriores, libera o excesso.
     """
 
     def __init__(self, message: str, retry_after: timedelta) -> None:
@@ -349,7 +350,7 @@ def _check_upload_references(
         return
     known = set(upload_ids)
     errors = [
-        FieldError(f"parameters.{reference.location}", _NOT_AN_INPUT)
+        FieldError(("parameters", *reference.location), _NOT_AN_INPUT)
         for reference in recipe.upload_references(parameters)
         if reference.upload_id not in known
     ]
@@ -438,9 +439,10 @@ def _check_input_bytes(
             "input_upload_ids",
             f"as entradas somam mais que a cota diária de {quota.input_bytes_per_24h} bytes",
         )
-    if usage.input_bytes + incoming > quota.input_bytes_per_24h:
+    excess = usage.input_bytes + incoming - quota.input_bytes_per_24h
+    if excess > 0:
         raise DailyQuotaExceededError(
-            "a entrada passa da cota diária de bytes", _until_window_frees(usage, now)
+            "a entrada passa da cota diária de bytes", _until_bytes_free(usage, excess, now)
         )
 
 
@@ -449,6 +451,14 @@ def _until_window_frees(usage: DailyUsage, now: datetime) -> timedelta:
     if resets_at is None:
         raise RuntimeError("cota diária esgotada sem execução na janela")
     return max(resets_at - now, _MIN_RETRY_AFTER)
+
+
+def _until_bytes_free(usage: DailyUsage, needed: int, now: datetime) -> timedelta:
+    free_at = usage.bytes_free_at(needed)
+    if free_at is None:
+        # Impossível: `incoming` já cabe na cota, então a janela guarda ao menos `needed` bytes.
+        raise RuntimeError("cota de bytes esgotada sem Runs que a liberem")
+    return max(free_at - now, _MIN_RETRY_AFTER)
 
 
 def _insert_run(
@@ -519,9 +529,8 @@ def _record_key(
 
 
 def _under(prefix: str, error: FieldError) -> FieldError:
-    location = f"{prefix}.{error.location}" if error.location else prefix
-    return FieldError(location, error.message)
+    return replace(error, location=(prefix, *error.location))
 
 
 def _refuse(location: str, message: str) -> NoReturn:
-    raise InvalidRunCommandError([FieldError(location, message)])
+    raise InvalidRunCommandError([FieldError((location,), message)])

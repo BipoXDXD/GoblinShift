@@ -648,6 +648,7 @@ function derivedDetail({ run, inputIds }: StoredRun): RunDetailParts {
     counts: {},
     duplicate_of: null,
     formula_cells: null,
+    comparison: null,
   }));
   const count = inputIds.length;
   const summary = done

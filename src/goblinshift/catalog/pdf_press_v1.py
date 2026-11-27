@@ -77,6 +77,6 @@ def upload_references(parameters: Mapping[str, object]) -> tuple[UploadReference
     """Uploads citados pelo `select` dos parâmetros já resolvidos, com o campo de cada um."""
     selection = params_from_mapping(parameters).select or ()
     return tuple(
-        UploadReference(f"select.{index}.upload_id", UUID(page.upload_id))
+        UploadReference(("select", str(index), "upload_id"), UUID(page.upload_id))
         for index, page in enumerate(selection)
     )

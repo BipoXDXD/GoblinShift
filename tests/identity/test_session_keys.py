@@ -1,5 +1,9 @@
 """Chaves emitidas, listadas e revogadas pela sessão web (GoblinShiftPlan.md, 3.6; Frente C)."""
 
+import io
+import json
+import logging
+from collections.abc import Callable
 from datetime import UTC, datetime, timedelta
 from uuid import UUID, uuid7
 
@@ -16,14 +20,15 @@ from goblinshift.identity import (
     Scope,
     UnknownAccountError,
     authenticate_api_key,
+    issue_key,
     issue_key_for_session,
     list_keys,
     revoke_owned_key,
 )
-from goblinshift.identity.accounts import MAX_LISTED_KEYS
+from goblinshift.identity.accounts import MAX_LISTED_KEYS, StoredKeyLimitError
 from goblinshift.identity.tables import api_key, app_user
 from goblinshift.platform.db import unit_of_work
-from tests.identity.support import new_user
+from tests.identity.support import HASHER, new_user
 from tests.lock_support import in_thread, wait_until_someone_waits_for_a_lock
 
 pytestmark = pytest.mark.integration
@@ -35,6 +40,36 @@ READ = frozenset({Scope.FILES_READ})
 def issue(factory: sessionmaker[Session], owner_id: UUID, now: datetime = NOW) -> IssuedKey:
     with unit_of_work(factory) as session:
         return issue_key_for_session(session, owner_id=owner_id, scopes=READ, days=30, now=now)
+
+
+def revoke(factory: sessionmaker[Session], owner_id: UUID, key: IssuedKey) -> None:
+    with unit_of_work(factory) as session:
+        session.execute(
+            update(api_key)
+            .where(api_key.c.id == key.id)
+            .values(revoked_at=NOW - timedelta(hours=1))
+        )
+
+
+def expire(factory: sessionmaker[Session], owner_id: UUID, key: IssuedKey) -> None:
+    with unit_of_work(factory) as session:
+        session.execute(
+            update(api_key)
+            .where(api_key.c.id == key.id)
+            .values(created_at=NOW - timedelta(days=30), expires_at=NOW)
+        )
+
+
+def block_account(factory: sessionmaker[Session], owner_id: UUID, key: IssuedKey) -> None:
+    with unit_of_work(factory) as session:
+        session.execute(update(app_user).where(app_user.c.id == owner_id).values(status="blocked"))
+
+
+def request_deletion(factory: sessionmaker[Session], owner_id: UUID, key: IssuedKey) -> None:
+    with unit_of_work(factory) as session:
+        session.execute(
+            update(app_user).where(app_user.c.id == owner_id).values(deletion_requested_at=NOW)
+        )
 
 
 def active_count(factory: sessionmaker[Session], owner_id: UUID) -> int:
@@ -58,7 +93,7 @@ def test_chave_emitida_pela_sessao_autentica_com_os_escopos_pedidos(
 
     assert issued.expires_at == NOW + timedelta(days=7)
     with unit_of_work(factory) as session:
-        principal = authenticate_api_key(session, issued.token, NOW)
+        principal = authenticate_api_key(session, issued.token, NOW, hasher=HASHER)
     assert principal is not None
     assert principal.owner_id == owner
     assert principal.scopes == scopes
@@ -119,6 +154,53 @@ def test_um_segundo_antes_de_vencer_ainda_conta(factory: sessionmaker[Session]) 
 
     with pytest.raises(ActiveKeyLimitError):
         issue(factory, owner)
+
+
+def store_inactive_keys(factory: sessionmaker[Session], owner_id: UUID, count: int) -> None:
+    """Guarda `count` chaves que já não autenticam: metade revogadas, metade vencidas."""
+    with unit_of_work(factory) as session:
+        for index in range(count):
+            if index % 2:
+                issue_key(
+                    session, owner_id=owner_id, scopes=READ, now=NOW - timedelta(days=31), days=30
+                )
+            else:
+                issued = issue_key(session, owner_id=owner_id, scopes=READ, now=NOW)
+                session.execute(
+                    update(api_key)
+                    .where(api_key.c.public_id == issued.public_id)
+                    .values(revoked_at=NOW)
+                )
+
+
+def stored_count(factory: sessionmaker[Session], owner_id: UUID) -> int:
+    with factory() as session:
+        count: int = session.execute(
+            select(func.count()).select_from(api_key).where(api_key.c.owner_id == owner_id)
+        ).scalar_one()
+    return count
+
+
+def test_emissao_com_100_chaves_guardadas_e_recusada(factory: sessionmaker[Session]) -> None:
+    owner = new_user(factory)
+    store_inactive_keys(factory, owner, 99)
+    # Com 99 guardadas a emissão passa e grava a centésima.
+    issue(factory, owner)
+
+    with pytest.raises(StoredKeyLimitError):
+        issue(factory, owner)
+
+    assert stored_count(factory, owner) == 100
+
+
+def test_teto_de_chaves_guardadas_e_por_conta(factory: sessionmaker[Session]) -> None:
+    full = new_user(factory)
+    store_inactive_keys(factory, full, 100)
+    other = new_user(factory)
+
+    issue(factory, other)
+
+    assert stored_count(factory, other) == 1
 
 
 def test_emissao_concorrente_espera_a_trava_e_ve_a_quinta_chave(
@@ -200,13 +282,14 @@ def test_listagem_traz_so_as_chaves_da_conta_mais_recentes_primeiro(
 def test_listar_chaves_mostra_ativa_antiga_depois_de_100_revogadas(
     factory: sessionmaker[Session],
 ) -> None:
-    # Revogada nunca sai da tabela: sem priorizar as ativas, 100 chaves mais novas tirariam da
-    # listagem uma chave que ainda autentica, e o dono não teria o id para revogá-la.
+    # O `gs-admin issue-key` não passa pelo teto de `MAX_STORED_KEYS`: sem priorizar as ativas,
+    # 100 chaves mais novas tirariam da listagem uma chave que ainda autentica, e o dono não teria
+    # o id para revogá-la.
     owner = new_user(factory)
     active = issue(factory, owner, NOW - timedelta(days=1))
     with unit_of_work(factory) as session:
         for minute in range(MAX_LISTED_KEYS):
-            issue_key_for_session(
+            issue_key(
                 session, owner_id=owner, scopes=READ, days=30, now=NOW + timedelta(minutes=minute)
             )
             session.execute(
@@ -265,7 +348,7 @@ def test_dono_revoga_a_propria_chave(factory: sessionmaker[Session]) -> None:
 
     assert found is True
     with unit_of_work(factory) as session:
-        assert authenticate_api_key(session, issued.token, NOW) is None
+        assert authenticate_api_key(session, issued.token, NOW, hasher=HASHER) is None
         [after] = list_keys(session, owner, NOW)
     assert after.revoked_at == NOW
 
@@ -297,9 +380,43 @@ def test_revogar_chave_alheia_devolve_false_e_nao_a_toca(factory: sessionmaker[S
 
     assert found is False
     with unit_of_work(factory) as session:
-        assert authenticate_api_key(session, issued.token, NOW) is not None
+        assert authenticate_api_key(session, issued.token, NOW, hasher=HASHER) is not None
 
 
 def test_revogar_chave_inexistente_devolve_false(factory: sessionmaker[Session]) -> None:
     with unit_of_work(factory) as session:
         assert revoke_owned_key(session, new_user(factory), uuid7(), NOW) is False
+
+
+@pytest.mark.parametrize(
+    ("make_refused", "reason"),
+    [
+        (revoke, "expired_or_revoked"),
+        (expire, "expired_or_revoked"),
+        (block_account, "account_unavailable"),
+        (request_deletion, "account_unavailable"),
+    ],
+)
+def test_chave_recusada_registra_user_hash_e_nao_o_public_id(
+    factory: sessionmaker[Session],
+    listen: Callable[[logging.Logger], io.StringIO],
+    caplog: pytest.LogCaptureFixture,
+    make_refused: Callable[[sessionmaker[Session], UUID, IssuedKey], None],
+    reason: str,
+) -> None:
+    owner = new_user(factory)
+    issued = issue(factory, owner)
+    make_refused(factory, owner, issued)
+    # Em produção o root fica em INFO (`configure_logging`); aqui o nível vem do caplog.
+    caplog.set_level(logging.INFO, logger="goblinshift.identity.accounts")
+    stream = listen(logging.getLogger("goblinshift.identity.accounts"))
+
+    with unit_of_work(factory) as session:
+        assert authenticate_api_key(session, issued.token, NOW, hasher=HASHER) is None
+
+    [line] = [json.loads(raw) for raw in stream.getvalue().splitlines()]
+    assert line["message"] == "chave de API recusada"
+    assert line["user.hash"] == HASHER.hash(owner)
+    assert line["reason"] == reason
+    assert "dropped_fields" not in line
+    assert issued.public_id not in stream.getvalue()

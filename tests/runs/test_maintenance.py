@@ -23,11 +23,12 @@ from goblinshift.files.tables import object_use, stored_object, upload
 from goblinshift.files.uploads import get_upload, request_deletion
 from goblinshift.platform.db import unit_of_work
 from goblinshift.runs.cancellation import cancel_run
-from goblinshift.runs.lifecycle import MIN_RETRY_JITTER
+from goblinshift.runs.lifecycle import MIN_RETRY_JITTER, Status
 from goblinshift.runs.maintenance import UNREADABLE_LOG_SAMPLE, Maintenance, MaintenanceConfig
+from goblinshift.runs.store import LostFencing
 from goblinshift.runs.tables import run
 from goblinshift.runs.worker.claim import claim_next
-from goblinshift.runs.worker.runner import LocalRunner
+from goblinshift.runs.worker.runner import ExecutorStatus, LocalRunner
 from tests.capacity.support import account_reserved
 from tests.files.support import create_intent, mark_mounted, ready_upload
 from tests.runs.worker_support import (
@@ -189,6 +190,46 @@ def test_stopping_com_lease_vencido_para_o_executor_e_confirma(
     assert not runner.status(claimed.attempt_id).is_running, diagnostic
     assert attempt_rows[0]["error_code"] == "CANCELED", diagnostic
     assert open_run_uses(factory, run_id) == 0, diagnostic
+
+
+def test_worker_que_renova_entre_a_releitura_e_o_stop_nao_perde_a_decisao(
+    factory: sessionmaker[Session],
+    storage: FileStorage,
+    work_root: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    run_id = queue_run(factory, storage, create_user(factory))
+    runner = local_runner(work_root, "sleep", "30")
+    worker = coordinator(factory, storage, runner)
+    claimed = claim(factory, storage)
+    worker.prepare(claimed)
+    runner.start(claimed.attempt_id, claimed.executor_image)
+    wait_until_executor_sleeps(work_root, claimed.attempt_id)
+    worker.record_start(claimed)
+    expire_lease(factory, run_id)
+    renewals: list[Status | LostFencing] = []
+    stop = runner.stop
+
+    def worker_renews_then_stop(attempt_id: uuid.UUID, grace: timedelta) -> ExecutorStatus:
+        # O worker pausado volta depois da releitura do lease (`may_stop`) e antes do `stop`.
+        try:
+            renewals.append(worker.renew_lease(claimed))
+        except LostFencing as error:
+            renewals.append(error)
+        return stop(attempt_id, grace)
+
+    monkeypatch.setattr(runner, "stop", worker_renews_then_stop)
+
+    counts = maintenance(factory, storage, runner).run_cycle()
+
+    [renewal_error] = renewals
+    assert isinstance(renewal_error, LostFencing)
+    assert counts["leases_reconciled"] == 1
+    row = run_row(factory, run_id)
+    assert (row["status"], row["phase"]) == ("running", "retry_wait")
+    [only] = attempts(factory, run_id)
+    assert only["ended_at"] is not None
+    assert not runner.status(claimed.attempt_id).is_running
 
 
 def test_falha_ao_apagar_um_candidato_nao_perde_os_demais(
@@ -655,7 +696,7 @@ def test_falha_ao_varrer_temporarios_nao_impede_o_resto_do_ciclo(
     caplog: pytest.LogCaptureFixture,
 ) -> None:
     storage.root.mkdir(parents=True)
-    # `.tmp` como arquivo: `scandir` levanta `NotADirectoryError` de verdade.
+    # `.tmp` como arquivo: a abertura do diretório falha de verdade.
     (storage.root / ".tmp").write_bytes(b"")
 
     with caplog.at_level(logging.ERROR, logger="goblinshift.runs.maintenance"):
@@ -664,6 +705,31 @@ def test_falha_ao_varrer_temporarios_nao_impede_o_resto_do_ciclo(
     assert counts["tmp_parts_sweep_failed"] == 1
     assert counts["tmp_parts_removed"] == 0
     assert "storage_global_max_bytes" in counts
+    assert "limpeza de temporários falhou" in caplog.messages
+
+
+def test_temporarios_como_symlink_marcam_falha_sem_apagar_fora(
+    factory: sessionmaker[Session],
+    storage: FileStorage,
+    work_root: Path,
+    tmp_path: Path,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    storage.root.mkdir(parents=True)
+    outside = tmp_path / "fora"
+    outside.mkdir()
+    victim = outside / f"{'a' * 32}.part"
+    victim.write_bytes(b"abc")
+    stale = time.time() - timedelta(hours=2).total_seconds()
+    os.utime(victim, (stale, stale))
+    (storage.root / ".tmp").symlink_to(outside, target_is_directory=True)
+
+    with caplog.at_level(logging.ERROR, logger="goblinshift.runs.maintenance"):
+        counts = maintenance(factory, storage, local_runner(work_root)).run_cycle()
+
+    assert counts["tmp_parts_sweep_failed"] == 1
+    assert counts["tmp_parts_removed"] == 0
+    assert victim.read_bytes() == b"abc"
     assert "limpeza de temporários falhou" in caplog.messages
 
 
@@ -676,15 +742,17 @@ def test_falha_ao_apagar_um_temporario_marca_o_ciclo_e_limpa_os_demais(
     old = timedelta(hours=2)
     for name in (f"{'a' * 32}.part", f"{'b' * 32}.part"):
         plant_temporary(storage, name, old, b"ab")
-    original = Path.unlink
+    original = os.unlink
     denied = iter([PermissionError(errno.EACCES, "recusado")])
 
-    def unlink(self: Path, missing_ok: bool = False) -> None:
-        for failure in denied:
-            raise failure
-        original(self, missing_ok=missing_ok)
+    def unlink(path: str, *, dir_fd: int | None = None) -> None:
+        # Só a varredura apaga `.part` no ciclo: o resto do ciclo remove pelo caminho de sempre.
+        if path.endswith(".part"):
+            for failure in denied:
+                raise failure
+        original(path, dir_fd=dir_fd)
 
-    monkeypatch.setattr(Path, "unlink", unlink)
+    monkeypatch.setattr(os, "unlink", unlink)
 
     counts = maintenance(factory, storage, local_runner(work_root)).run_cycle()
 

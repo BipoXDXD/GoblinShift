@@ -1,29 +1,55 @@
 """Protocolo HTTP do executor-ctl sem Docker: tudo aqui é recusado antes de chamar o CLI."""
 
 import http.client
+import importlib
+import itertools
 import json
+import os
+import select
+import signal
 import socket as socketlib
 import stat
+import subprocess
 import sys
+import threading
+import time
 import uuid
 from collections.abc import Iterator
+from contextlib import ExitStack, contextmanager
+from dataclasses import replace
 from pathlib import Path
-from typing import Any
+from types import SimpleNamespace
+from typing import IO, Any, cast
 from urllib.parse import quote
 
 import pytest
 
+from executor_ctl import profile
+from executor_ctl.__main__ import EXIT_HOST_NOT_READY
 from executor_ctl.client import UnixHTTPConnection, call
 from executor_ctl.docker_cli import DockerCli
-from executor_ctl.server import MAX_BODY_BYTES
+from executor_ctl.journal import JsonFormatter
+from executor_ctl.server import (
+    MAX_BODY_BYTES,
+    MAX_CONNECTIONS,
+    REQUEST_READ_DEADLINE_S,
+    ControlHandler,
+    ControlServer,
+    _error_payload,
+    bind_server,
+)
+from executor_ctl.service import ExecutorService
 
-from .conftest import make_config, running_server
+from .conftest import TEST_READ_TIMEOUT_S, make_config, running_server
+from .labeled_docker import LabeledDocker
 
 pytestmark = pytest.mark.host_python
 
 ATTEMPT = "0193a3f0-7b2c-7def-8a01-23456789abcd"
 ALLOWED = "ghcr.io/bipoxdxd/goblinshift-executor@sha256:" + "a" * 64
 OTHER_IMAGE = "ghcr.io/bipoxdxd/goblinshift-executor@sha256:" + "f" * 64
+# Texto de quem fala com o socket: não pode aparecer em nenhuma linha do journal.
+CANARY = f"CANARY-{uuid.uuid4()}"
 
 
 @pytest.fixture
@@ -519,3 +545,550 @@ def test_content_length_com_zeros_a_esquerda_em_rota_que_nao_le_corpo_responde_i
 
     assert answer.startswith(b"HTTP/1.1 ")
     assert status_and_body(answer) == status_and_body(plain)
+
+
+def test_log_message_do_http_server_nao_interpola_os_argumentos(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    ControlHandler.log_message(cast(Any, object()), "code %d, message %s", 400, CANARY)
+
+    [record] = [r for r in caplog.records if r.getMessage() == "http.server"]
+    assert record.__dict__["detail"] == "code %d, message %s"
+    assert CANARY not in JsonFormatter().format(record)
+
+
+def _raise_with_canary_everywhere() -> None:
+    """Mensagem, nota, causa, contexto e membro de grupo, todos com o canário."""
+    try:
+        try:
+            raise ValueError(f"contexto {CANARY}")
+        except ValueError:
+            # Sem `from`: o ValueError fica no `__context__` do KeyError.
+            raise KeyError(f"causa {CANARY}")  # noqa: B904
+    except KeyError as cause:
+        group = ExceptionGroup(f"grupo {CANARY}", [OSError(f"membro {CANARY}")])
+        group.add_note(f"nota {CANARY}")
+        raise group from cause
+
+
+def test_excecao_inesperada_vai_ao_journal_so_com_tipos_e_frames(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    try:
+        _raise_with_canary_everywhere()
+    except ExceptionGroup as error:
+        _error_payload(error)
+
+    [record] = [r for r in caplog.records if r.getMessage() == "erro inesperado"]
+    line = JsonFormatter().format(record)
+    assert CANARY not in line
+    exception = json.loads(line)["exception"]
+    assert exception.startswith("Traceback (most recent call last):")
+    assert "_raise_with_canary_everywhere" in exception
+    for kind in ("ExceptionGroup", "KeyError", "ValueError", "OSError"):
+        assert f"builtins.{kind}" in exception
+    for label in ("[cause]", "[context]", "[group member]"):
+        assert label in exception
+
+
+def test_excecao_que_escapa_do_handler_vai_ao_journal_so_com_tipos_e_frames(
+    caplog: pytest.LogCaptureFixture, capsys: pytest.CaptureFixture[str]
+) -> None:
+    # O padrão do socketserver imprime o traceback inteiro no stderr, que também vai ao journal.
+    try:
+        raise BrokenPipeError(f"pipe {CANARY}")
+    except BrokenPipeError:
+        ControlServer.handle_error(cast(Any, object()), cast(Any, object()), "")
+
+    assert CANARY not in capsys.readouterr().err
+    [record] = [r for r in caplog.records if r.getMessage() == "erro no handler"]
+    line = JsonFormatter().format(record)
+    assert CANARY not in line
+    assert "builtins.BrokenPipeError" in json.loads(line)["exception"]
+
+
+# Guardas de falha: só estouram se o comportamento testado não acontecer.
+ANSWER_GUARD_S = 5.0
+DRIP_GUARD_S = 10.0
+_RETRY_PACE_S = 0.01
+
+
+@contextmanager
+def serving(
+    tmp_path: Path,
+    socket_dir: Path,
+    *,
+    read_timeout_s: float = TEST_READ_TIMEOUT_S,
+    max_connections: int = MAX_CONNECTIONS,
+    read_deadline_s: float = REQUEST_READ_DEADLINE_S,
+) -> Iterator[Path]:
+    config = make_config(tmp_path, socket_dir, allowed=[ALLOWED])
+    with running_server(
+        config,
+        DockerCli(binary=str(tmp_path / "sem-docker")),
+        read_timeout_s=read_timeout_s,
+        max_connections=max_connections,
+        read_deadline_s=read_deadline_s,
+    ) as socket:
+        yield socket
+
+
+def open_partial_request(socket: Path, prefix: bytes) -> socketlib.socket:
+    """Conexão que manda o começo da requisição e fica parada, segurando uma vaga."""
+    raw = socketlib.socket(socketlib.AF_UNIX)
+    raw.connect(str(socket))
+    raw.sendall(prefix)
+    return raw
+
+
+def read_until_eof(raw: socketlib.socket) -> bytes:
+    chunks = []
+    while chunk := raw.recv(4096):
+        chunks.append(chunk)
+    return b"".join(chunks)
+
+
+def parse_answer(answer: bytes) -> tuple[int, dict[str, Any]]:
+    head, _, body = answer.partition(b"\r\n\r\n")
+    parsed = json.loads(body)
+    assert isinstance(parsed, dict)
+    return int(head.split(b" ", 2)[1]), parsed
+
+
+def request_until_answered(socket: Path, method: str, path: str) -> tuple[int, dict[str, Any]]:
+    """Repete a conexão até vir uma resposta: a recusa pode fechar antes de ler o pedido."""
+    request = f"{method} {path} HTTP/1.1\r\nContent-Length: 0\r\n\r\n".encode()
+    deadline = time.monotonic() + ANSWER_GUARD_S
+    while True:
+        try:
+            with socketlib.socket(socketlib.AF_UNIX) as raw:
+                raw.settimeout(ANSWER_GUARD_S)
+                raw.connect(str(socket))
+                raw.sendall(request)
+                answer = read_until_eof(raw)
+        except ConnectionError:
+            answer = b""
+        if answer or time.monotonic() > deadline:
+            return parse_answer(answer)
+        threading.Event().wait(_RETRY_PACE_S)
+
+
+def request_until_not_busy(socket: Path, method: str, path: str) -> tuple[int, dict[str, Any]]:
+    """A vaga volta quando a thread da conexão fechada termina, sem aviso ao cliente."""
+    deadline = time.monotonic() + ANSWER_GUARD_S
+    while True:
+        status, body = request_until_answered(socket, method, path)
+        if body.get("error") != "busy" or time.monotonic() > deadline:
+            return status, body
+        threading.Event().wait(_RETRY_PACE_S)
+
+
+def drip_until_closed(socket: Path, *, every_s: float) -> float:
+    """Manda a requisição um byte por vez e devolve quanto o servidor levou para cortar."""
+    pace = threading.Event()
+    started = time.monotonic()
+    with socketlib.socket(socketlib.AF_UNIX) as raw:
+        raw.connect(str(socket))
+        for byte in itertools.cycle(b"GET /v1/attempts/"):
+            elapsed = time.monotonic() - started
+            if elapsed > DRIP_GUARD_S:
+                return elapsed
+            try:
+                raw.sendall(bytes([byte]))
+                if raw.recv(1, socketlib.MSG_DONTWAIT) == b"":
+                    return time.monotonic() - started
+            except BlockingIOError:
+                pass
+            except ConnectionError:
+                return time.monotonic() - started
+            pace.wait(every_s)
+    raise AssertionError("inalcançável: o ciclo de bytes não termina")
+
+
+def test_conexao_acima_do_teto_recebe_503_busy(tmp_path: Path, socket_dir: Path) -> None:
+    with (
+        serving(tmp_path, socket_dir, max_connections=2, read_timeout_s=60) as path,
+        ExitStack() as idle,
+    ):
+        for _ in range(2):
+            idle.enter_context(open_partial_request(path, b"GET /v1/"))
+
+        status, body = request_until_answered(path, "GET", f"/v1/attempts/{ATTEMPT}")
+
+    assert (status, body["error"]) == (503, "busy")
+
+
+def test_cliente_gotejando_e_desconectado_no_prazo_total(tmp_path: Path, socket_dir: Path) -> None:
+    with serving(tmp_path, socket_dir, read_timeout_s=5, read_deadline_s=0.3) as path:
+        closed_after = drip_until_closed(path, every_s=0.05)
+
+    # Cada byte chega bem antes do prazo por leitura (5 s): quem cortou foi o prazo total.
+    assert closed_after < 5
+
+
+def test_requisicao_normal_continua_respondendo_depois_do_teto_liberar(
+    tmp_path: Path, socket_dir: Path
+) -> None:
+    with serving(tmp_path, socket_dir, max_connections=1, read_timeout_s=60) as path:
+        with open_partial_request(path, b"GET /v1/"):
+            _, refused = request_until_answered(path, "GET", "/v1/attempts/x")
+
+        status, body = request_until_not_busy(path, "GET", "/v1/attempts/x")
+
+    assert refused["error"] == "busy"
+    assert (status, body["error"]) == (400, "invalid_attempt_id")
+
+
+def _fail_to_start(self: threading.Thread) -> None:
+    raise RuntimeError("can't start new thread")
+
+
+def test_vaga_volta_quando_a_thread_da_conexao_nao_inicia(
+    tmp_path: Path, socket_dir: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    config = make_config(tmp_path, socket_dir, allowed=[ALLOWED])
+    service = ExecutorService(config, DockerCli(binary=str(tmp_path / "sem-docker")), os.getgid())
+    server = ControlServer(config.socket, service, TEST_READ_TIMEOUT_S, max_connections=1)
+    try:
+        lost, lost_peer = socketlib.socketpair(socketlib.AF_UNIX)
+        with lost, lost_peer, monkeypatch.context() as patch:
+            patch.setattr(threading.Thread, "start", _fail_to_start)
+            with pytest.raises(RuntimeError):
+                server.process_request(lost, None)
+
+        accepted, client = socketlib.socketpair(socketlib.AF_UNIX)
+        with client:
+            client.settimeout(ANSWER_GUARD_S)
+            server.process_request(accepted, None)
+            client.sendall(b"GET /v1/attempts/x HTTP/1.1\r\nContent-Length: 0\r\n\r\n")
+            status, body = parse_answer(read_until_eof(client))
+    finally:
+        server.server_close()
+
+    assert (status, body["error"]) == (400, "invalid_attempt_id")
+
+
+def test_requisicao_cortada_no_prazo_total_nao_chega_ao_docker(
+    tmp_path: Path, socket_dir: Path
+) -> None:
+    docker, calls = recording_docker(tmp_path)
+    config = make_config(tmp_path, socket_dir, allowed=[ALLOWED])
+
+    # A linha chega inteira; o cabeçalho fica pela metade até o prazo total cortar.
+    request = f"DELETE /v1/attempts/{ATTEMPT} HTTP/1.1\r\nX-Lento: a".encode()
+    with (
+        running_server(config, docker, read_timeout_s=5, read_deadline_s=0.3) as socket,
+        open_partial_request(socket, request) as stalled,
+    ):
+        stalled.settimeout(ANSWER_GUARD_S)
+        answer = read_until_eof(stalled)
+    # Ao sair, o servidor já esperou a thread da conexão terminar.
+
+    assert answer == b""
+    assert not calls.exists()
+
+
+# Os GIDs de produção: gs-exec (área e `--user` do executor) e gs-ctl (só o socket; D11).
+EXECUTOR_GROUP_GID = 61001
+SOCKET_GROUP_GID = 61002
+
+
+class _StoppedServer:
+    def serve_forever(self) -> None:
+        """Volta na hora: o teste só quer ver com que GIDs o main montou o serviço."""
+
+    def shutdown(self) -> None:
+        """Nada a encerrar."""
+
+    def server_close(self) -> None:
+        """Nada a fechar."""
+
+
+def _run_main_with_host_groups(
+    tmp_path: Path, socket_dir: Path, monkeypatch: pytest.MonkeyPatch, groups: dict[str, int]
+) -> tuple[int, dict[str, int]]:
+    main_module = importlib.import_module("executor_ctl.__main__")
+    config = replace(make_config(tmp_path, socket_dir), group="gs-exec", socket_group="gs-ctl")
+    seen: dict[str, int] = {}
+
+    def fake_service(_config: object, _docker: object, executor_gid: int) -> object:
+        seen["executor"] = executor_gid
+        return object()
+
+    def fake_bind(_config: object, _service: object, socket_group_id: int) -> _StoppedServer:
+        seen["socket"] = socket_group_id
+        return _StoppedServer()
+
+    def getgrnam(name: str) -> SimpleNamespace:
+        if name not in groups:
+            raise KeyError(name)
+        return SimpleNamespace(gr_gid=groups[name])
+
+    monkeypatch.setattr(main_module, "configure_logging", lambda: None)
+    monkeypatch.setattr(main_module, "load_config", lambda _path: config)
+    monkeypatch.setattr(main_module.grp, "getgrnam", getgrnam)
+    monkeypatch.setattr(main_module, "ExecutorService", fake_service)
+    monkeypatch.setattr(main_module, "bind_server", fake_bind)
+    monkeypatch.setattr(main_module.signal, "signal", lambda *_args: None)
+    return main_module.main(["/etc/goblinshift/executor-ctl.json"]), seen
+
+
+def test_gid_do_executor_difere_do_grupo_do_socket(
+    tmp_path: Path, socket_dir: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    code, seen = _run_main_with_host_groups(
+        tmp_path,
+        socket_dir,
+        monkeypatch,
+        {"gs-exec": EXECUTOR_GROUP_GID, "gs-ctl": SOCKET_GROUP_GID},
+    )
+    options = profile.run_options(
+        uuid.UUID(ATTEMPT), work_dir=tmp_path, runtime="runsc", executor_gid=seen["executor"]
+    )
+
+    assert code == 0
+    assert f"--user={profile.EXECUTOR_UID}:{EXECUTOR_GROUP_GID}" in options
+    assert seen["socket"] == SOCKET_GROUP_GID
+
+
+def test_main_sem_o_grupo_do_socket_no_host_nao_sobe(
+    tmp_path: Path, socket_dir: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    code, seen = _run_main_with_host_groups(
+        tmp_path, socket_dir, monkeypatch, {"gs-exec": EXECUTOR_GROUP_GID}
+    )
+
+    assert code == EXIT_HOST_NOT_READY
+    assert "socket" not in seen
+
+
+def test_main_com_gs_ctl_no_mesmo_gid_do_gs_exec_nao_sobe(
+    tmp_path: Path, socket_dir: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # Dois nomes, um GID (`groupadd -o`): o executor voltaria a alcançar o socket.
+    code, seen = _run_main_with_host_groups(
+        tmp_path,
+        socket_dir,
+        monkeypatch,
+        {"gs-exec": EXECUTOR_GROUP_GID, "gs-ctl": EXECUTOR_GROUP_GID},
+    )
+
+    assert code == EXIT_HOST_NOT_READY
+    assert "socket" not in seen
+
+
+def _connect_as(socket_path: Path, uid: int, gid: int, extra_groups: list[int]) -> str:
+    """Conecta num processo filho com a identidade dada; devolve o resultado do `connect`."""
+    read_end, write_end = os.pipe()
+    pid = os.fork()
+    if pid == 0:  # pragma: no cover - roda no filho
+        outcome = b"erro"
+        try:
+            os.setgroups(extra_groups)
+            os.setgid(gid)
+            os.setuid(uid)
+            with socketlib.socket(socketlib.AF_UNIX, socketlib.SOCK_STREAM) as client:
+                client.connect(str(socket_path))
+            outcome = b"conectou"
+        except PermissionError:
+            outcome = b"PermissionError"
+        finally:
+            # Qualquer outra exceção também termina aqui: o filho relata e nunca volta ao pytest.
+            os.write(write_end, outcome)
+            os._exit(0)
+    os.close(write_end)
+    try:
+        _, status = os.waitpid(pid, 0)
+        assert os.waitstatus_to_exitcode(status) == 0
+        return os.read(read_end, 64).decode()
+    finally:
+        os.close(read_end)
+
+
+@pytest.mark.needs_root
+def test_sandbox_nao_conecta_no_socket(tmp_path: Path, socket_dir: Path) -> None:
+    # Diretório atravessável por todos: a única barreira que sobra é o modo 0660 do socket.
+    socket_dir.chmod(0o755)
+    config = make_config(tmp_path, socket_dir)
+    service = ExecutorService(config, DockerCli(binary=str(tmp_path / "sem-docker")), 0)
+    server = bind_server(config, service, SOCKET_GROUP_GID)
+    try:
+        sandbox = _connect_as(config.socket, profile.EXECUTOR_UID, EXECUTOR_GROUP_GID, [])
+        # Controle: a mesma identidade, com o grupo do socket, conecta (o teste não mente).
+        member = _connect_as(
+            config.socket, profile.EXECUTOR_UID, EXECUTOR_GROUP_GID, [SOCKET_GROUP_GID]
+        )
+    finally:
+        server.server_close()
+
+    assert sandbox == "PermissionError"
+    assert member == "conectou"
+
+
+def test_fechar_o_servidor_depois_de_uma_thread_que_nao_iniciou_nao_falha(
+    tmp_path: Path, socket_dir: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    config = make_config(tmp_path, socket_dir, allowed=[ALLOWED])
+    service = ExecutorService(config, DockerCli(binary=str(tmp_path / "sem-docker")), os.getgid())
+    server = ControlServer(config.socket, service, TEST_READ_TIMEOUT_S)
+    lost, lost_peer = socketlib.socketpair(socketlib.AF_UNIX)
+    with lost, lost_peer, monkeypatch.context() as patch:
+        patch.setattr(threading.Thread, "start", _fail_to_start)
+        with pytest.raises(RuntimeError):
+            server.process_request(lost, None)
+
+    # Sem outra conexão no meio: o join do fechamento não pode alcançar a thread que não nasceu.
+    server.server_close()
+
+    assert not config.socket.exists()
+
+
+# Serviço real em processo próprio: só o carregamento da configuração e os GIDs vêm do teste
+# (sem root, o socket só aceita um grupo de quem roda o teste).
+_REAL_SERVICE = """
+import json, os, sys
+from pathlib import Path
+from executor_ctl import __main__ as main_module
+from executor_ctl.config import Config
+
+spec = json.loads(sys.argv[1])
+config = Config(
+    socket=Path(spec["socket"]),
+    group="gs-exec",
+    socket_group="gs-ctl",
+    work_area=Path(spec["area"]),
+    runtime="runc",
+    images_file=Path(spec["images"]),
+    require_mount=False,
+)
+main_module.load_config = lambda _path: config
+main_module._group_id = {"gs-exec": 61001, "gs-ctl": os.getgid()}.get
+sys.exit(main_module.main(["executor-ctl.json"]))
+"""
+# O `inspect` do docker falso: o container da própria tentativa (label e imagem certas), parado.
+_SLOW_STOP_INSPECT = json.dumps(
+    [
+        {
+            "Id": "e" * 64,
+            "Config": {"Image": ALLOWED, "Labels": {profile.ATTEMPT_LABEL: ATTEMPT}},
+            "State": {
+                "Status": "exited",
+                "ExitCode": 0,
+                "OOMKilled": False,
+                "StartedAt": "0001-01-01T00:00:00Z",
+                "FinishedAt": "0001-01-01T00:00:00Z",
+            },
+        }
+    ]
+)
+# `docker stop` que só termina quando o teste solta.
+_SLOW_STOP_DOCKER = f"""#!/bin/sh
+case "$1" in
+  stop)
+    : > "$DOCKER_ENTERED"
+    while [ ! -e "$DOCKER_RELEASE" ]; do sleep 0.01; done
+    ;;
+  inspect)
+    echo '{_SLOW_STOP_INSPECT}'
+    ;;
+  *) exit 1 ;;
+esac
+"""
+# Teto das esperas do teste: só estoura se o serviço travar de verdade.
+_PROCESS_GUARD_S = 10.0
+
+
+def _wait_until(condition: Any) -> bool:
+    deadline = time.monotonic() + _PROCESS_GUARD_S
+    while not condition():
+        if time.monotonic() > deadline:
+            return False
+        threading.Event().wait(_RETRY_PACE_S)
+    return True
+
+
+def _first_line(stream: IO[str]) -> str:
+    """Primeira linha do processo, com teto: um serviço que não imprime falha em vez de travar."""
+    ready, _, _ = select.select([stream], [], [], _PROCESS_GUARD_S)
+    assert ready, f"nada na saída do processo em {_PROCESS_GUARD_S} s"
+    return stream.readline()
+
+
+def test_sigterm_so_no_processo_principal_durante_stop_ainda_responde_200(
+    tmp_path: Path, socket_dir: Path
+) -> None:
+    """Como o `KillMode=mixed` da unit: o SIGTERM vai só ao PID principal, não ao `docker`.
+
+    O servidor para de aceitar conexões, mas espera o `stop` em voo e o responde antes de sair.
+    """
+    config = make_config(tmp_path, socket_dir)
+    binaries = tmp_path / "bin"
+    binaries.mkdir()
+    docker = binaries / "docker"
+    docker.write_text(_SLOW_STOP_DOCKER)
+    docker.chmod(0o755)
+    entered, release = tmp_path / "docker-stop-entrou", tmp_path / "docker-stop-solto"
+    spec = {
+        "socket": str(config.socket),
+        "area": str(config.work_area),
+        "images": str(config.images_file),
+    }
+    env = {
+        **os.environ,
+        "PATH": f"{binaries}:{os.environ['PATH']}",
+        "PYTHONPATH": str(Path(__file__).resolve().parents[2] / "deploy"),
+        "DOCKER_ENTERED": str(entered),
+        "DOCKER_RELEASE": str(release),
+    }
+    process = subprocess.Popen(
+        [sys.executable, "-B", "-c", _REAL_SERVICE, json.dumps(spec)],
+        env=env,
+        stdout=subprocess.PIPE,
+        text=True,
+    )
+    answers: list[Any] = []
+    try:
+        assert process.stdout is not None
+        assert "pronto" in _first_line(process.stdout)
+        client = threading.Thread(
+            target=lambda: answers.append(
+                call(
+                    config.socket,
+                    "POST",
+                    f"/v1/attempts/{ATTEMPT}/stop",
+                    {"grace_s": 0},
+                    timeout_s=_PROCESS_GUARD_S,
+                )
+            )
+        )
+        client.start()
+        assert _wait_until(entered.exists), "o stop não chegou ao docker"
+
+        os.kill(process.pid, signal.SIGTERM)
+
+        assert _wait_until(lambda: not config.socket.exists()), "o SIGTERM não fechou o servidor"
+        assert process.poll() is None, "o servidor saiu com o stop em voo"
+        assert answers == []
+        release.touch()
+        client.join(_PROCESS_GUARD_S)
+        assert [answer.status for answer in answers] == [200]
+        assert answers[0].body["state"] == "exited"
+        assert process.wait(_PROCESS_GUARD_S) == 0
+    finally:
+        release.touch(exist_ok=True)
+        if process.poll() is None:
+            process.kill()
+            process.wait(_PROCESS_GUARD_S)
+        if process.stdout is not None:
+            process.stdout.close()
+
+
+def test_conteiner_alheio_vira_409_foreign_container(tmp_path: Path, socket_dir: Path) -> None:
+    config = make_config(tmp_path, socket_dir, allowed=[ALLOWED])
+    docker = LabeledDocker("exited", None, ALLOWED)
+
+    with running_server(config, docker) as socket:
+        response = call(socket, "GET", f"/v1/attempts/{ATTEMPT}")
+
+    assert response.status == 409
+    assert response.body["error"] == "foreign_container"

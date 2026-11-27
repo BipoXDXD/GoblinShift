@@ -1,9 +1,9 @@
 """Retenção do histórico de execuções para o processo `maintenance` (docs/GoblinShiftPlan.md, 1.7).
 
 - Parâmetros (`run.parameters`), código de rejeição por item (`run_input.error_code`) e detalhe
-  por item (`run_input.details`: avisos e contagens) são anulados 30 dias depois do término; a
-  Run continua, com estado, contagens e datas. O desfecho por item (`ok`/`rejected`) fica, porque
-  só diz quantas entradas foram processadas.
+  por item (`run_input.details`: avisos, contagens e comparação, ADR 059) são anulados 30 dias
+  depois do término; a Run continua, com estado, contagens e datas. O desfecho por item
+  (`ok`/`rejected`) fica, porque só diz quantas entradas foram processadas.
 - Os nomes das saídas (`run_output.logical_name` e `artifact.file_name`) também saem aos 30 dias,
   numa etapa própria e só quando o artefato já foi excluído (vence em 48 h): o download lê o nome
   de artefato vivo. Quem lê um nome anulado usa `files.artifacts.generic_file_name`.
@@ -29,6 +29,7 @@ from datetime import datetime, timedelta
 from sqlalchemy import ColumnElement, Select, delete, exists, func, null, or_, select, update
 from sqlalchemy.orm import Session
 
+from goblinshift import capacity
 from goblinshift.files.objects import release_many
 from goblinshift.files.retention import HistoryReferences, has_unsettled_candidate
 from goblinshift.files.states import HolderKind
@@ -139,10 +140,16 @@ def delete_old_runs(session: Session, now: datetime, limit: int) -> int:
             .with_for_update(skip_locked=True)
         ).scalars()
     )
-    # Uso que ficou aberto numa Run terminal prenderia o objeto para sempre sem a Run.
+    # Uso ou reserva que ficou aberto numa Run terminal (queda antes de `release_run_holds`)
+    # prenderia o objeto e o espaço da conta para sempre sem a Run; os dois saem junto com ela.
+    # Ordem das travas: Run, tentativas e objetos, reservas, pools; a mesma da reconciliação
+    # (objetos, depois pools). O DELETE apaga as tentativas em cascata e, pela FK composta do
+    # #503, anula `(attempt_id, generation)` dos objetos (`SET NULL`). A reserva não tem FK
+    # para a Run.
     release_many(session, HolderKind.RUN, chosen)
     if chosen:
         session.execute(delete(run).where(run.c.id.in_(chosen)))
+    capacity.release_many(session, holder=capacity.HolderKind.RUN, holder_ids=chosen)
     return len(chosen)
 
 

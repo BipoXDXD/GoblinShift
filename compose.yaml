@@ -198,6 +198,9 @@ services:
     depends_on: *worker-deps
     # A volta para entre os passos, e um passo pode esperar o prazo de uma chamada ao executor-ctl
     # (a sonda da imagem, 10 s) antes do prazo do tracing: a carência padrão de 10 s não cabe.
+    # O `stop` do executor-ctl num `_confirm_ended` pode levar até ~170 s (STOP_BASE_TIMEOUT mais a
+    # carência do executor) e leva SIGKILL no meio quando o serviço é parado: é inofensivo, porque
+    # `stop` e `remove` são idempotentes e a próxima volta da manutenção refaz o passo.
     stop_grace_period: 30s
     restart: unless-stopped
 

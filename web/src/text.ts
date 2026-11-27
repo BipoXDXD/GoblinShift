@@ -169,6 +169,7 @@ export const TEXT = {
         name: "Rúbia",
         alt: "Rúbia, goblin da oficina, de maria-chiquinhas vermelhas e vestido preto de renda.",
       },
+      lua: { name: "Lua", alt: "Lua, goblin de cabelo preto, com um sininho dourado no pescoço." },
       nyx: { name: "Nyx", alt: "Nyx, goblin de cabelo preto com pontas rosa e vestido preto." },
       ferrugem: {
         name: "Ferrugem",
@@ -366,6 +367,28 @@ export const TEXT = {
       unknownNotice: (code: string) => `Nota desconhecida (${code}).`,
       duplicateOf: (position: number) =>
         `Igual ao arquivo ${String(position)}; não gerou outra saída.`,
+      comparison: {
+        label: "Antes e depois",
+        to: "para",
+        dimensions: "Dimensões",
+        format: "Formato",
+        size: "Tamanho",
+        records: "Registros",
+        pages: "Páginas",
+        audio: "Áudio",
+        formats: { jpeg: "JPEG", png: "PNG", mpo: "MPO" },
+        codecs: {
+          aac: "AAC",
+          pcm_s16le: "PCM 16 bits",
+          pcm_s16be: "PCM 16 bits",
+          pcm_s24le: "PCM 24 bits",
+          pcm_s24be: "PCM 24 bits",
+          opus: "Opus",
+          vorbis: "Vorbis",
+          wav: "WAV",
+          flac: "FLAC",
+        },
+      },
       // Singular e plural, como em `nouns`.
       counts: {
         records_read: ["registro lido", "registros lidos"],
@@ -796,7 +819,8 @@ export const TEXT = {
       create: "Criar chave",
       creating: "Criando…",
       cancel: "Cancelar",
-      tooMany: "A conta já tem o máximo de chaves ativas. Revogue uma antes de criar outra.",
+      tooMany: (active: number, stored: number, retentionDays: number) =>
+        `A conta chegou ao limite de chaves: ${String(active)} ativas, ou ${String(stored)} guardadas contando as revogadas e vencidas, que saem ${String(retentionDays)} dias depois do fim.`,
       createdHeading: "Chave criada",
       createdWarning: "Copie a chave agora: ela não aparece de novo, nem para nós.",
       tokenLabel: "Chave de API",
@@ -857,6 +881,25 @@ export const TEXT = {
     removed: (name: string) => `Preset ${name} excluído.`,
     changedElsewhere:
       "O preset mudou em outra aba ou dispositivo. A lista foi atualizada; confira antes de excluir.",
+    rename: "Renomear",
+    renameOf: (name: string) => `o preset ${name}`,
+    renameTitle: (name: string) => `Renomear o preset ${name}`,
+    renameLabel: "Novo nome",
+    renameConfirm: "Renomear",
+    renaming: "Renomeando…",
+    renamed: (name: string) => `Preset renomeado para ${name}.`,
+    nameTaken: "Já existe um preset com esse nome.",
+    changedElsewhereRename:
+      "O preset mudou em outra aba ou dispositivo. A lista foi atualizada; confira e tente de novo.",
+    update: "Atualizar preset",
+    updateOf: (name: string) => name,
+    updateTitle: (name: string) => `Atualizar o preset ${name}?`,
+    updateBody:
+      "Os parâmetros do formulário substituem os do preset. As execuções feitas com ele não mudam.",
+    updating: "Atualizando…",
+    updated: (name: string) => `Preset ${name} atualizado.`,
+    changedElsewhereUpdate:
+      "O preset mudou em outra aba ou dispositivo. Abra-o de novo pela Oficina para ver a versão atual.",
     updatedAt: (date: string) => `Atualizado em ${date}`,
     save: "Salvar preset",
     saveTitle: "Salvar os parâmetros como preset",
@@ -987,7 +1030,7 @@ export const TEXT = {
     art: {
       cast: {
         before:
-          "Rúbia, Fagulha, Ferrugem, Jade e Nyx compõem o elenco da oficina. Os renders, recortes e a otimização usam Blender e glTF Transform. As condições de uso das ilustrações e dos modelos estão no ",
+          "Rúbia, Fagulha, Ferrugem, Jade, Lua e Nyx compõem o elenco da oficina. Os renders, recortes e a otimização usam Blender e glTF Transform. As condições de uso das ilustrações e dos modelos estão no ",
         link: "registro de licenças da arte",
         after: ".",
       },

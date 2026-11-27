@@ -7,6 +7,7 @@ está em `test_database_unavailable_postgres.py`.
 """
 
 import logging
+import time
 from collections.abc import Iterator
 from typing import Annotated, Any
 
@@ -20,6 +21,7 @@ from sqlalchemy.engine import Engine
 from sqlalchemy.exc import DBAPIError
 from sqlalchemy.pool import QueuePool
 
+from goblinshift.entrypoints.api.app import API_DB_POOL_TIMEOUT_S
 from tests.api.support import assert_problem
 
 CANARY = "CANARY-valor-da-consulta"
@@ -75,7 +77,8 @@ def exhausted_pool() -> Iterator[Engine]:
         poolclass=QueuePool,
         pool_size=1,
         max_overflow=0,
-        pool_timeout=0.01,
+        # O mesmo prazo do pool da API: a recusa inteira precisa caber em menos de 1 s.
+        pool_timeout=API_DB_POOL_TIMEOUT_S,
         connect_args={"check_same_thread": False},
     )
     yield engine
@@ -115,13 +118,13 @@ def client(offline_client: TestClient, exhausted_pool: Engine) -> TestClient:
     return offline_client
 
 
-def _assert_unavailable(client: TestClient, path: str) -> None:
+def _assert_unavailable(client: TestClient, path: str, retry_after: str = "5") -> None:
     response = client.get(path)
 
     body = assert_problem(response, 503, "SERVICE_UNAVAILABLE")
     assert body["instance"] == path
     assert body["request_id"] == response.headers["x-request-id"]
-    assert response.headers["retry-after"] == "5"
+    assert response.headers["retry-after"] == retry_after
     assert CANARY not in response.text
 
 
@@ -134,21 +137,38 @@ def _assert_internal_error(client: TestClient, path: str) -> None:
 
 
 @pytest.mark.parametrize(
-    "path",
+    ("path", "retry_after"),
     [
-        "/_db/connection-refused",
-        "/_db/pool-exhausted",
-        "/_db/in-dependency",
-        f"/_db/invalidated/{UNLISTED_SQLSTATE}",
-        f"/_db/invalidated/{IDLE_SESSION_KILLED}",
-        "/_db/driver/connection-failed",
-        "/_db/driver/connection-timeout",
+        ("/_db/connection-refused", "5"),
+        # Pool esgotado: a API espera no máximo meio segundo e uma vaga volta logo.
+        ("/_db/pool-exhausted", "1"),
+        ("/_db/in-dependency", "5"),
+        (f"/_db/invalidated/{UNLISTED_SQLSTATE}", "5"),
+        (f"/_db/invalidated/{IDLE_SESSION_KILLED}", "5"),
+        ("/_db/driver/connection-failed", "5"),
+        ("/_db/driver/connection-timeout", "5"),
     ],
 )
 def test_banco_ou_pool_indisponivel_responde_503_com_retry_after(
-    client: TestClient, path: str
+    client: TestClient, path: str, retry_after: str
 ) -> None:
-    _assert_unavailable(client, path)
+    _assert_unavailable(client, path, retry_after)
+
+
+def test_api_espera_o_pool_no_maximo_meio_segundo(offline_client: TestClient) -> None:
+    app: FastAPI = offline_client.app  # type: ignore[assignment]
+
+    assert app.state.engine.pool.timeout() == API_DB_POOL_TIMEOUT_S == 0.5
+
+
+def test_pool_travado_responde_503_em_menos_de_1_s(client: TestClient) -> None:
+    started = time.monotonic()
+    response = client.get("/_db/pool-exhausted")
+    elapsed_s = time.monotonic() - started
+
+    assert elapsed_s < 1.0
+    assert_problem(response, 503, "SERVICE_UNAVAILABLE")
+    assert response.headers["Retry-After"] == "1"
 
 
 @pytest.mark.parametrize(

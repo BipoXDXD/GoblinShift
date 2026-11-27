@@ -55,6 +55,11 @@ interface UploadBatch {
   /** Exclusões no servidor que falharam; o arquivo já saiu do lote. */
   readonly failedDeletions: readonly FailedDeletion[];
   readonly retryDeletions: () => void;
+  /**
+   * O lote virou Run: esquece as intenções sem apagá-las. Sem isso, desmontar apaga todos os
+   * uploads do lote, para não deixar cota reservada.
+   */
+  readonly consume: () => void;
 }
 
 /** O que excluir no servidor: o id da intenção e o nome, para a mensagem de falha. */
@@ -72,7 +77,8 @@ const ACTIVE_STATUSES: ReadonlySet<UploadEntryState["status"]> = new Set([
  *
  * Remover tira o arquivo do lote na hora (ele deixa de ser entrada) e exclui o upload no servidor
  * (DELETE /uploads/{id}), inclusive a intenção de um envio interrompido; a falha do DELETE fica em
- * `failedDeletions`, com o nome, para a pessoa tentar de novo.
+ * `failedDeletions`, com o nome, para a pessoa tentar de novo. Refazer e cancelar também excluem a
+ * intenção do arquivo, e desmontar sem `consume` exclui todas as do lote.
  */
 export function useUploadBatch(services: UploadServices): UploadBatch {
   const [entries, setEntries] = useState<readonly UploadEntry[]>([]);
@@ -93,6 +99,18 @@ export function useUploadBatch(services: UploadServices): UploadBatch {
   }, []);
 
   const deleteOnServer = useDeleteOnServer(servicesRef, setFailedDeletions);
+
+  /** Exclui no servidor a intenção do arquivo, se houver, e a tira de `serverUploads`. */
+  const forgetOnServer = useCallback(
+    (localId: string) => {
+      const created = serverUploads.current.get(localId);
+      serverUploads.current.delete(localId);
+      if (created !== undefined) {
+        deleteOnServer([created]);
+      }
+    },
+    [deleteOnServer],
+  );
 
   const send = useCallback(
     (batch: readonly Pick<UploadEntry, "localId" | "file">[]) => {
@@ -150,32 +168,31 @@ export function useUploadBatch(services: UploadServices): UploadBatch {
       if (entry?.state.status !== "failed") {
         return;
       }
+      // A intenção do envio falho ainda reserva cota: sai antes de pedir outra.
+      forgetOnServer(localId);
       setState(localId, { status: "waiting" });
       send([entry]);
     },
-    [entries, send, setState],
+    [entries, send, setState, forgetOnServer],
   );
 
   const cancel = useCallback(
     (localId: string) => {
       controllers.current.get(localId)?.abort();
+      forgetOnServer(localId);
       setState(localId, { status: "canceled" });
     },
-    [setState],
+    [setState, forgetOnServer],
   );
 
   const remove = useCallback(
     (localId: string) => {
       controllers.current.get(localId)?.abort();
       controllers.current.delete(localId);
-      const created = serverUploads.current.get(localId);
-      serverUploads.current.delete(localId);
       setEntries((current) => current.filter((entry) => entry.localId !== localId));
-      if (created !== undefined) {
-        deleteOnServer([created]);
-      }
+      forgetOnServer(localId);
     },
-    [deleteOnServer],
+    [forgetOnServer],
   );
 
   const removeAll = useCallback(() => {
@@ -195,6 +212,11 @@ export function useUploadBatch(services: UploadServices): UploadBatch {
     deleteOnServer(failedDeletions);
   }, [deleteOnServer, failedDeletions]);
 
+  const consume = useCallback(() => {
+    // Esvazia a mesma Map que a desmontagem guardou; trocá-la por outra faria a saída excluir tudo.
+    serverUploads.current.clear();
+  }, []);
+
   const uploading = entries.some((entry) => ACTIVE_STATUSES.has(entry.state.status));
   useEffect(() => {
     if (!uploading) {
@@ -211,14 +233,32 @@ export function useUploadBatch(services: UploadServices): UploadBatch {
 
   useEffect(() => {
     const active = controllers.current;
+    // A desmontagem guarda esta Map: `consume`, `remove` e afins precisam limpá-la, nunca trocá-la
+    // (`serverUploads.current = new Map()` deixaria a saída excluir uploads que já são de uma Run).
+    const created = serverUploads.current;
     return () => {
       for (const controller of active.values()) {
         controller.abort();
       }
+      // Saiu sem Run (sem `consume`): os uploads do lote não servem mais e só reservam cota. Sair
+      // com o POST /runs ainda pendente também os exclui; se a Run chegar a ser criada, o servidor
+      // segura a remoção física enquanto ela os usa.
+      deleteOnServer([...created.values()]);
+      created.clear();
     };
-  }, []);
+  }, [deleteOnServer]);
 
-  return { entries, add, retry, cancel, remove, removeAll, failedDeletions, retryDeletions };
+  return {
+    entries,
+    add,
+    retry,
+    cancel,
+    remove,
+    removeAll,
+    failedDeletions,
+    retryDeletions,
+    consume,
+  };
 }
 
 /** Uma exclusão por vez a menos que o limite: o DELETE conta na cota de comandos por minuto. */

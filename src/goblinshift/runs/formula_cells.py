@@ -2,10 +2,10 @@
 
 O relatório traz todas as colunas de saída com células que parecem fórmula; o banco guarda só as
 `MAX_COLUMNS` de maior contagem (empate na ordem da saída) e quantas ficaram de fora. O nome da
-coluna é dado do usuário: fica como texto, com teto de `MAX_COLUMN_NAME_CHARS` caracteres e sem
-controle, formato invisível nem surrogate solto (o JSONB do PostgreSQL recusa NUL e surrogate, e
-bidi disfarça o texto exibido). Cabeçalho vazio ou só de espaços vira nome nulo. Some com
-`run_input.details` na retenção de 30 dias.
+coluna é dado do usuário: fica como texto, com teto de `MAX_REPORTED_COLUMN_NAME_CHARS`
+caracteres e sem controle, formato invisível nem surrogate solto (o JSONB do PostgreSQL recusa NUL
+e surrogate, e bidi disfarça o texto exibido). Cabeçalho vazio ou só de espaços vira nome nulo.
+Some com `run_input.details` na retenção de 30 dias.
 """
 
 from collections.abc import Iterable
@@ -15,7 +15,7 @@ from typing import TypeIs
 from goblinshift.processing.names import has_unsafe_char
 
 MAX_COLUMNS = 10
-MAX_COLUMN_NAME_CHARS = 120
+MAX_REPORTED_COLUMN_NAME_CHARS = 120
 _ELLIPSIS = "…"
 _REPLACEMENT = "\ufffd"  # U+FFFD, o caractere de substituição
 
@@ -68,9 +68,9 @@ def _display_name(name: str) -> str | None:
     if not name.strip():
         return None
     safe = "".join(_REPLACEMENT if has_unsafe_char(char) else char for char in name)
-    if len(safe) <= MAX_COLUMN_NAME_CHARS:
+    if len(safe) <= MAX_REPORTED_COLUMN_NAME_CHARS:
         return safe
-    return safe[: MAX_COLUMN_NAME_CHARS - len(_ELLIPSIS)] + _ELLIPSIS
+    return safe[: MAX_REPORTED_COLUMN_NAME_CHARS - len(_ELLIPSIS)] + _ELLIPSIS
 
 
 def _stored_column(raw: object) -> ColumnCells | None:
@@ -83,7 +83,9 @@ def _stored_column(raw: object) -> ColumnCells | None:
 
 
 def _is_stored_name(name: object) -> bool:
-    return isinstance(name, str) and bool(name.strip()) and len(name) <= MAX_COLUMN_NAME_CHARS
+    return (
+        isinstance(name, str) and bool(name.strip()) and len(name) <= MAX_REPORTED_COLUMN_NAME_CHARS
+    )
 
 
 def _is_count(value: object, *, minimum: int) -> TypeIs[int]:

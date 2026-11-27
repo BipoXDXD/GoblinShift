@@ -4,7 +4,8 @@ Roda depois que `files` e `runs` apagaram tudo o que é da conta: remove chaves,
 de capacidade (`capacity.purge_owner`) e a própria `app_user`. A auditoria fica (ADR 026).
 
 Também a retenção do que a identidade acumula: estado de login vencido, sessões encerradas há
-mais de 7 dias e eventos de auditoria com mais de 90 dias, sempre em lotes.
+mais de 7 dias, chaves de API revogadas ou vencidas há mais de 30 dias e eventos de auditoria com
+mais de 90 dias, sempre em lotes.
 """
 
 from datetime import datetime, timedelta
@@ -14,6 +15,7 @@ from sqlalchemy import ColumnElement, Table, delete, func, select, update
 from sqlalchemy.orm import Session
 
 from goblinshift import capacity
+from goblinshift.identity.accounts import KEY_RETENTION
 from goblinshift.identity.tables import api_key, app_user, audit_event, login_state, web_session
 from goblinshift.platform.sql import skip_locked_batch
 
@@ -101,6 +103,15 @@ def delete_ended_web_sessions(session: Session, now: datetime, limit: int) -> in
     return _delete_batch(
         session, web_session, web_session.c.id, ended_at < now - WEB_SESSION_RETENTION, limit
     )
+
+
+def delete_inactive_api_keys(session: Session, now: datetime, limit: int) -> int:
+    """Chaves cujo fim (revogação ou vencimento, o primeiro) passou há mais de `KEY_RETENTION`.
+
+    A ativa nunca entra: sem revogação, o fim é o vencimento, que ainda está no futuro.
+    """
+    ended_at = func.least(api_key.c.revoked_at, api_key.c.expires_at)
+    return _delete_batch(session, api_key, api_key.c.id, ended_at < now - KEY_RETENTION, limit)
 
 
 def delete_old_audit_events(session: Session, now: datetime, limit: int) -> int:

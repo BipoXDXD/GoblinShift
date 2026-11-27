@@ -11,7 +11,7 @@ from functools import partial
 from importlib.metadata import version
 from typing import Any
 
-from fastapi import APIRouter, FastAPI
+from fastapi import APIRouter, Depends, FastAPI
 from opentelemetry.sdk.trace.export import SpanExporter
 from starlette.middleware.sessions import SessionMiddleware
 
@@ -32,6 +32,10 @@ from goblinshift.entrypoints.api import (
     runs_cancel,
     uploads,
 )
+from goblinshift.entrypoints.api.concurrency import (
+    MAX_CONCURRENT_REQUESTS,
+    ConcurrencyLimitMiddleware,
+)
 from goblinshift.entrypoints.api.cookies import (
     LOGIN_COOKIE,
     LOGIN_COOKIE_MAX_AGE_S,
@@ -42,6 +46,7 @@ from goblinshift.entrypoints.api.problems import (
     install_problem_handlers,
     normalize_problem_responses,
 )
+from goblinshift.entrypoints.api.query_guard import reject_unknown_query
 from goblinshift.entrypoints.api.saturation import saturation_reporting
 from goblinshift.entrypoints.api.security_headers import SecurityHeadersMiddleware
 from goblinshift.entrypoints.api.transfers import TransferTimeouts
@@ -69,6 +74,14 @@ class _GoblinShiftAPI(FastAPI):
         return schema
 
 
+# Espera máxima por uma conexão do pool numa requisição. A autenticação abre 3 a 4 transações curtas
+# por requisição; com os 5 s das settings, um pool esgotado seguraria o pedido por até 20 s antes do
+# 503. Meio segundo basta para uma vaga voltar com tráfego normal. O worker e a manutenção mantêm o
+# `db_pool_timeout_s` das settings, e as escritas que encerram uma transferência (concluir o envio,
+# devolver a vaga) repetem até ele (`retry_on_pool_timeout`): não podem perder um envio já feito.
+API_DB_POOL_TIMEOUT_S: float = 0.5
+
+
 def create_app(
     settings: Settings | None = None,
     *,
@@ -85,7 +98,7 @@ def create_app(
     executor_image = settings.executor_image_for_runs()
     web_identity = settings.web_identity()
     configure_logging()
-    engine = make_engine(settings)
+    engine = make_engine(settings.model_copy(update={"db_pool_timeout_s": API_DB_POOL_TIMEOUT_S}))
     code_heads, known_revisions = read_code_revisions(str(settings.alembic_ini))
 
     @asynccontextmanager
@@ -123,6 +136,7 @@ def create_app(
         swagger_ui_oauth2_redirect_url=None,
     )
     app.state.settings = settings
+    app.state.user_hasher = user_hasher
     app.state.executor_image = executor_image
     app.state.quota_defaults = QuotaLimits.from_settings(settings)
     app.state.web_identity = web_identity
@@ -136,6 +150,9 @@ def create_app(
     app.state.transfer_timeouts = TransferTimeouts()
     app.state.terms_version = CURRENT_TERMS_VERSION
 
+    # Antes dos handlers: fica por dentro do `RequestContextMiddleware`, que dá o `request_id` à
+    # recusa, e por fora da rota, que devolve a vaga ao terminar, com sucesso ou exceção.
+    app.add_middleware(ConcurrencyLimitMiddleware, limit=MAX_CONCURRENT_REQUESTS)
     install_problem_handlers(app)
     # Cookie de login (ADR 025): só o marcador do estado do Authlib, cujo conteúdo fica em
     # `login_state`. Middleware ASGI puro, que não toca respostas fora de `/auth`.
@@ -161,7 +178,11 @@ def create_app(
     app.include_router(api_docs.router)
     app.include_router(auth_login.router)
     app.include_router(auth_session.router)
-    api = APIRouter(prefix=API_PREFIX, responses=PROBLEM_RESPONSES)
+    api = APIRouter(
+        prefix=API_PREFIX,
+        responses=PROBLEM_RESPONSES,
+        dependencies=[Depends(reject_unknown_query)],
+    )
     api.include_router(catalog.router)
     api.include_router(me.router)
     api.include_router(me_delete.router)

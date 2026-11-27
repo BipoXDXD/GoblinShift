@@ -8,7 +8,8 @@ Inexistente e de outra conta dão o mesmo 404; expirado ou excluído do próprio
 """
 
 from datetime import datetime
-from typing import Annotated, Literal
+from functools import partial
+from typing import Annotated, Any, Literal
 from uuid import UUID
 
 import anyio
@@ -21,9 +22,18 @@ from starlette.requests import ClientDisconnect
 from goblinshift.capacity import AccountCapacityExceededError, GlobalCapacityExceededError
 from goblinshift.entrypoints.api.capacity_problems import (
     account_storage_problem,
+    daily_uploads_problem,
     environment_storage_problem,
+    live_uploads_problem,
 )
 from goblinshift.entrypoints.api.dependencies import DbSession, ReadFiles, Storage, WriteFiles
+from goblinshift.entrypoints.api.idempotency import (
+    IDEMPOTENCY_KEY_HEADER,
+    REPLAYED_HEADER,
+    idempotency_key_parameter,
+    in_progress_problem,
+    key_invalid_problem,
+)
 from goblinshift.entrypoints.api.json_command import command_openapi, json_command
 from goblinshift.entrypoints.api.problems import ApiProblem, ProblemCode, problem_responses
 from goblinshift.entrypoints.api.transfers import (
@@ -36,12 +46,16 @@ from goblinshift.entrypoints.api.transfers import (
     transfer_limit_problem,
 )
 from goblinshift.files.errors import (
+    DailyUploadLimitError,
     FilesError,
     InvalidUploadRequestError,
+    LiveUploadLimitError,
     TransferLimitReachedError,
     UploadContentTooLargeError,
     UploadGoneError,
     UploadNotFoundError,
+    UploadRequestInProgressError,
+    UploadRequestKeyReusedError,
     UploadSizeMismatchError,
     UploadStateConflictError,
 )
@@ -56,6 +70,7 @@ from goblinshift.files.limits import (
 )
 from goblinshift.files.states import Availability, TransferDirection, UploadState
 from goblinshift.files.transfers import acquire_transfer_slot, release_transfer_slot
+from goblinshift.files.upload_requests import create_intents_once
 from goblinshift.files.uploads import (
     UPLOAD_NAME_PATTERN,
     UploadView,
@@ -64,6 +79,8 @@ from goblinshift.files.uploads import (
     receive_content,
     request_deletion,
 )
+from goblinshift.platform.db import retry_on_pool_timeout
+from goblinshift.runs.acceptance import IdempotencyKeyInvalidError, parse_idempotency_key
 
 router = APIRouter(tags=["uploads"])
 
@@ -136,29 +153,54 @@ class UploadDetails(BaseModel):
     expires_at: datetime
 
 
+def _create_uploads_openapi() -> dict[str, Any]:
+    idempotency_key = idempotency_key_parameter(
+        required=False,
+        description="Opcional. Repetida com o mesmo corpo em até 1 h, devolve o mesmo lote.",
+    )
+    return {**command_openapi(CreateUploads), "parameters": [idempotency_key]}
+
+
 @router.post(
     "/uploads",
     status_code=201,
     operation_id="createUploads",
-    responses=problem_responses(400, 413, 415, 429, 503),
-    openapi_extra=command_openapi(CreateUploads),
+    responses=problem_responses(400, 409, 413, 415, 429, 503),
+    openapi_extra=_create_uploads_openapi(),
 )
 def create_uploads(
     principal: WriteFiles,
     command: Annotated[CreateUploads, Depends(json_command(CreateUploads))],
     session: DbSession,
     request: Request,
+    response: Response,
 ) -> CreatedUploads:
+    """Cria o lote; com Idempotency-Key, o replay devolve o mesmo lote no estado atual."""
+    owner_id = principal.owner_id
     items = [(item.name, item.size) for item in command.items]
+    # Lida à mão e publicada em `_create_uploads_openapi` (motivo em `idempotency`).
+    key = _idempotency_key(request)
     try:
         with session.begin():
-            views = create_intents(session, principal.owner_id, items)
+            views, replayed = _create_batch(session, owner_id, items, key)
     except InvalidUploadRequestError as error:
         raise _invalid_request(error) from None
+    except UploadRequestKeyReusedError:
+        raise ApiProblem(
+            ProblemCode.IDEMPOTENCY_KEY_REUSED, "A Idempotency-Key já foi usada com outro lote."
+        ) from None
+    except UploadRequestInProgressError:
+        raise in_progress_problem() from None
+    except LiveUploadLimitError as error:
+        raise live_uploads_problem(error.retry_after) from None
+    except DailyUploadLimitError as error:
+        raise daily_uploads_problem(error.retry_after) from None
     except AccountCapacityExceededError:
-        raise account_storage_problem(session, principal.owner_id) from None
+        raise account_storage_problem(session, owner_id) from None
     except GlobalCapacityExceededError:
         raise environment_storage_problem() from None
+    if replayed:
+        response.headers[REPLAYED_HEADER] = "true"
     return CreatedUploads(items=[_created(view, request) for view in views])
 
 
@@ -180,11 +222,14 @@ async def put_upload_content(
             ProblemCode.UNSUPPORTED_MEDIA_TYPE, f"Envie o conteúdo como {OCTET_STREAM}."
         )
     owner_id = principal.owner_id
+    # O fim da transferência espera o pool pelo prazo das settings, não pelo da API (app.py).
+    patience_s: float = request.app.state.settings.db_pool_timeout_s
     slot_id = await anyio.to_thread.run_sync(_acquire_upload_slot, session, owner_id)
     try:
         chunks = request_body_chunks(request, timeouts_of(request))
+        receive = partial(receive_content, pool_patience_s=patience_s)
         view = await anyio.to_thread.run_sync(
-            receive_content, session, storage, owner_id, upload_id, chunks
+            receive, session, storage, owner_id, upload_id, chunks
         )
     except FilesError as error:
         raise _upload_problem(error) from None
@@ -198,7 +243,7 @@ async def put_upload_content(
         raise ApiProblem(ProblemCode.BAD_REQUEST, "O envio foi interrompido.") from None
     finally:
         with anyio.CancelScope(shield=True):
-            await anyio.to_thread.run_sync(_release_slot, session, slot_id)
+            await anyio.to_thread.run_sync(_release_slot, session, slot_id, patience_s)
     # `ready` garante tamanho e hash (o serviço só conclui depois de persistir).
     if view.size_bytes is None or view.sha256 is None:
         raise RuntimeError("upload pronto sem tamanho ou hash")
@@ -244,6 +289,24 @@ def delete_upload(upload_id: UUID, principal: WriteFiles, session: DbSession) ->
     return Response(status_code=202)
 
 
+def _create_batch(
+    session: Session, owner_id: UUID, items: list[tuple[str, int]], key: str | None
+) -> tuple[list[UploadView], bool]:
+    if key is None:
+        return create_intents(session, owner_id, items), False
+    return create_intents_once(session, owner_id, items, key)
+
+
+def _idempotency_key(request: Request) -> str | None:
+    raw = request.headers.get(IDEMPOTENCY_KEY_HEADER)
+    if raw is None:
+        return None
+    try:
+        return parse_idempotency_key(raw)
+    except IdempotencyKeyInvalidError:
+        raise key_invalid_problem() from None
+
+
 def _created(view: UploadView, request: Request) -> CreatedUpload:
     if view.original_name is None:
         # A intenção acabou de nascer com o nome; só a retenção o anula, 30 dias depois.
@@ -270,9 +333,12 @@ def _acquire_upload_slot(session: Session, owner_id: UUID) -> UUID:
         raise transfer_limit_problem() from None
 
 
-def _release_slot(session: Session, slot_id: UUID) -> None:
-    with session.begin():
-        release_transfer_slot(session, slot_id)
+def _release_slot(session: Session, slot_id: UUID, patience_s: float) -> None:
+    def release() -> None:
+        with session.begin():
+            release_transfer_slot(session, slot_id)
+
+    retry_on_pool_timeout(release, patience_s=patience_s)
 
 
 def _upload_problem(error: FilesError) -> ApiProblem:

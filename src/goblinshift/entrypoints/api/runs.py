@@ -6,7 +6,7 @@ geração e `traceparent` nunca saem daqui.
 """
 
 from datetime import UTC, datetime
-from typing import Annotated, Any
+from typing import Annotated, Any, Literal
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, Query, Request, Response
@@ -25,11 +25,24 @@ from goblinshift.entrypoints.api.capacity_problems import (
 from goblinshift.entrypoints.api.catalog import (
     MAX_RECIPE_ID_CHARS,
     RECIPE_ID_PATTERN,
+    RecipeIdField,
+    RecipeVersionField,
     deprecation_headers,
     recipe_command_schema,
 )
 from goblinshift.entrypoints.api.dependencies import DbSession, Now, require_scope
-from goblinshift.entrypoints.api.json_command import JSON_MEDIA_TYPE, json_command
+from goblinshift.entrypoints.api.idempotency import (
+    IDEMPOTENCY_KEY_HEADER,
+    REPLAYED_HEADER,
+    idempotency_key_parameter,
+    in_progress_problem,
+    key_invalid_problem,
+)
+from goblinshift.entrypoints.api.json_command import (
+    JSON_MEDIA_TYPE,
+    body_validation_error,
+    json_command,
+)
 from goblinshift.entrypoints.api.problems import (
     ApiProblem,
     ProblemCode,
@@ -44,7 +57,6 @@ from goblinshift.platform.settings import Settings
 from goblinshift.presets import PresetNotFoundError, get_preset
 from goblinshift.processing.recipe import ItemNoticeCode, ItemRejectionCode, ItemWarningCode
 from goblinshift.runs.acceptance import (
-    IDEMPOTENCY_KEY_PATTERN,
     AcceptanceError,
     Accepted,
     ActiveRunLimitError,
@@ -61,8 +73,18 @@ from goblinshift.runs.acceptance import (
     preset_run_hash,
     validate_run,
 )
+from goblinshift.runs.comparison import (
+    AudioCodec,
+    AudioFormat,
+    ImageComparison,
+    ImageFormat,
+    ItemComparison,
+    MediaComparison,
+    PdfComparison,
+    TableComparison,
+)
 from goblinshift.runs.cursor import CursorScopeMismatchError, InvalidCursorError
-from goblinshift.runs.formula_cells import MAX_COLUMN_NAME_CHARS, MAX_COLUMNS, FormulaCells
+from goblinshift.runs.formula_cells import MAX_COLUMNS, MAX_REPORTED_COLUMN_NAME_CHARS, FormulaCells
 from goblinshift.runs.lifecycle import ErrorCode, Phase, Status
 from goblinshift.runs.queries import (
     DEFAULT_PAGE_SIZE,
@@ -96,13 +118,9 @@ PeriodBound = Annotated[AwareDatetime, BeforeValidator(_reject_unix_timestamp)]
 RUNS_PATH = "/runs"
 # Intervalo de polling esperado enquanto a execução não termina (1.6, "Acompanhamento").
 POLL_RETRY_AFTER_SECONDS = 2
-# A requisição original costuma terminar em milissegundos; um segundo basta para o replay.
-IN_PROGRESS_RETRY_AFTER_SECONDS = 1
 # Uma execução ocupa o executor por minutos (1.7); tentar antes disso só gasta a cota.
 QUEUE_FULL_RETRY_AFTER_SECONDS = 60
 MAX_CURSOR_CHARS = 1024
-_IDEMPOTENCY_KEY_HEADER = "Idempotency-Key"
-_REPLAYED_HEADER = "Idempotency-Replayed"
 _ERROR_MESSAGES: dict[str, str] = {
     ErrorCode.NO_VALID_OUTPUTS: "Nenhuma entrada produziu saída válida.",
     ErrorCode.OUTPUT_LIMIT_EXCEEDED: "As saídas passaram do limite da execução.",
@@ -129,8 +147,8 @@ class NewRun(BaseModel):
 
     model_config = ConfigDict(extra="forbid")
 
-    recipe_id: str = Field(min_length=1, max_length=MAX_RECIPE_ID_CHARS)
-    recipe_version: int = Field(ge=1)
+    recipe_id: RecipeIdField
+    recipe_version: RecipeVersionField
     input_upload_ids: list[UUID] = Field(default_factory=list, max_length=MAX_BATCH_FILES)
     parameters: dict[str, Any]
 
@@ -178,7 +196,7 @@ class RunSummaryResponse(BaseModel):
 class FormulaColumnResponse(BaseModel):
     # Nome da coluna de saída como texto puro: é dado do usuário, cortado com "…" no teto. Nulo
     # quando o cabeçalho é vazio ou só de espaços (a tela dá o rótulo).
-    name: str | None = Field(min_length=1, max_length=MAX_COLUMN_NAME_CHARS)
+    name: str | None = Field(min_length=1, max_length=MAX_REPORTED_COLUMN_NAME_CHARS)
     cells: int = Field(ge=1)
 
 
@@ -188,6 +206,58 @@ class FormulaCellsResponse(BaseModel):
     columns: list[FormulaColumnResponse] = Field(min_length=1, max_length=MAX_COLUMNS)
     # Colunas com células que parecem fórmula e que ficaram fora de `columns` pelo teto.
     more_columns: int = Field(ge=0)
+
+
+class TableComparisonResponse(BaseModel):
+    """CSV Janitor: registros lidos → escritos."""
+
+    kind: Literal["table"]
+    records_before: int = Field(ge=0)
+    records_after: int = Field(ge=0)
+
+
+class PdfComparisonResponse(BaseModel):
+    """PDF Press: páginas da entrada → da saída."""
+
+    kind: Literal["pdf"]
+    pages_before: int = Field(ge=0)
+    pages_after: int = Field(ge=0)
+
+
+class ImageComparisonResponse(BaseModel):
+    """Image Forge: dimensões, formato e tamanho em bytes."""
+
+    kind: Literal["image"]
+    width_before: int = Field(ge=1)
+    height_before: int = Field(ge=1)
+    width_after: int = Field(ge=1)
+    height_after: int = Field(ge=1)
+    format_before: ImageFormat
+    format_after: ImageFormat
+    bytes_before: int = Field(ge=0)
+    # Tamanho da saída medido pelo worker na coleta (ADR 059); nulo se não houve medida.
+    bytes_after: int | None = Field(ge=0)
+
+
+class MediaComparisonResponse(BaseModel):
+    """Media Mill: vídeo → miniatura e áudio de origem → extraído; cada par vem inteiro ou nulo."""
+
+    kind: Literal["media"]
+    width_before: int = Field(ge=1)
+    height_before: int = Field(ge=1)
+    width_after: int | None = Field(ge=1)
+    height_after: int | None = Field(ge=1)
+    audio_before: AudioCodec | None
+    audio_after: AudioFormat | None
+
+
+ItemComparisonResponse = Annotated[
+    TableComparisonResponse
+    | PdfComparisonResponse
+    | ImageComparisonResponse
+    | MediaComparisonResponse,
+    Field(discriminator="kind"),
+]
 
 
 class RunItemResponse(BaseModel):
@@ -206,6 +276,8 @@ class RunItemResponse(BaseModel):
     duplicate_of: int | None
     # Só com o aviso CSV_FORMULA_CELLS; nulo sem ele e depois de 30 dias, como `counts`.
     formula_cells: FormulaCellsResponse | None
+    # Antes → depois que a receita já mede (2.2); nulo sem dado e depois de 30 dias, como `counts`.
+    comparison: ItemComparisonResponse | None
 
 
 class RunDetailResponse(RunResponse):
@@ -275,13 +347,9 @@ def _create_run_openapi() -> dict[str, Any]:
         },
     }
     schema = recipe_command_schema(common)
-    idempotency_key = {
-        "name": _IDEMPOTENCY_KEY_HEADER,
-        "in": "header",
-        "required": False,
-        "description": "Obrigatória, exceto com validate_only.",
-        "schema": {"type": "string", "pattern": f"^{IDEMPOTENCY_KEY_PATTERN.pattern}$"},
-    }
+    idempotency_key = idempotency_key_parameter(
+        required=False, description="Obrigatória, exceto com validate_only."
+    )
     return {
         "parameters": [idempotency_key],
         "requestBody": {"required": True, "content": {JSON_MEDIA_TYPE: {"schema": schema}}},
@@ -313,9 +381,8 @@ def create_run(
         input_upload_ids=tuple(command.input_upload_ids),
         parameters=command.parameters,
     )
-    # Lida à mão e publicada em `_create_run_openapi`: declarada como `str | None` na assinatura,
-    # sairia na spec como `anyOf [string, null]`, e o cliente gerado mandaria o texto "null".
-    idempotency_key = request.headers.get(_IDEMPOTENCY_KEY_HEADER)
+    # Lida à mão e publicada em `_create_run_openapi` (motivo em `idempotency`).
+    idempotency_key = request.headers.get(IDEMPOTENCY_KEY_HEADER)
     if validate_only:
         response.status_code = 200
         validated = _validate(run_command, idempotency_key)
@@ -349,12 +416,7 @@ def _preset_run_openapi() -> dict[str, Any]:
         "required": ["input_upload_ids"],
         "additionalProperties": False,
     }
-    idempotency_key = {
-        "name": _IDEMPOTENCY_KEY_HEADER,
-        "in": "header",
-        "required": True,
-        "schema": {"type": "string", "pattern": f"^{IDEMPOTENCY_KEY_PATTERN.pattern}$"},
-    }
+    idempotency_key = idempotency_key_parameter(required=True)
     return {
         "parameters": [idempotency_key],
         "requestBody": {"required": True, "content": {JSON_MEDIA_TYPE: {"schema": schema}}},
@@ -382,7 +444,7 @@ def create_run_from_preset(
     Exige também `presets:read`, porque a configuração do preset passa a aparecer na execução.
     A Run guarda o `preset_id`; editar ou excluir o preset depois não a altera.
     """
-    idempotency_key = request.headers.get(_IDEMPOTENCY_KEY_HEADER)
+    idempotency_key = request.headers.get(IDEMPOTENCY_KEY_HEADER)
     inputs = tuple(command.input_upload_ids)
     try:
         # O replay vem antes de ler o preset: editado ou excluído depois da primeira chamada, o
@@ -451,7 +513,7 @@ def _respond_accepted(
         get_run_route.__name__, run_id=str(accepted.run_id)
     )
     if accepted.replayed:
-        response.headers[_REPLAYED_HEADER] = "true"
+        response.headers[REPLAYED_HEADER] = "true"
     _add_deprecation_headers(response, view.recipe_id, view.recipe_version)
     return AcceptedRunResponse(
         **_run_response(view).model_dump(),
@@ -533,6 +595,7 @@ def get_run_route(
                 counts=item.counts,
                 duplicate_of=item.duplicate_of,
                 formula_cells=_formula_cells(item.formula_cells),
+                comparison=_comparison(item.comparison),
             )
             for item in detail.items
         ],
@@ -616,21 +679,9 @@ def _refusal_problem(error: Exception) -> ApiProblem | RequestValidationError:
     """Recusa do serviço → problem+json; cada recusa tem um código só (1.6)."""
     match error:
         case IdempotencyKeyInvalidError():
-            return ApiProblem(
-                ProblemCode.IDEMPOTENCY_KEY_INVALID,
-                "Envie Idempotency-Key com 16 a 64 caracteres [A-Za-z0-9_-].",
-            )
+            return key_invalid_problem()
         case InvalidRunCommandError():
-            return RequestValidationError(
-                [
-                    {
-                        "loc": ("body", *field_error.location.split(".")),
-                        "type": "value_error",
-                        "msg": field_error.message,
-                    }
-                    for field_error in error.errors
-                ]
-            )
+            return body_validation_error(error.errors)
         case RecipeVersionRetiredError():
             return ApiProblem(
                 ProblemCode.RECIPE_VERSION_RETIRED, "A versão da receita foi retirada."
@@ -641,11 +692,7 @@ def _refusal_problem(error: Exception) -> ApiProblem | RequestValidationError:
                 "A Idempotency-Key já foi usada com outro comando.",
             )
         case IdempotencyInProgressError():
-            return ApiProblem(
-                ProblemCode.IDEMPOTENCY_IN_PROGRESS,
-                "A requisição original com esta Idempotency-Key ainda está em andamento.",
-                headers={"Retry-After": str(IN_PROGRESS_RETRY_AFTER_SECONDS)},
-            )
+            return in_progress_problem()
         case QueueFullError():
             return ApiProblem(
                 ProblemCode.QUEUE_FULL,
@@ -690,6 +737,44 @@ def _formula_cells(summary: FormulaCells | None) -> FormulaCellsResponse | None:
         columns=[FormulaColumnResponse(name=c.name, cells=c.cells) for c in summary.columns],
         more_columns=summary.more_columns,
     )
+
+
+def _comparison(comparison: ItemComparison | None) -> ItemComparisonResponse | None:
+    match comparison:
+        case None:
+            return None
+        case TableComparison():
+            return TableComparisonResponse(
+                kind="table",
+                records_before=comparison.records_before,
+                records_after=comparison.records_after,
+            )
+        case PdfComparison():
+            return PdfComparisonResponse(
+                kind="pdf", pages_before=comparison.pages_before, pages_after=comparison.pages_after
+            )
+        case ImageComparison():
+            return ImageComparisonResponse(
+                kind="image",
+                width_before=comparison.width_before,
+                height_before=comparison.height_before,
+                width_after=comparison.width_after,
+                height_after=comparison.height_after,
+                format_before=comparison.format_before,
+                format_after=comparison.format_after,
+                bytes_before=comparison.bytes_before,
+                bytes_after=comparison.bytes_after,
+            )
+        case MediaComparison():
+            return MediaComparisonResponse(
+                kind="media",
+                width_before=comparison.width_before,
+                height_before=comparison.height_before,
+                width_after=comparison.width_after,
+                height_after=comparison.height_after,
+                audio_before=comparison.audio_before,
+                audio_after=comparison.audio_after,
+            )
 
 
 def _run_response(view: RunView) -> RunResponse:

@@ -31,6 +31,8 @@ from pathlib import Path
 from stat import S_ISDIR, S_ISREG
 from typing import BinaryIO
 
+from goblinshift.platform.telemetry import exception_fields
+
 logger = logging.getLogger(__name__)
 
 # Segmentos só com caracteres seguros e sem começar por ponto: barra `.`, `..`, ocultos e o
@@ -114,7 +116,6 @@ class TemporarySweep:
 class FileStorage:
     def __init__(self, root: Path) -> None:
         self.root = root.resolve()
-        self._tmp_dir = self.root / _TMP_DIR_NAME
 
     def create_exclusive(
         self, key: str, chunks: Iterable[bytes], max_bytes: int
@@ -289,41 +290,22 @@ class FileStorage:
 
         O corte precisa ser maior que o intervalo em que uma gravação viva pode ficar sem escrever.
         Compara com o `mtime`, então `modified_before` vem do relógio da própria máquina. Falha
-        ao listar o diretório sobe; a de um arquivo fica no log e em `failed`, sem parar os
-        demais, e conta no teto, que limita as tentativas e o log de cada varredura. Arquivo que
-        some durante a varredura é sucesso (o estado final é o mesmo).
-        """
-        removed = 0
-        failed = 0
-        remaining = 0
-        remaining_bytes = 0
-        for entry, info in self._temporary_parts():
-            if info.st_mtime < modified_before and removed + failed < limit:
-                if _unlink_temporary(entry):
-                    removed += 1
-                    continue
-                failed += 1
-            remaining += 1
-            remaining_bytes += info.st_size
-        return TemporarySweep(removed, remaining, remaining_bytes, failed)
+        ao abrir ou listar o diretório sobe; a de um arquivo fica no log e em `failed`, sem parar
+        os demais, e conta no teto, que limita as tentativas e o log de cada varredura. Arquivo
+        que some durante a varredura é sucesso (o estado final é o mesmo).
 
-    def _temporary_parts(self) -> list[tuple[os.DirEntry[str], os.stat_result]]:
-        """Temporários do storage: arquivos comuns com o nome gerado, sem seguir symlink."""
+        `.tmp` é aberto a partir da raiz com `O_NOFOLLOW`, e a listagem e as remoções são
+        relativas a esse descritor: um `.tmp` trocado por symlink ou arquivo é
+        `ObjectTamperedError`, e nada fora da raiz é apagado.
+        """
         try:
-            entries = list(os.scandir(self._tmp_dir))
+            tmp_fd = self._open_directory(_TMP_DIR_NAME, [_TMP_DIR_NAME], create=False)
         except FileNotFoundError:
-            return []
-        parts = []
-        for entry in entries:
-            if not _TMP_PART_NAME.fullmatch(entry.name):
-                continue
-            try:
-                info = entry.stat(follow_symlinks=False)
-            except FileNotFoundError:
-                continue
-            if S_ISREG(info.st_mode):
-                parts.append((entry, info))
-        return parts
+            return TemporarySweep(removed=0, remaining=0, remaining_bytes=0)
+        try:
+            return _sweep_directory(tmp_fd, modified_before, limit)
+        finally:
+            os.close(tmp_fd)
 
     def _open_parent(self, key: str) -> tuple[int, str]:
         """Descritor do diretório do objeto e o nome dele lá dentro; quem chama fecha o descritor.
@@ -401,12 +383,49 @@ def _open_subdirectory(name: str, parent_fd: int) -> int | None:
         raise
 
 
-def _unlink_temporary(entry: os.DirEntry[str]) -> bool:
+def _sweep_directory(tmp_fd: int, modified_before: float, limit: int) -> TemporarySweep:
+    removed = 0
+    failed = 0
+    remaining = 0
+    remaining_bytes = 0
+    for name, info in _temporary_parts(tmp_fd):
+        if info.st_mtime < modified_before and removed + failed < limit:
+            if _unlink_temporary(name, tmp_fd):
+                removed += 1
+                continue
+            failed += 1
+        remaining += 1
+        remaining_bytes += info.st_size
+    return TemporarySweep(removed, remaining, remaining_bytes, failed)
+
+
+def _temporary_parts(tmp_fd: int) -> list[tuple[str, os.stat_result]]:
+    """Temporários do storage: arquivos comuns com o nome gerado, sem seguir symlink."""
+    with os.scandir(tmp_fd) as scan:
+        entries = list(scan)
+    parts = []
+    for entry in entries:
+        if not _TMP_PART_NAME.fullmatch(entry.name):
+            continue
+        try:
+            info = entry.stat(follow_symlinks=False)
+        except FileNotFoundError:
+            continue
+        if S_ISREG(info.st_mode):
+            parts.append((entry.name, info))
+    return parts
+
+
+def _unlink_temporary(name: str, tmp_fd: int) -> bool:
     try:
-        Path(entry.path).unlink(missing_ok=True)
-    except OSError:
+        os.unlink(name, dir_fd=tmp_fd)
+    except FileNotFoundError:
+        return True
+    except OSError as error:
         logger.warning(
-            "temporário não removido", exc_info=True, extra={"fields": {"tmp_part": entry.name}}
+            "temporário não removido",
+            exc_info=True,
+            extra={"fields": {"tmp_part": name, **exception_fields(error)}},
         )
         return False
     return True

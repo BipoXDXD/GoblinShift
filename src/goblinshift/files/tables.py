@@ -14,6 +14,7 @@ from sqlalchemy import (
     Index,
     Integer,
     LargeBinary,
+    SmallInteger,
     Table,
     Text,
     UniqueConstraint,
@@ -84,6 +85,11 @@ upload = Table(
     # Retenção de 1.7: 1 h sem atividade enquanto incompleto, 24 h sem uso depois de pronto.
     Column("expires_at", DateTime(timezone=True), nullable=False),
     Column("deleted_at", DateTime(timezone=True)),
+    # Lote criado com Idempotency-Key (migração 0025): a chave, o SHA-256 do corpo e a posição do
+    # item no pedido, iguais em todas as linhas do lote; sem a chave, as três ficam nulas.
+    Column("request_key", Text),
+    Column("request_hash", LargeBinary),
+    Column("request_index", SmallInteger),
     UniqueConstraint("owner_id", "id"),
     ForeignKeyConstraint(
         ["owner_id", "object_id"],
@@ -91,6 +97,9 @@ upload = Table(
         ondelete="RESTRICT",
     ),
     Index(None, "owner_id", "created_at"),
+    Index(None, "owner_id", "request_key", postgresql_where=text("request_key IS NOT NULL")),
+    # Uploads vivos da conta (teto de `files.uploads`): só as linhas sem exclusão, pelo vencimento.
+    Index(None, "owner_id", "expires_at", postgresql_where=text("deleted_at IS NULL")),
     Index("upload_expires_at_idx", "expires_at", postgresql_where=text("deleted_at IS NULL")),
     # Incompletos que `expire_incomplete_uploads` busca por vencimento (migração 0024).
     Index("upload_incomplete_idx", "expires_at", "id", postgresql_where=text("state <> 'ready'")),
@@ -100,11 +109,24 @@ upload = Table(
     CheckConstraint(
         "original_name IS NOT NULL OR deleted_at IS NOT NULL", name="name_until_deleted"
     ),
+    CheckConstraint("request_key ~ '^[A-Za-z0-9_-]{16,64}$'", name="request_key"),
+    CheckConstraint("octet_length(request_hash) = 32", name="request_hash"),
+    CheckConstraint(
+        "(request_key IS NULL) = (request_hash IS NULL)"
+        " AND (request_key IS NULL) = (request_index IS NULL)",
+        name="request",
+    ),
     # Uploads excluídos que a retenção ainda vai anular (1.7).
     Index(
         "upload_anonymize_idx",
         "created_at",
         postgresql_where=text("original_name IS NOT NULL AND deleted_at IS NOT NULL"),
+    ),
+    # Lotes com chave de idempotência que a retenção ainda vai anular (24 h).
+    Index(
+        "upload_request_created_at_idx",
+        "created_at",
+        postgresql_where=text("request_key IS NOT NULL"),
     ),
 )
 

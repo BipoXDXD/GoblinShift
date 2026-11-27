@@ -117,7 +117,10 @@ export interface paths {
         };
         get?: never;
         put?: never;
-        /** Create Uploads */
+        /**
+         * Create Uploads
+         * @description Cria o lote; com Idempotency-Key, o replay devolve o mesmo lote no estado atual.
+         */
         post: operations["createUploads"];
         delete?: never;
         options?: never;
@@ -481,6 +484,18 @@ export interface components {
          */
         ArtifactRole: "output" | "report" | "manifest" | "package" | "preview";
         /**
+         * AudioCodec
+         * @description Codecs de áudio de origem aceitos pelo Media Mill (`media_mill.probe`).
+         * @enum {string}
+         */
+        AudioCodec: "aac" | "pcm_s16le" | "pcm_s16be" | "pcm_s24le" | "pcm_s24be" | "opus" | "vorbis";
+        /**
+         * AudioFormat
+         * @description Formato do áudio extraído pelo Media Mill.
+         * @enum {string}
+         */
+        AudioFormat: "wav" | "flac";
+        /**
          * Availability
          * @description Se o conteúdo ainda pode ser usado, independente do estado histórico (1.7).
          *
@@ -593,6 +608,36 @@ export interface components {
             cells: number;
         };
         /**
+         * ImageComparisonResponse
+         * @description Image Forge: dimensões, formato e tamanho em bytes.
+         */
+        ImageComparisonResponse: {
+            /**
+             * @description discriminator enum property added by openapi-typescript
+             * @enum {string}
+             */
+            kind: "image";
+            /** Width Before */
+            width_before: number;
+            /** Height Before */
+            height_before: number;
+            /** Width After */
+            width_after: number;
+            /** Height After */
+            height_after: number;
+            format_before: components["schemas"]["ImageFormat"];
+            format_after: components["schemas"]["ImageFormat"];
+            /** Bytes Before */
+            bytes_before: number;
+            /** Bytes After */
+            bytes_after: number | null;
+        };
+        /**
+         * ImageFormat
+         * @enum {string}
+         */
+        ImageFormat: "jpeg" | "png" | "mpo";
+        /**
          * ItemNoticeCode
          * @description Fatos sobre o item que a interface mostra, mas que não são aviso (A2: não mudam o estado
          *     para `succeeded_with_warnings`). Lista fechada: vão para o banco e para a API.
@@ -666,6 +711,42 @@ export interface components {
             limits: components["schemas"]["Limits"];
             usage: components["schemas"]["Usage"];
             terms: components["schemas"]["Terms"];
+        };
+        /**
+         * MediaComparisonResponse
+         * @description Media Mill: vídeo → miniatura e áudio de origem → extraído; cada par vem inteiro ou nulo.
+         */
+        MediaComparisonResponse: {
+            /**
+             * @description discriminator enum property added by openapi-typescript
+             * @enum {string}
+             */
+            kind: "media";
+            /** Width Before */
+            width_before: number;
+            /** Height Before */
+            height_before: number;
+            /** Width After */
+            width_after: number | null;
+            /** Height After */
+            height_after: number | null;
+            audio_before: components["schemas"]["AudioCodec"] | null;
+            audio_after: components["schemas"]["AudioFormat"] | null;
+        };
+        /**
+         * PdfComparisonResponse
+         * @description PDF Press: páginas da entrada → da saída.
+         */
+        PdfComparisonResponse: {
+            /**
+             * @description discriminator enum property added by openapi-typescript
+             * @enum {string}
+             */
+            kind: "pdf";
+            /** Pages Before */
+            pages_before: number;
+            /** Pages After */
+            pages_after: number;
         };
         /**
          * Phase
@@ -742,6 +823,8 @@ export interface components {
             request_id: string;
             /** Errors */
             errors?: components["schemas"]["FieldError"][] | null;
+            /** Errors Truncated */
+            errors_truncated?: true | null;
         };
         /** Progress */
         Progress: {
@@ -909,6 +992,8 @@ export interface components {
             /** Duplicate Of */
             duplicate_of: number | null;
             formula_cells: components["schemas"]["FormulaCellsResponse"] | null;
+            /** Comparison */
+            comparison: (components["schemas"]["TableComparisonResponse"] | components["schemas"]["PdfComparisonResponse"] | components["schemas"]["ImageComparisonResponse"] | components["schemas"]["MediaComparisonResponse"]) | null;
         };
         /** RunListResponse */
         RunListResponse: {
@@ -991,6 +1076,21 @@ export interface components {
          * @enum {string}
          */
         Status: "queued" | "running" | "stopping" | "succeeded" | "succeeded_with_warnings" | "canceled" | "failed";
+        /**
+         * TableComparisonResponse
+         * @description CSV Janitor: registros lidos → escritos.
+         */
+        TableComparisonResponse: {
+            /**
+             * @description discriminator enum property added by openapi-typescript
+             * @enum {string}
+             */
+            kind: "table";
+            /** Records Before */
+            records_before: number;
+            /** Records After */
+            records_after: number;
+        };
         /**
          * Terms
          * @description A versão vigente e a última aceita; `acceptance_required` bloqueia as demais rotas.
@@ -1842,7 +1942,10 @@ export interface operations {
     createUploads: {
         parameters: {
             query?: never;
-            header?: never;
+            header?: {
+                /** @description Opcional. Repetida com o mesmo corpo em até 1 h, devolve o mesmo lote. */
+                "Idempotency-Key"?: string;
+            };
             path?: never;
             cookie?: never;
         };
@@ -1892,6 +1995,15 @@ export interface operations {
             };
             /** @description Forbidden */
             403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description Conflict */
+            409: {
                 headers: {
                     [name: string]: unknown;
                 };

@@ -1,12 +1,14 @@
 """Construtores de dados dos testes de execuções."""
 
 import uuid
-from collections.abc import Sequence
+from collections.abc import Callable, Sequence
 from datetime import datetime, timedelta
 
-from sqlalchemy import func, insert, select, update
+from sqlalchemy import func, insert, select, text, update
 from sqlalchemy.orm import Session, sessionmaker
 
+from goblinshift.capacity import HolderKind as CapacityHolder
+from goblinshift.capacity.tables import capacity_pool
 from goblinshift.files.storage import FileStorage
 from goblinshift.files.tables import object_use, upload
 from goblinshift.files.uploads import request_deletion
@@ -14,7 +16,9 @@ from goblinshift.platform.db import unit_of_work
 from goblinshift.runs.acceptance import RunCommand
 from goblinshift.runs.lifecycle import Status
 from goblinshift.runs.tables import idempotency_record, run, run_input
+from tests.capacity.support import create_account_pool, reserve_now
 from tests.files.support import create_intent, create_user, ready_upload
+from tests.lock_support import in_thread, wait_until_someone_waits_for_a_lock
 
 RECIPE_ID = "csv-janitor"
 RECIPE_VERSION = 1
@@ -104,6 +108,47 @@ def insert_finished_run(
             )
             .returning(run.c.id)
         ).scalar_one()
+    return run_id
+
+
+def tables_written_before_waiting_for_the_pool(
+    factory: sessionmaker[Session], owner_id: uuid.UUID, purge: Callable[[], object]
+) -> set[str]:
+    """Tabelas em que `purge` já escreveu quando parou na trava do pool da conta.
+
+    Outra conexão segura o pool; a purga roda numa thread até esperar por ele, e o
+    `pg_locks` mostra onde ela já tem `RowExclusiveLock` (INSERT, UPDATE ou DELETE, inclusive
+    em cascata). O que aparece aqui foi travado antes do pool: a ordem das travas da purga.
+    """
+    with factory() as blocker, blocker.begin():
+        blocker.execute(
+            select(capacity_pool.c.id)
+            .where(capacity_pool.c.scope == "account", capacity_pool.c.owner_id == owner_id)
+            .with_for_update()
+        )
+        work = in_thread(purge)
+        wait_until_someone_waits_for_a_lock(factory, "a purga")
+        with factory() as observer:
+            written = set(
+                observer.execute(
+                    text(
+                        "SELECT c.relname FROM pg_locks l JOIN pg_class c ON c.oid = l.relation"
+                        " WHERE c.relkind = 'r' AND l.granted AND l.mode = 'RowExclusiveLock'"
+                        " AND l.pid IN (SELECT pid FROM pg_locks WHERE NOT granted)"
+                    )
+                ).scalars()
+            )
+    work.result()
+    return written
+
+
+def finished_run_with_live_reservation(
+    factory: sessionmaker[Session], owner_id: uuid.UUID, created_at: datetime, amount: int
+) -> uuid.UUID:
+    """Run terminada cuja reserva `RUN` continua viva: o processo caiu antes de liberá-la."""
+    create_account_pool(factory, owner_id, 10 * amount)
+    run_id = insert_finished_run(factory, owner_id, created_at)
+    reserve_now(factory, owner_id, amount, CapacityHolder.RUN, run_id)
     return run_id
 
 

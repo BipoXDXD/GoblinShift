@@ -12,13 +12,16 @@ Passos:
    aqui (disco cheio, storage ilegível) é infraestrutura: falha transitória na hora.
 2. `start`: confere que ninguém pediu parada, chama `runner.start` com a imagem fixada na Run e
    registra `ExecutorStarted` (a partir daqui a tentativa conta como física) e a fase
-   `processing`.
+   `processing`. O `start` pode passar do lease (prazo do executor-ctl): enquanto ele bloqueia,
+   uma thread renova (`BackgroundRenewal`), e o fencing perdido nela leva ao abandono.
 3. `supervise`: renova o lease a cada terço do prazo, grava o progresso, aplica o prazo vencido
    e, se a Run foi para `stopping` (cancelamento ou prazo) ou a tentativa passou do teto de
-   duração, pede `stop` ao Runner. Runner fora do ar não interrompe a espera: o lease segue
-   renovado e a consulta se repete (3.5: execuções aguardam dentro dos prazos). Falha transitória
-   do banco na renovação também não: a renovação é repetida logo, e o fencing decide, quando o
-   banco voltar, se a tentativa ainda é desta instância.
+   duração, pede `stop` ao Runner: no máximo um por volta, com o lease renovado numa thread
+   enquanto ele bloqueia (o pior caso do executor-ctl passa do lease). Runner fora do ar não
+   interrompe a espera: o lease segue renovado e a consulta se repete (3.5: execuções aguardam
+   dentro dos prazos). Falha transitória do banco na renovação também não: a renovação é
+   repetida logo, e o fencing decide, quando o banco voltar, se a tentativa ainda é desta
+   instância.
 4. `finish`: pelo código de saída, publica (0), falha de forma determinística (3, ou memória
    estourada) ou transitória (demais, inclusive o teto de 10 min). A publicação condiciona o
    `UPDATE` à geração, a `running`, à ausência de cancelamento e a `now() <= deadline_at`; se não
@@ -41,8 +44,10 @@ import time
 import uuid
 from collections import Counter
 from collections.abc import Callable, Iterable, Iterator, Mapping
+from contextlib import nullcontext
 from dataclasses import dataclass, field, replace
 from datetime import timedelta
+from functools import partial
 from pathlib import Path
 from typing import BinaryIO
 
@@ -58,7 +63,8 @@ from goblinshift.files.artifacts import publish_artifact
 from goblinshift.files.candidates import HeldContent, HeldContentMissingError, held_input_contents
 from goblinshift.files.errors import ObjectNotAvailableError
 from goblinshift.files.storage import FileStorage, ObjectTamperedError, StorageError
-from goblinshift.platform.telemetry import UserHasher
+from goblinshift.platform.telemetry import UserHasher, exception_fields
+from goblinshift.runs.comparison import comparison_as_json
 from goblinshift.runs.lifecycle import (
     DETERMINISTIC_CODES,
     MAX_RETRY_JITTER,
@@ -88,11 +94,14 @@ from goblinshift.runs.store import (
     RunFinishedHook,
     apply_transition,
     complete_after_commit,
+    db_clock,
+    lease_expired,
     lock_fenced,
     run_transaction,
 )
 from goblinshift.runs.tables import attempt, run, run_input, run_output
 from goblinshift.runs.worker import attempt_event
+from goblinshift.runs.worker.background_renewal import BackgroundRenewal, next_renewal_wait
 from goblinshift.runs.worker.candidate_writer import CandidateWriter, StoredCandidate
 from goblinshift.runs.worker.claim import ClaimedAttempt
 from goblinshift.runs.worker.collection import (
@@ -165,12 +174,14 @@ class CoordinatorConfig:
 class PreparationError(Exception):
     """A área de trabalho não pôde ser montada (entrada sumida ou divergente): infraestrutura.
 
-    `alert` é o evento `alert=` que o log da falha leva; `None` deixa o log sem alerta.
+    `alert` é o evento `alert=` que o log da falha leva; `None` deixa o log sem alerta. `errno` é o
+    da `OSError` de origem, que o log leva pelo nome: a mensagem dela traz o caminho e fica de fora.
     """
 
-    def __init__(self, message: str, *, alert: str | None = None) -> None:
+    def __init__(self, message: str, *, alert: str | None = None, errno: int | None = None) -> None:
         super().__init__(message)
         self.alert = alert
+        self.errno = errno
 
 
 class InputTamperedError(Exception):
@@ -210,7 +221,8 @@ class _AreaFile:
                 # O corpo já levantou (parada pedida, fencing perdido, leitura do storage): essa é a
                 # exceção que decide o desfecho da Run, e o fechamento falho não a substitui.
                 logger.warning(
-                    "fechamento da área de trabalho falhou", extra={"fields": {"error": str(error)}}
+                    "fechamento da área de trabalho falhou",
+                    extra={"fields": exception_fields(error)},
                 )
                 return
             raise _area_write_failed(error) from error
@@ -223,7 +235,9 @@ class _AreaFile:
 
 
 def _area_write_failed(error: OSError) -> PreparationError:
-    return PreparationError(f"área de trabalho: {error}", alert=EXECUTOR_START_FAILED)
+    return PreparationError(
+        f"área de trabalho: {error}", alert=EXECUTOR_START_FAILED, errno=error.errno
+    )
 
 
 class _StopRequested(Exception):  # noqa: N818 - sinal interno de controle, não erro
@@ -346,9 +360,9 @@ class Coordinator:
         started = time.monotonic()
         try:
             applied = self._drive(claimed)
-        except LostFencing as lost:
+        except LostFencing:
             _record_end(started, "lost_fencing", error=None)
-            _log_attempt(claimed, "lost_fencing", started, detail=str(lost))
+            _log_attempt(claimed, "lost_fencing", started)
             self._abandon(claimed)
             return None
         left_on_disk = complete_after_commit(
@@ -393,7 +407,7 @@ class Coordinator:
             )
             return self.fail_input_tampered(claimed)
         except PreparationError as error:
-            fields = _ids(claimed, error)
+            fields = {**_ids(claimed), **exception_fields(error)}
             if error.alert is not None:
                 fields["alert"] = error.alert
             logger.warning("área de trabalho falhou", extra={"fields": fields})
@@ -404,13 +418,19 @@ class Coordinator:
         if not self.may_start(claimed):
             return self.conclude_stop(claimed)
         try:
-            self._runner.start(claimed.attempt_id, claimed.executor_image)
+            self.start_executor(claimed)
         except RunnerError as error:
             # Toda recusa do start é de infraestrutura, inclusive imagem fora da allowlist do
             # host: não é culpa da receita nem da entrada, e o deploy pode corrigi-la a tempo.
             logger.warning(
                 "executor não iniciou",
-                extra={"fields": {**_ids(claimed, error), "alert": EXECUTOR_START_FAILED}},
+                extra={
+                    "fields": {
+                        **_ids(claimed),
+                        **exception_fields(error),
+                        "alert": EXECUTOR_START_FAILED,
+                    }
+                },
             )
             return self.fail_transiently(claimed)
         self.record_start(claimed)
@@ -430,14 +450,14 @@ class Coordinator:
             # A área do host que não aceita a tentativa (montagem perdida, sem escrita) perde a Run
             # como o start recusado, e nenhuma outra causa avisa: conta no mesmo alerta.
             raise PreparationError(
-                f"área de trabalho: {error}", alert=EXECUTOR_START_FAILED
+                f"área de trabalho: {error}", alert=EXECUTOR_START_FAILED, errno=error.errno
             ) from error
         try:
             self._fill_work_area(work_dir, claimed, contents, self._lease_keeper(claimed))
         except OSError as error:
             # Só chega aqui a `OSError` da leitura do storage, que não é a área do host e fica sem
             # alerta: a escrita local vira `PreparationError` com alerta em `_AreaFile`.
-            raise PreparationError(f"área de trabalho: {error}") from error
+            raise PreparationError(f"área de trabalho: {error}", errno=error.errno) from error
 
     def _fill_work_area(
         self,
@@ -481,8 +501,11 @@ class Coordinator:
                 _AreaFile(inputs_dir / name) as target,
             ):
                 for chunk in keeper.beating(_chunks(source)):
-                    digest.update(chunk)
                     size += len(chunk)
+                    # Objeto adulterado maior que o registro não chega a encher a área de trabalho.
+                    if size > content.size_bytes:
+                        raise PreparationError(f"entrada {position} passa do tamanho registrado")
+                    digest.update(chunk)
                     target.write(chunk)
         except ObjectTamperedError:
             raise InputTamperedError(position) from None
@@ -509,6 +532,18 @@ class Coordinator:
 
         return run_transaction(self._factory, check)
 
+    def start_executor(self, claimed: ClaimedAttempt) -> None:
+        """Inicia o executor com o lease renovado em paralelo: o `start` pode passar do lease."""
+        with self._background_renewal(claimed):
+            self._runner.start(claimed.attempt_id, claimed.executor_image)
+
+    def _background_renewal(self, claimed: ClaimedAttempt) -> BackgroundRenewal:
+        return BackgroundRenewal(
+            partial(self._try_renew, claimed),
+            every=self._config.renew_every,
+            retry_every=self._config.renew_retry_every,
+        )
+
     def record_start(self, claimed: ClaimedAttempt) -> None:
         def record(session: Session) -> None:
             loaded = lock_fenced(session, _fence(claimed), ACTIVE_STATUSES)
@@ -524,27 +559,44 @@ class Coordinator:
         """Espera o executor terminar, renovando o lease; pede `stop` se a Run vai parar."""
         started = time.monotonic()
         next_renewal = float("-inf")
+        next_stop = float("-inf")
         while True:
             status = self._observe(claimed)
             if status is not None and not status.is_running:
                 return status
+            # Um `stop` por volta: cada um pode levar o pior caso do executor-ctl, e um segundo na
+            # mesma volta abriria uma parada concorrente à primeira.
+            stop_attempted = False
             now = time.monotonic()
             if now >= next_renewal:
                 renewed = self._try_renew(claimed)
-                renewal_failed = renewed is None
-                wait = (
-                    self._config.renew_retry_every if renewal_failed else self._config.renew_every
+                wait = next_renewal_wait(
+                    renewed,
+                    every=self._config.renew_every,
+                    retry_every=self._config.renew_retry_every,
                 )
                 next_renewal = now + wait.total_seconds()
                 if renewed is Status.STOPPING:
+                    stop_attempted = True
                     stopped = self._try_stop(claimed)
-                    # Sem confirmação de término não há desfecho: o lease segue renovado.
-                    if stopped is not None and not stopped.is_running:
+                    # Sem confirmação de término não há desfecho: o lease segue renovado. Um `stop`
+                    # falho também adia o do teto (mesmo intervalo curto, logo abaixo).
+                    if stopped is None:
+                        next_stop = now + self._config.renew_retry_every.total_seconds()
+                    elif not stopped.is_running:
                         return stopped
-            if time.monotonic() - started >= self._config.attempt_timeout.total_seconds():
+            now = time.monotonic()
+            timed_out = now - started >= self._config.attempt_timeout.total_seconds()
+            if timed_out and not stop_attempted and now >= next_stop:
                 stopped = self._try_stop(claimed)
-                if stopped is not None and not stopped.is_running:
-                    return replace(stopped, timed_out=True)
+                # `stop` falho espera `renew_retry_every`: repeti-lo a cada `status_poll` abriria
+                # uma thread de renovação, e uma transação no banco, por volta com o ctl fora.
+                if stopped is None:
+                    next_stop = now + self._config.renew_retry_every.total_seconds()
+                elif not stopped.is_running:
+                    # Sem executor (`absent`, contêiner que nunca iniciou), não houve estouro do
+                    # usuário: o `finish` trata a falta de código de saída como transitória.
+                    return replace(stopped, timed_out=True) if stopped.ran else stopped
             time.sleep(self._config.status_poll.total_seconds())
 
     def _try_renew(self, claimed: ClaimedAttempt) -> Status | None:
@@ -563,24 +615,48 @@ class Coordinator:
         try:
             return self._runner.status(claimed.attempt_id)
         except RunnerError as error:
-            logger.warning("executor sem estado", extra={"fields": _ids(claimed, error)})
+            logger.warning(
+                "executor sem estado",
+                extra={"fields": {**_ids(claimed), **exception_fields(error)}},
+            )
             return None
 
-    def _try_stop(self, claimed: ClaimedAttempt) -> ExecutorStatus | None:
+    def _try_stop(self, claimed: ClaimedAttempt, *, renewing: bool = True) -> ExecutorStatus | None:
+        """Pede `stop`; `None` se o Runner falhou (quem chamou decide se repete).
+
+        O `stop` pode passar do lease (pior caso do executor-ctl): com `renewing`, uma thread
+        renova enquanto ele bloqueia, e o fencing perdido nela sai daqui como `LostFencing`. Se o
+        próprio `stop` levanta `RunnerError`, o erro dele vence e a resposta é `None`: o
+        `LostFencing` reaparece na renovação seguinte.
+        """
+        renewal = self._background_renewal(claimed) if renewing else nullcontext()
         try:
-            return self._runner.stop(claimed.attempt_id, self._config.stop_grace)
+            with renewal:
+                return self._runner.stop(claimed.attempt_id, self._config.stop_grace)
         except RunnerError as error:
-            logger.warning("executor não parou", extra={"fields": _ids(claimed, error)})
+            logger.warning(
+                "executor não parou", extra={"fields": {**_ids(claimed), **exception_fields(error)}}
+            )
             return None
 
     def renew_lease(
         self, claimed: ClaimedAttempt, *, retry_allowed: Callable[[float], bool] | None = None
     ) -> Status:
-        """Renova o lease e grava o progresso; aplica o prazo vencido. Devolve o status."""
+        """Renova o lease e grava o progresso; aplica o prazo vencido. Devolve o status.
+
+        Lease já vencido no relógio do banco não se renova: `LostFencing`, e o worker abandona.
+        """
         processed = self._processed_count(claimed)
 
         def renew(session: Session) -> Status:
             loaded = lock_fenced(session, _fence(claimed), ACTIVE_STATUSES)
+            live = loaded.live_attempt
+            # Vencido é definitivo (3.4): a manutenção pode já ter parado o executor e só decidir
+            # depois; renovar agora tiraria a decisão dela e deixaria a tentativa perdida. O
+            # relógio é lido depois da trava: `loaded.now` (o `now()` da transação) não vê a
+            # espera pelo `FOR UPDATE`, e um lease vencido nela passaria por vivo.
+            if live is not None and lease_expired(live.lease_expires_at, db_clock(session)):
+                raise LostFencing(f"lease vencido em {live.lease_expires_at.isoformat()}")
             session.execute(
                 update(attempt)
                 .where(attempt.c.id == claimed.attempt_id, attempt.c.ended_at.is_(None))
@@ -699,12 +775,17 @@ class Coordinator:
                 attempt_error=code,
             )
         except (CollectionError, OSError) as error:
-            logger.warning("coleta recusada", extra={"fields": _ids(claimed, error)})
+            logger.warning(
+                "coleta recusada", extra={"fields": {**_ids(claimed), **exception_fields(error)}}
+            )
             return self.fail_transiently(claimed)
         try:
             stored = self.store_candidates(claimed, collected)
-        except (StorageError, OSError) as error:
-            logger.warning("candidatos não gravados", extra={"fields": _ids(claimed, error)})
+        except (StorageError, OSError, CollectionError) as error:
+            logger.warning(
+                "candidatos não gravados",
+                extra={"fields": {**_ids(claimed), **exception_fields(error)}},
+            )
             return self.fail_transiently(claimed)
         attempt_event.record(
             {"collect_ms": _elapsed_ms(collect_started), **_output_attributes(collected)}
@@ -789,6 +870,11 @@ class Coordinator:
                                 if item.formula_cells is not None
                                 else None
                             ),
+                            "comparison": (
+                                comparison_as_json(item.comparison)
+                                if item.comparison is not None
+                                else None
+                            ),
                         },
                     )
                 )
@@ -828,9 +914,10 @@ class Coordinator:
 
         Nada vai para o banco. O executor tem o nome desta Attempt, que nenhuma tentativa nova
         reutiliza, então pará-lo nunca atinge o trabalho de quem assumiu. Se o Runner falhar, a
-        manutenção encontra a área da tentativa encerrada e termina o serviço.
+        manutenção encontra a área da tentativa encerrada e termina o serviço. Sem renovação
+        durante o `stop`: o fencing já foi perdido.
         """
-        stopped = self._try_stop(claimed)
+        stopped = self._try_stop(claimed, renewing=False)
         if stopped is not None and not stopped.is_running:
             self._try_remove(claimed)
 
@@ -844,7 +931,10 @@ class Coordinator:
         try:
             self._runner.remove(claimed.attempt_id)
         except RunnerError as error:
-            logger.warning("área de trabalho não removida", extra={"fields": _ids(claimed, error)})
+            logger.warning(
+                "área de trabalho não removida",
+                extra={"fields": {**_ids(claimed), **exception_fields(error)}},
+            )
 
     def _conclude(
         self,
@@ -958,16 +1048,13 @@ def _chunks(source: BinaryIO) -> Iterator[bytes]:
         yield chunk
 
 
-def _ids(claimed: ClaimedAttempt, error: Exception | None = None) -> dict[str, object]:
-    fields: dict[str, object] = {
+def _ids(claimed: ClaimedAttempt) -> dict[str, object]:
+    return {
         "run_id": str(claimed.run_id),
         "attempt_id": str(claimed.attempt_id),
         "generation": claimed.generation,
         "attempt.number": claimed.number,
     }
-    if error is not None:
-        fields["error"] = str(error)
-    return fields
 
 
 def _elapsed_ms(started: float) -> int:
@@ -1019,7 +1106,6 @@ def _log_attempt(
     started: float,
     *,
     error: ErrorCode | None = None,
-    detail: str | None = None,
 ) -> None:
     fields = _ids(claimed)
     fields |= {
@@ -1028,6 +1114,4 @@ def _log_attempt(
         "error.code": error,
         "duration_ms": round((time.monotonic() - started) * 1000),
     }
-    if detail is not None:
-        fields["detail"] = detail
     logger.info("tentativa encerrada", extra={"fields": fields})

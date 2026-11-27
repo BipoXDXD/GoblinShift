@@ -9,7 +9,8 @@ Duas recusas da preparação que o `test_input_tampered.py` não alcança:
 import logging
 import uuid
 from pathlib import Path
-from typing import Any
+from types import TracebackType
+from typing import Any, Self
 
 import pytest
 from sqlalchemy import update
@@ -19,6 +20,7 @@ from goblinshift.files.states import ObjectState
 from goblinshift.files.storage import FileStorage
 from goblinshift.files.tables import stored_object
 from goblinshift.platform.db import unit_of_work
+from goblinshift.runs.worker.coordinator import COPY_CHUNK_BYTES
 from tests.runs.worker_support import (
     VALID,
     attempts,
@@ -54,6 +56,31 @@ def assert_rescheduled_without_executor(
     assert only["executor_started_at"] is None
     assert open_run_uses(factory, run_id) == 1
     assert not work_dir.exists()
+
+
+class CountingReader:
+    """Objeto do storage com `total` bytes; conta quanto a cópia chegou a ler."""
+
+    def __init__(self, total: int) -> None:
+        self._remaining = total
+        self.consumed = 0
+
+    def read(self, size: int) -> bytes:
+        served = min(size, self._remaining)
+        self._remaining -= served
+        self.consumed += served
+        return b"x" * served
+
+    def __enter__(self) -> Self:
+        return self
+
+    def __exit__(
+        self,
+        exc_type: type[BaseException] | None,
+        exc: BaseException | None,
+        traceback: TracebackType | None,
+    ) -> None:
+        return None
 
 
 def fields_of(record: logging.LogRecord) -> dict[str, Any]:
@@ -100,8 +127,27 @@ def test_divergencia_de_hash_loga_a_falha_da_area_sem_alerta_de_adulteracao(
     [record] = [r for r in caplog.records if r.getMessage() == WORK_AREA_FAILED]
     fields = fields_of(record)
     assert "alert" not in fields
-    assert "diverge do hash ou tamanho" in str(fields["error"])
+    assert fields["error_type"] == "PreparationError"
+    assert "error" not in fields
     assert str(storage.root) not in repr(fields)
+
+
+def test_entrada_maior_que_o_registro_para_de_copiar_no_primeiro_bloco_excedente(
+    factory: sessionmaker[Session],
+    storage: FileStorage,
+    work_root: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    run_id = queue_run(factory, storage, create_user(factory))
+    reader = CountingReader(len(VALID) + 8 * COPY_CHUNK_BYTES)
+    monkeypatch.setattr(storage, "open", lambda _key: reader)
+    claimed = claim(factory, storage)
+    runner = local_runner(work_root)
+
+    coordinator(factory, storage, runner).run(claimed)
+
+    assert reader.consumed <= COPY_CHUNK_BYTES
+    assert_rescheduled_without_executor(factory, run_id, runner.work_dir(claimed.attempt_id))
 
 
 @pytest.mark.parametrize("state", [ObjectState.MISSING, ObjectState.DELETED])

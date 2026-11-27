@@ -61,7 +61,7 @@ describe("/creditos", () => {
     expect(link).toHaveAttribute("hreflang", "pt");
   });
 
-  it("apresenta as cinco goblins do elenco, cada uma com o nome", async () => {
+  it("apresenta as seis goblins do elenco, cada uma com o nome", async () => {
     setup("/creditos");
     await expectHeadingFocused("Créditos");
 
@@ -69,7 +69,11 @@ describe("/creditos", () => {
     const names = within(cast)
       .getAllByRole("listitem")
       .map((item) => within(item).getByRole("figure").textContent);
-    expect(names).toEqual(["Rúbia", "Fagulha", "Ferrugem", "Jade", "Nyx"]);
+    expect(names).toEqual(["Rúbia", "Fagulha", "Ferrugem", "Jade", "Lua", "Nyx"]);
+    // O parágrafo de abertura cita as mesmas seis, na mesma ordem.
+    expect(screen.getByRole("main")).toHaveTextContent(
+      "Rúbia, Fagulha, Ferrugem, Jade, Lua e Nyx compõem o elenco da oficina.",
+    );
     // A foto repete o nome que a legenda já diz: é decorativa.
     for (const image of cast.querySelectorAll("img")) {
       expect(image).toHaveAttribute("alt", "");

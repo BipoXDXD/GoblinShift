@@ -290,6 +290,14 @@ def delete_released_reservations(session: Session, now: datetime, limit: int) ->
     return len(removed)
 
 
+def released_backlog(session: Session, now: datetime) -> int:
+    """Reservas liberadas há 90 dias ou mais que a limpeza ainda não apagou (o acúmulo dela)."""
+    count: int = session.execute(
+        select(func.count()).where(resource_reservation.c.released_at <= now - RELEASED_RETENTION)
+    ).scalar_one()
+    return count
+
+
 def has_live_reservation(
     holder: HolderKind, holder_id: ColumnElement[uuid.UUID]
 ) -> ColumnElement[bool]:

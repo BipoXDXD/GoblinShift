@@ -16,7 +16,9 @@ from uuid import UUID, uuid4
 
 import pytest
 from alembic.autogenerate import compare_metadata
+from alembic.config import Config
 from alembic.migration import MigrationContext
+from alembic.script import ScriptDirectory
 from sqlalchemy import Connection, Engine, Table, delete, func, insert, inspect, select, update
 from sqlalchemy.exc import IntegrityError
 
@@ -30,6 +32,7 @@ from goblinshift.platform.settings import Settings
 from goblinshift.processing.recipe import ItemRejectionCode
 from goblinshift.runs.lifecycle import ErrorCode
 from goblinshift.runs.tables import attempt, idempotency_record, run, run_input, run_output
+from tests.alembic_cli import REPO_ROOT
 from tests.conftest import run_migrations
 
 pytestmark = pytest.mark.integration
@@ -178,6 +181,14 @@ def test_migracao_e_reversivel_de_base_a_head(db_settings: Settings, engine: Eng
     with engine.connect() as connection:
         tabelas_em_head = set(inspect(connection).get_table_names())
     assert tabelas_em_head >= TABELAS_DO_MODELO
+
+
+def test_migracoes_tem_uma_head_so() -> None:
+    """Duas branches que criam migração a partir da mesma base deixam duas heads, e o `upgrade
+    head` do `migrate` recusa rodar; quem entra depois troca o `down_revision`."""
+    script = ScriptDirectory.from_config(Config(str(REPO_ROOT / "alembic.ini")))
+
+    assert len(script.get_heads()) == 1
 
 
 # --- 2. FK composta com proprietário ----------------------------------------------------------

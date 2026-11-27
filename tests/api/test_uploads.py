@@ -231,7 +231,7 @@ def test_campo_extra_no_item_e_recusado(
 
     body = assert_problem(response, 422, "VALIDATION_FAILED")
     assert [(e["field"], e["code"]) for e in body["errors"]] == [
-        (f"body.items.0.{extra}", "extra_forbidden")
+        ("body.items.0", "extra_forbidden")
     ]
 
 

@@ -74,8 +74,9 @@ limit_req_status 429;
 # canários de IP e de query.
 # O `crit` é raro, mas não limpo: falta de recurso (disco cheio no `proxy_temp`, EMFILE, malloc)
 # ainda grava `client:` e `request:` com o IP completo e a query. Nesse caso o log de acesso pode
-# mostrar 200 para uma resposta cortada no meio. `proxy_max_temp_file_size 0` tiraria o disco do
-# caminho, mas muda o comportamento com respostas grandes; fica registrado como opção, não aplicado.
+# mostrar 200 para uma resposta cortada no meio. O download de artefatos já não passa pelo disco
+# (`proxy_buffering off` e `proxy_max_temp_file_size 0` na location dele); nas outras rotas da API
+# as respostas são pequenas.
 error_log /var/log/nginx/error.log crit;
 
 # A API é resolvida pelo DNS do Docker em tempo de requisição (proxy_pass com variável), não só
@@ -260,7 +261,27 @@ server {
         error_page 502 504 = @upstream_unavailable;
         client_max_body_size 256m;
         proxy_request_buffering off;
+        # TRANSFER_IDLE_TIMEOUT (files/limits.py) + 5 s de folga. O 408 em problem+json vem da
+        # API, que desiste primeiro; este prazo só cobre uma API travada. Vencido, o Nginx fecha
+        # a conexão sem resposta (nem `error_page 408` roda), por isso ele não pode vencer a API.
+        client_body_timeout 35s;
         include /etc/nginx/snippets/proxy-api.conf;
         proxy_read_timeout 600s;
+    }
+
+    # Download de artefato: sem buffer e sem arquivo temporário, para a API sentir o ritmo do
+    # cliente. Com buffer, o Nginx esvaziaria a API em segundos, a vaga voltaria e o arquivo
+    # ficaria no `proxy_temp` servindo um cliente lento. A API também manda `X-Accel-Buffering: no`.
+    # `send_timeout` igual ao TRANSFER_IDLE_TIMEOUT (files/limits.py): o cliente que para de ler
+    # é cortado aqui no mesmo prazo em que a API o cortaria.
+    location ~ ^/api/v1/artifacts/[^/]+/download$ {
+        limit_req zone=api burst=40 nodelay;
+        error_page 429 = @rate_limited;
+        error_page 413 = @body_too_large;
+        error_page 502 504 = @upstream_unavailable;
+        proxy_buffering off;
+        proxy_max_temp_file_size 0;
+        send_timeout 30s;
+        include /etc/nginx/snippets/proxy-api.conf;
     }
 }
