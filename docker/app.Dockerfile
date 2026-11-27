@@ -40,8 +40,12 @@ COPY migrations ./migrations
 RUN --mount=type=bind,source=scripts/check_runtime_licenses.py,target=/tmp/check_runtime_licenses.py \
     /app/.venv/bin/python -I -B /tmp/check_runtime_licenses.py
 ARG GS_SERVICE_VERSION=dev
+# A imagem nasce em produção (issue #442, D6): sem a variável, `Settings` cairia no padrão
+# `development` e pularia segredos, https e executor-ctl. A pilha local e os e2e declaram o próprio
+# ambiente no Compose (tests/test_app_image_environment.py).
 ENV PATH="/app/.venv/bin:$PATH" \
     PYTHONUNBUFFERED=1 \
+    GS_ENVIRONMENT=production \
     GS_SERVICE_VERSION=${GS_SERVICE_VERSION}
 USER app
 EXPOSE 8000

@@ -578,7 +578,9 @@ def _connection_refused(canary: str) -> PsycopgOperationalError:
 @pytest.fixture
 def worker_offline(monkeypatch: pytest.MonkeyPatch, restored_root_logging: None) -> None:
     settings = _offline_settings()
-    monkeypatch.setattr(worker, "Settings", lambda: settings)
+    # Guarda hermética: se `worker.main` vazar para `Settings()`, aborta com SystemExit(2).
+    monkeypatch.setenv("GS_WORKER_LEASE_S", "nan")
+    monkeypatch.setattr(worker, "load_settings_or_exit", lambda _logger: settings)
     monkeypatch.setattr(worker, "build_runner", lambda _settings: MagicMock())
     monkeypatch.setattr(worker, "shutdown_on_signals", ShutdownFlag)
 
@@ -667,7 +669,9 @@ def test_manutencao_que_falha_ao_subir_sai_com_erro_e_sem_o_detalhe(
     def fail(*_args: object) -> None:
         raise _connection_refused(canary)
 
-    monkeypatch.setattr(maintenance, "Settings", lambda: settings)
+    # Guarda hermética: se `maintenance.main` vazar para `Settings()`, aborta com SystemExit(2).
+    monkeypatch.setenv("GS_WORKER_LEASE_S", "nan")
+    monkeypatch.setattr(maintenance, "load_settings_or_exit", lambda _logger: settings)
     monkeypatch.setattr(maintenance, "build_runner", lambda _settings: MagicMock())
     monkeypatch.setattr("signal.signal", lambda *_args: None)
     monkeypatch.setattr(maintenance, "FileStorage", fail)
