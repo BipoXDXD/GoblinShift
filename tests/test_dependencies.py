@@ -5,9 +5,12 @@ A imagem do executor instala o grupo `executor` a partir do `uv.lock`; o ambient
 outra. Pillow: ADR 018. pikepdf, com o qpdf que vem dentro da wheel: ADR 035.
 
 Também confere o cooldown do Dependabot: todo ecossistema espera o mínimo de dias antes de propor
-uma versão recém-publicada.
+uma versão recém-publicada; o uv da CI igual ao da imagem; e toda action fixada por SHA com a
+versão exata no comentário, que é o que o Dependabot compara.
 """
 
+import re
+import subprocess
 import tomllib
 from pathlib import Path
 from typing import Any
@@ -24,6 +27,10 @@ QPDF_VERSION = "12.4.2"
 # D1 (#366): o Dependabot espera 7 dias antes de propor uma versão nova, em todo ecossistema. Um
 # pacote sequestrado costuma ser retirado nesse prazo, antes de virar PR.
 COOLDOWN_MIN_DAYS = 7
+WORKFLOWS = ROOT / ".github" / "workflows"
+UV_IMAGE = re.compile(r"^FROM ghcr\.io/astral-sh/uv:(\d+\.\d+\.\d+)@sha256:[0-9a-f]{64}\b", re.M)
+PINNED_USES = re.compile(r"^\s*-?\s*uses:\s*[\w.-]+/[\w./-]+@[0-9a-f]{40}\b(?P<resto>.*)$")
+EXACT_VERSION_COMMENT = re.compile(r"\s+# v\d+\.\d+\.\d+$")
 
 
 def _pyproject() -> dict[str, object]:
@@ -50,6 +57,23 @@ def _dependabot_updates() -> list[dict[str, Any]]:
     updates = config["updates"]
     assert isinstance(updates, list)
     return updates
+
+
+def _dockerfile_uv_version() -> str:
+    versoes = UV_IMAGE.findall((ROOT / "docker" / "app.Dockerfile").read_text(encoding="utf-8"))
+    assert len(versoes) == 1, versoes
+    return str(versoes[0])
+
+
+def _setup_uv_steps() -> list[tuple[str, dict[str, Any]]]:
+    passos = []
+    for arquivo in sorted([*WORKFLOWS.glob("*.yml"), *WORKFLOWS.glob("*.yaml")]):
+        workflow = yaml.safe_load(arquivo.read_text(encoding="utf-8"))
+        for job in (workflow.get("jobs") or {}).values():
+            for passo in job.get("steps") or []:
+                if passo.get("uses", "").startswith("astral-sh/setup-uv@"):
+                    passos.append((arquivo.name, passo))
+    return passos
 
 
 def test_pillow_tem_pin_exato_nas_dependencias_do_projeto() -> None:
@@ -90,3 +114,52 @@ def test_todo_ecossistema_do_dependabot_espera_o_cooldown_minimo() -> None:
         dias = {k: v for k, v in cooldown.items() if k.endswith("-days")}
         assert dias.get("default-days", 0) >= COOLDOWN_MIN_DAYS, item["package-ecosystem"]
         assert all(v >= COOLDOWN_MIN_DAYS for v in dias.values()), item["package-ecosystem"]
+
+
+def test_todo_setup_uv_usa_a_versao_do_dockerfile() -> None:
+    versao = _dockerfile_uv_version()
+    passos = _setup_uv_steps()
+    assert passos
+
+    sem_a_versao = [
+        arquivo for arquivo, passo in passos if (passo.get("with") or {}).get("version") != versao
+    ]
+
+    assert sem_a_versao == []
+
+
+def test_action_fixada_por_sha_traz_a_versao_exata_no_comentario() -> None:
+    fixadas = [
+        (arquivo.name, numero, casamento["resto"])
+        for arquivo in sorted([*WORKFLOWS.glob("*.yml"), *WORKFLOWS.glob("*.yaml")])
+        for numero, linha in enumerate(arquivo.read_text(encoding="utf-8").splitlines(), start=1)
+        if (casamento := PINNED_USES.match(linha))
+    ]
+    assert fixadas
+
+    sem_versao_exata = [
+        (arquivo, numero)
+        for arquivo, numero, resto in fixadas
+        if not EXACT_VERSION_COMMENT.fullmatch(resto)
+    ]
+
+    assert sem_versao_exata == []
+
+
+def test_dependabot_cobre_os_dockerfiles() -> None:
+    docker = [item for item in _dependabot_updates() if item["package-ecosystem"] == "docker"]
+    assert [item["directory"] for item in docker] == ["/docker"]
+    assert docker[0].get("open-pull-requests-limit") == 1
+
+    # Só o que o git rastreia: cópias locais fora do repositório (.claude/) não contam.
+    rastreados = subprocess.run(
+        ["git", "ls-files", "*Dockerfile*"],  # noqa: S607 (git do PATH, como nos outros testes)
+        cwd=ROOT,
+        capture_output=True,
+        text=True,
+        check=True,
+    ).stdout.split()
+    assert rastreados
+    fora_de_docker = [nome for nome in rastreados if Path(nome).parent != Path("docker")]
+
+    assert fora_de_docker == []
