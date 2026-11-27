@@ -149,7 +149,8 @@ def authenticate(request: Request, session: DbSession, now: Now) -> Principal:
     A ordem é: identificar (sem CSRF e sem gravar o uso da sessão), contar, conferir o CSRF e só
     então registrar o uso da sessão. Toda requisição autenticada conta no limite por conta e
     classe de rota (1.7), inclusive a mutação que o CSRF recusa depois; acima dele, 429
-    `RATE_LIMITED` com `Retry-After`. A recusa do CSRF não estende a sessão. Depois, conta do
+    `RATE_LIMITED` com `Retry-After`, atribuído à conta no evento amplo. A recusa do CSRF não
+    estende a sessão nem é atribuída à conta do cookie (fica na auditoria). Depois, conta do
     login sem o aceite dos termos vigentes recebe 403 `TERMS_NOT_ACCEPTED`, salvo nas rotas de
     `_TERMS_EXEMPT_ROUTES`. Tudo fica aqui para nenhuma rota escapar.
     """
@@ -286,6 +287,10 @@ def _count_request(
             count_request(session, principal.owner_id, request_class, now)
     except RequestLimitExceededError as error:
         record_rate_limit(limited=True)
+        # A recusa pelo limite é da conta, que é dona do balde, e o evento amplo a atribui a ela
+        # (a sessão só registra a conta depois do CSRF, que vem a seguir). A recusa do CSRF não:
+        # o pedido forjado leva o cookie da vítima, e ela fica na auditoria.
+        record_principal(principal.owner_id, principal.via)
         raise ApiProblem(
             ProblemCode.RATE_LIMITED,
             f"A conta atingiu o limite de {REQUESTS_PER_MINUTE[request_class]} requisições por "

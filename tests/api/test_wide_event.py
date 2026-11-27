@@ -433,6 +433,23 @@ def test_requisicao_recusada_pelo_limite_traz_rate_limit_limited_e_o_codigo(
     assert event["error.code"] == "RATE_LIMITED"
 
 
+def test_recusa_pelo_limite_vinda_pela_sessao_e_atribuida_a_conta(traced: Traced) -> None:
+    traced.app.dependency_overrides[current_time] = lambda: FROZEN_NOW
+    user_id = new_user(traced.factory)
+    issued = open_session(traced.app, user_id)
+    headers = {**session_headers(traced.app, issued), "Idempotency-Key": str(uuid.uuid4())}
+    for _ in range(10):
+        traced.client.post(f"{RUNS}?validate_only=true", json={}, headers=headers)
+    traced.clear()
+
+    response = traced.client.post(f"{RUNS}?validate_only=true", json={}, headers=headers)
+
+    assert response.status_code == 429
+    event = traced.main_event()
+    assert event["auth.via"] == "session"
+    assert event["user.hash"] == UserHasher(traced.app.state.settings.user_hash_key()).hash(user_id)
+
+
 def test_requisicao_sem_credencial_nao_traz_rate_limit_limited(traced: Traced) -> None:
     traced.client.get("/api/v1/me")
 
