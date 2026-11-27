@@ -75,6 +75,7 @@ from goblinshift.runs.lifecycle import (
     Event,
     ExecutorStarted,
     ExecutorStopped,
+    ExecutorYielded,
     Phase,
     PhaseReached,
     Published,
@@ -129,6 +130,20 @@ PROGRESS_MAX_BYTES = 1024 * 1024
 WORKER_FILE_MODE = 0o640
 # Teto de cada tentativa (1.7, "Duração"); é duração, medida com o relógio monotônico.
 DEFAULT_ATTEMPT_TIMEOUT = timedelta(minutes=10)
+# Espelho do `stop_grace_period` do serviço `worker` em `compose.yaml`: se falta no máximo isto
+# para o teto da tentativa, ceder não evitaria o SIGKILL e só descartaria o trabalho quase pronto.
+SHUTDOWN_GRACE = timedelta(seconds=30)
+
+
+def should_yield(remaining: timedelta, grace: timedelta) -> bool:
+    """Só cede a tentativa no SIGTERM se o restante do teto passar da carência do container."""
+    return remaining > grace
+
+
+def _never() -> bool:
+    return False
+
+
 # Erro gravado na Attempt que termina por infraestrutura (catálogo de 1.6).
 TRANSIENT_ATTEMPT_ERROR = ErrorCode.EXECUTOR_UNAVAILABLE
 # Evento `alert=` do executor que não chega a iniciar: start recusado, área de trabalho não criada
@@ -158,6 +173,7 @@ class CoordinatorConfig:
     lease: timedelta
     status_poll: timedelta = timedelta(seconds=0.2)
     stop_grace: timedelta = STOP_GRACE
+    shutdown_grace: timedelta = SHUTDOWN_GRACE
     attempt_timeout: timedelta = DEFAULT_ATTEMPT_TIMEOUT
     jitter: Callable[[], timedelta] = field(default=random_retry_jitter)
 
@@ -332,6 +348,7 @@ class Coordinator:
         on_finished: RunFinishedHook | None = None,
         tracer: Tracer | None = None,
         user_hasher: UserHasher | None = None,
+        yield_requested: Callable[[], bool] = _never,
     ) -> None:
         self._factory = factory
         self._storage = storage
@@ -341,6 +358,7 @@ class Coordinator:
         self._candidates = CandidateWriter(factory, storage)
         self._tracer: Tracer = tracer if tracer is not None else NoOpTracer()
         self._user_hasher = user_hasher
+        self._yield_requested = yield_requested
 
     def run(self, claimed: ClaimedAttempt) -> Applied | None:
         """Leva a tentativa até um estado decidido; `None` se o fencing foi perdido.
@@ -586,17 +604,23 @@ class Coordinator:
                     elif not stopped.is_running:
                         return stopped
             now = time.monotonic()
-            timed_out = now - started >= self._config.attempt_timeout.total_seconds()
-            if timed_out and not stop_attempted and now >= next_stop:
+            remaining = self._config.attempt_timeout - timedelta(seconds=now - started)
+            timed_out = remaining <= timedelta(0)
+            yielding = self._yield_requested() and should_yield(
+                remaining, self._config.shutdown_grace
+            )
+            if (timed_out or yielding) and not stop_attempted and now >= next_stop:
                 stopped = self._try_stop(claimed)
                 # `stop` falho espera `renew_retry_every`: repeti-lo a cada `status_poll` abriria
                 # uma thread de renovação, e uma transação no banco, por volta com o ctl fora.
                 if stopped is None:
                     next_stop = now + self._config.renew_retry_every.total_seconds()
                 elif not stopped.is_running:
-                    # Sem executor (`absent`, contêiner que nunca iniciou), não houve estouro do
-                    # usuário: o `finish` trata a falta de código de saída como transitória.
-                    return replace(stopped, timed_out=True) if stopped.ran else stopped
+                    if timed_out:
+                        # Sem executor (`absent`, contêiner que nunca iniciou), não houve estouro do
+                        # usuário: o `finish` trata a falta de código de saída como transitória.
+                        return replace(stopped, timed_out=True) if stopped.ran else stopped
+                    return replace(stopped, yielded=True)
             time.sleep(self._config.status_poll.total_seconds())
 
     def _try_renew(self, claimed: ClaimedAttempt) -> Status | None:
@@ -715,6 +739,14 @@ class Coordinator:
 
     def finish(self, claimed: ClaimedAttempt, status: ExecutorStatus) -> Applied:
         self._record_executor(claimed, status)
+        if status.yielded:
+            return self._conclude(
+                claimed,
+                lambda loaded: ExecutorYielded(
+                    claimed.generation, loaded.now, self._config.jitter()
+                ),
+                attempt_error=None,
+            )
         if status.oom_killed or status.timed_out or status.exit_code == EXIT_NO_SPACE:
             # 1.6: memória estourada, disco cheio e os 10 min da tentativa são limite de
             # recurso; repetir daria o mesmo resultado.

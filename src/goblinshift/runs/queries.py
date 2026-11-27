@@ -342,7 +342,11 @@ def _results_expire_at() -> ColumnElement[datetime]:
 def _physical_attempts() -> ColumnElement[int]:
     return (
         select(func.count())
-        .where(attempt.c.run_id == run.c.id, attempt.c.executor_started_at.is_not(None))
+        .where(
+            attempt.c.run_id == run.c.id,
+            attempt.c.executor_started_at.is_not(None),
+            attempt.c.yielded_at.is_(None),
+        )
         .scalar_subquery()
     )
 
