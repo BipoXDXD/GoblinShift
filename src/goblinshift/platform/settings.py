@@ -7,7 +7,7 @@ from pathlib import Path
 from typing import Literal
 from urllib.parse import urlsplit
 
-from pydantic import Field, SecretStr, ValidationError, field_validator
+from pydantic import Field, SecretStr, ValidationError, ValidationInfo, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 from sqlalchemy import URL
 
@@ -142,10 +142,13 @@ class Settings(BaseSettings):
     # Chave HMAC dos cursores da listagem (1.6). Trocá-la invalida os cursores emitidos, o que
     # só custa ao cliente recomeçar a paginação.
     cursor_secret: SecretStr | None = Field(default=None, min_length=MIN_SECRET_CHARS)
+    # Em produção vem do arquivo montado (#442, 34a): no `docker inspect` só aparece o caminho.
+    cursor_secret_file: Path | None = None
 
     # Chave HMAC do `user.hash` dos eventos amplos (3.7). Trocá-la só quebra a continuidade do
     # agrupamento por conta na telemetria, que guarda 30 dias.
     user_hash_secret: SecretStr | None = Field(default=None, min_length=MIN_SECRET_CHARS)
+    user_hash_secret_file: Path | None = None
 
     # Identidade web (fatia 6, 3.6). IDs de cliente não são segredo; os segredos vêm de arquivos
     # montados pelo Compose (`*_file`), no mesmo padrão de `db_password_file`.
@@ -158,8 +161,20 @@ class Settings(BaseSettings):
     github_client_secret_file: Path | None = None
     csrf_secret_file: Path | None = None
     login_cookie_secret_file: Path | None = None
+    # Token que o Collector exige no OTLP (#442, 31j): sem ele, quem alcança a rede interna
+    # injeta spans e logs falsos nos alertas. Fora da produção, ausente = sem cabeçalho.
+    otlp_token_file: Path | None = None
     # Teto de cada chamada ao Google e ao GitHub (3.2, "Timeouts em toda integração").
     oauth_http_timeout_s: float = Field(default=5.0, gt=0)
+
+    @field_validator("cursor_secret_file", "user_hash_secret_file")
+    @classmethod
+    def _one_source_per_secret(cls, value: Path | None, info: ValidationInfo) -> Path | None:
+        """A variável e o arquivo juntos são recusados: não há como saber qual vale."""
+        variable = info.field_name.removesuffix("_file") if info.field_name else ""
+        if value is not None and info.data.get(variable) is not None:
+            raise ValueError("defina a variável ou o arquivo, não os dois")
+        return value
 
     @field_validator("public_origin")
     @classmethod
@@ -246,19 +261,34 @@ class Settings(BaseSettings):
         return key.encode()
 
     def cursor_signing_key(self) -> bytes:
-        return self._secret_or_dev_default(self.cursor_secret, "GS_CURSOR_SECRET", _DEV_CURSOR_KEY)
-
-    def user_hash_key(self) -> bytes:
-        return self._secret_or_dev_default(
-            self.user_hash_secret, "GS_USER_HASH_SECRET", _DEV_USER_HASH_KEY
+        return self._hmac_key(
+            self.cursor_secret, "GS_CURSOR_SECRET_FILE", self.cursor_secret_file, _DEV_CURSOR_KEY
         )
 
-    def _secret_or_dev_default(self, secret: SecretStr | None, name: str, dev: str) -> bytes:
+    def user_hash_key(self) -> bytes:
+        return self._hmac_key(
+            self.user_hash_secret,
+            "GS_USER_HASH_SECRET_FILE",
+            self.user_hash_secret_file,
+            _DEV_USER_HASH_KEY,
+        )
+
+    def _hmac_key(
+        self, secret: SecretStr | None, name: str, secret_file: Path | None, dev: str
+    ) -> bytes:
+        """Da variável (já com o mínimo validado) ou do arquivo; em produção, um dos dois."""
         if secret is not None:
             return secret.get_secret_value().encode()
-        if self.environment == "production":
-            raise MissingSecretError(f"{name} é obrigatório em produção")
-        return dev.encode()
+        return self._server_key(self.environment == "production", name, secret_file, dev)
+
+    def otlp_headers(self) -> dict[str, str]:
+        """Cabeçalho do exporter OTLP; em produção, o arquivo do token é obrigatório."""
+        if self.otlp_token_file is None:
+            if self.environment == "production":
+                raise MissingSecretError("GS_OTLP_TOKEN_FILE é obrigatório em produção")
+            return {}
+        token = _read_secret("GS_OTLP_TOKEN_FILE", self.otlp_token_file)
+        return {"authorization": f"Bearer {token}"}
 
     def executor_image_for_runs(self) -> str:
         """Imagem que a Run fixa; recusa a combinação que não serve ao ambiente.

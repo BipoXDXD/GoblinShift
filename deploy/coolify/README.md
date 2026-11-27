@@ -10,7 +10,7 @@ Cada serviço tem `container_name` fixo, então uma publicação substitui a API
 
 Segredos de interpolação são configurados como variáveis privadas no Coolify. O modo Raw conserva o isolamento por serviço das variáveis e dos arquivos de segredo. Não adicionar env_file global a todos os serviços.
 
-Os quatro serviços contínuos da aplicação têm healthcheck no Compose. A API verifica a prontidão do banco e do schema; o Nginx consulta `/readyz` pelo próprio proxy; worker e manutenção verificam o processo esperado, uma consulta somente leitura no banco e uma consulta de status ao executor-ctl, sem criar tentativas. Assim o status agregado no Coolify reflete as dependências operacionais. Migração e inicialização de armazenamento usam `restart: no` e ficam fora do agregado por serem tarefas de execução única.
+Os quatro serviços contínuos da aplicação têm healthcheck no Compose. A API verifica a prontidão do banco e do schema; o Nginx consulta `/readyz` pelo próprio proxy; worker e manutenção verificam só se o processo esperado é o PID 1 (`/proc/1/cmdline`). Banco ou executor-ctl fora não marcam o contêiner como doente: reiniciá-lo não conserta a dependência e só derruba trabalho em andamento. As dependências ficam no `depends_on` e nos alertas do OpenObserve, não no estado do contêiner. A API tem `stop_grace_period: 15s`, acima dos 8 s do shutdown gracioso do uvicorn mais 1,5 s do flush do tracing. Migração e inicialização de armazenamento usam `restart: no` e ficam fora do agregado por serem tarefas de execução única.
 
 Manter backups e restauração verificada antes de atualizar uma versão. Não apontar tráfego para a origem com dados antigos após o destino aceitar escritas. Uma reversão precisa primeiro preservar e transferir o estado novo.
 

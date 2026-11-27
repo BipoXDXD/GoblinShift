@@ -297,7 +297,7 @@ def test_parada_da_api_exporta_a_janela_final_antes_de_encerrar_o_tracing(
     # descartado, então a janela final só sai se o relato da parada vier antes dele.
     monkeypatch.setenv("OTEL_EXPORTER_OTLP_ENDPOINT", "http://coletor.invalid")
     monkeypatch.setenv("OTEL_BSP_SCHEDULE_DELAY", BATCH_DELAY_MS)
-    monkeypatch.setattr(telemetry, "OTLPSpanExporter", lambda: exporter)
+    monkeypatch.setattr(telemetry, "OTLPSpanExporter", lambda **_: exporter)
     app = create_app(Settings(environment="test", db_port=1, db_connect_timeout_s=1))
     try:
         with TestClient(app):

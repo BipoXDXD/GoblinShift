@@ -572,21 +572,28 @@ SDK_DEFAULT_SPAN_QUEUE = SpanQueueLimits()
 # a fila segura 30 s dele parado a 20 req/s e custa cerca de 45 MiB cheia. Fica no código porque
 # a produção recebe novas imagens, não novas variáveis do Compose.
 API_SPAN_QUEUE = SpanQueueLimits(max_queue_size=8192, max_export_batch_size=2048)
+# Igual ao `max_request_body_size` do receptor OTLP (docker/otel-collector/config.yaml): um lote
+# de 2048 spans de SQL com ~2 KB de statement mede 4,3 MiB em protobuf; 8 MiB dão folga de ~2x.
+# Acima disso o exporter descarta o lote e registra a falha aqui, em vez de um 400 do Collector.
+OTLP_MAX_REQUEST_BYTES = 8 * 1024 * 1024
 
 
 def make_span_processor(
-    exporter: SpanExporter | None, queue: SpanQueueLimits = SDK_DEFAULT_SPAN_QUEUE
+    exporter: SpanExporter | None,
+    queue: SpanQueueLimits = SDK_DEFAULT_SPAN_QUEUE,
+    otlp_headers: Callable[[], dict[str, str]] = dict,
 ) -> SpanProcessor | None:
     """Processador que exporta os spans; sem `exporter` e sem endpoint OTLP, nenhum.
 
-    `exporter` serve aos testes, que leem os spans de um `InMemorySpanExporter`.
+    `exporter` serve aos testes, que leem os spans de um `InMemorySpanExporter`. `otlp_headers`
+    só é chamado quando o exporter OTLP é criado: sem endpoint, nenhum token é exigido.
     """
     inner: SpanProcessor
     if exporter is not None:
         inner = SimpleSpanProcessor(exporter)
     elif os.environ.get("OTEL_EXPORTER_OTLP_ENDPOINT"):
         inner = BatchSpanProcessor(
-            OTLPSpanExporter(),
+            OTLPSpanExporter(headers=otlp_headers(), max_request_size=OTLP_MAX_REQUEST_BYTES),
             max_queue_size=queue.max_queue_size,
             max_export_batch_size=queue.max_export_batch_size,
         )
@@ -803,7 +810,7 @@ def make_tracer_provider(
 
     Quem cria o provider chama `shutdown()` ao sair, para exportar o lote pendente.
     """
-    processor = make_span_processor(exporter, queue)
+    processor = make_span_processor(exporter, queue, settings.otlp_headers)
     if processor is None:
         return None
     resource = Resource.create(

@@ -27,10 +27,12 @@ x-app: &app
     GS_DB_PASSWORD_FILE: /run/secrets/db_password
     OTEL_SERVICE_NAME: goblinshift-api
     OTEL_EXPORTER_OTLP_ENDPOINT: http://otel-collector:4318
+    # O Collector só aceita OTLP com este token (#442, 31j).
+    GS_OTLP_TOKEN_FILE: /run/secrets/otlp_token
     # Confia em X-Forwarded-* só do Nginx interno (rede própria) e do proxy de borda (IP
     # fixo). Outros containers da rede compartilhada `edge` não são confiáveis.
     FORWARDED_ALLOW_IPS: 172.30.0.0/24,172.31.0.2
-  secrets: [db_password]
+  secrets: [db_password, otlp_token]
   networks: [internal]
   logging: *logging
 
@@ -96,6 +98,9 @@ services:
   storage-init:
     <<: *app
     user: "0"
+    # Só cria a pasta: não fala com o banco, então não herda a senha nem o ambiente do `x-app`.
+    environment: {}
+    secrets: []
     command: ["install", "-d", "-o", "app", "-g", "app", "-m", "700", "/var/lib/goblinshift/storage/objects"]
     # CHOWN para entregar a pasta ao `app` e DAC_OVERRIDE para criá-la: no volume nomeado (local e
     # CI) a raiz vem da imagem, de modo 700 do `app`; na VPS ela é do root, e só o CHOWN bastaria.
@@ -162,6 +167,9 @@ services:
       interval: 10s
       timeout: 3s
       retries: 5
+    # Acima dos 8 s do --timeout-graceful-shutdown do uvicorn mais 1,5 s do flush do tracing
+    # (TRACING_SHUTDOWN_TIMEOUT_S): o padrão de 10 s mataria o flush com SIGKILL.
+    stop_grace_period: 15s
     restart: unless-stopped
 
   # Worker e manutenção (3.4). O Runner e o que ele exige do container ficam em cada ambiente:
@@ -242,8 +250,7 @@ services:
     <<: *least-privilege
     image: otel/opentelemetry-collector-contrib:0.162.0@sha256:39923a8e431bd1f57be82411999d389fcfe40857492e4365456d97a4c1f74be6
     command: ["--config=/etc/otelcol/config.yaml"]
-    environment:
-      OPENOBSERVE_BASIC_AUTH: ${OPENOBSERVE_BASIC_AUTH:?defina em .env (scripts/dev-secrets.sh)}
+    secrets: [openobserve_basic_auth, otlp_token]
     volumes:
       - ./docker/otel-collector/config.yaml:/etc/otelcol/config.yaml:ro
     depends_on:
@@ -267,7 +274,11 @@ services:
       ZO_DATA_DIR: /data
       ZO_COMPACT_DATA_RETENTION_DAYS: "30"
       ZO_ROOT_USER_EMAIL: ${OPENOBSERVE_ROOT_EMAIL:?defina em .env (scripts/dev-secrets.sh)}
-      ZO_ROOT_USER_PASSWORD: ${OPENOBSERVE_ROOT_PASSWORD:?defina em .env (scripts/dev-secrets.sh)}
+    # A senha do root vem de um dotenv montado (`-c`; a imagem não lê `*_FILE`), fora do
+    # `docker inspect` (#442, 34a). Só vale enquanto o root não existe no volume: depois, o
+    # OpenObserve não a lê mais.
+    command: ["/openobserve", "-c", "/run/secrets/openobserve_env"]
+    secrets: [openobserve_env]
     volumes:
       - ${GS_TELEMETRY_DATA:-telemetry}:/data
     # Só localhost: acesso por túnel SSH (ssh -L 5080:127.0.0.1:5080 …).
@@ -280,6 +291,12 @@ services:
 secrets:
   db_password:
     file: ${GS_SECRETS_DIR:-./.secrets}/db_password
+  openobserve_basic_auth:
+    file: ${GS_SECRETS_DIR:-./.secrets}/openobserve_basic_auth
+  openobserve_env:
+    file: ${GS_SECRETS_DIR:-./.secrets}/openobserve_env
+  otlp_token:
+    file: ${GS_SECRETS_DIR:-./.secrets}/otlp_token
 
 volumes:
   pgdata:

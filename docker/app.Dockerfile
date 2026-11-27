@@ -56,9 +56,9 @@ EXPOSE 8000
 # do ASGI: 72 = 28 + a rajada de 40 do /api/ no Nginx (uma conexão por pedido, sem keepalive) + 3
 # sondas isentas (/livez, /readyz) + 1, porque ele compara com `>=` contando a conexão atual. Assim
 # a rajada de um cliente com a API no teto ainda recebe o problem+json, que custa pouco. Na parada, 8 s para terminar os
-# pedidos em curso, mais 2 s para o lifespan fechar o pool: cabe em qualquer carência de 10 s ou
-# mais, que é o padrão do Docker e do Compose (o serviço `api` não declara `stop_grace_period`).
-# tests/test_api_server_limits.py confere as duas contas.
+# pedidos em curso, mais 2 s para o lifespan fechar o pool e 1,5 s para o flush do tracing: o
+# serviço `api` declara `stop_grace_period: 15s` (compose.yaml e app.json).
+# tests/test_api_server_limits.py e tests/test_coolify_resource_limits.py conferem as contas.
 CMD ["uvicorn", "goblinshift.entrypoints.api.app:create_app", "--factory", \
      "--host", "0.0.0.0", "--port", "8000", "--proxy-headers", "--no-server-header", \
      "--no-access-log", "--limit-concurrency", "72", "--timeout-graceful-shutdown", "8"]

@@ -25,9 +25,10 @@
         "GS_ENVIRONMENT": "production",
         "GS_STORAGE_ROOT": "/var/lib/goblinshift/storage/objects",
         "OTEL_EXPORTER_OTLP_ENDPOINT": "http://otel-collector:4318",
+        "GS_OTLP_TOKEN_FILE": "/run/secrets/otlp_token",
         "OTEL_SERVICE_NAME": "goblinshift-api",
         "GS_CSRF_SECRET_FILE": "/run/secrets/csrf_secret",
-        "GS_CURSOR_SECRET": "${GS_CURSOR_SECRET:?defina a variável privada no recurso da aplicação no Coolify}",
+        "GS_CURSOR_SECRET_FILE": "/run/secrets/cursor_secret",
         "GS_EXECUTOR_IMAGE": "${GS_EXECUTOR_IMAGE:?exportada pelo deploy/release.sh (imagem do executor por digest)}",
         "GS_GITHUB_CLIENT_ID": "${GS_GITHUB_CLIENT_ID:?defina em secrets/app.env (OAuth App do GitHub)}",
         "GS_GITHUB_CLIENT_SECRET_FILE": "/run/secrets/github_client_secret",
@@ -37,7 +38,7 @@
         "GS_PUBLIC_ORIGIN": "${GS_PUBLIC_ORIGIN:?defina em secrets/app.env (https://goblinshift.dev)}",
         "GS_RUNNER": "executor_ctl",
         "GS_SIGNUP_MODE": "${GS_SIGNUP_MODE:-closed}",
-        "GS_USER_HASH_SECRET": "${GS_USER_HASH_SECRET:?defina a variável privada no recurso da aplicação no Coolify}"
+        "GS_USER_HASH_SECRET_FILE": "/run/secrets/user_hash_secret"
       },
       "healthcheck": {
         "interval": "10s",
@@ -50,6 +51,7 @@
         ],
         "timeout": "3s"
       },
+      "stop_grace_period": "15s",
       "image": "${GS_APP_IMAGE:-ghcr.io/bipoxdxd/goblinshift:sha-03f15c824029@sha256:54e9c5f01c78fa7e005994a4a3266b0180481c6ed018da289e7648abfdddd2cc}",
       "logging": {
         "driver": "local",
@@ -68,6 +70,14 @@
           "target": "/run/secrets/db_password"
         },
         {
+          "source": "cursor_secret",
+          "target": "/run/secrets/cursor_secret"
+        },
+        {
+          "source": "user_hash_secret",
+          "target": "/run/secrets/user_hash_secret"
+        },
+        {
           "source": "google_client_secret",
           "target": "/run/secrets/google_client_secret"
         },
@@ -82,6 +92,10 @@
         {
           "source": "login_cookie_secret",
           "target": "/run/secrets/login_cookie_secret"
+        },
+        {
+          "source": "otlp_token",
+          "target": "/run/secrets/otlp_token"
         }
       ],
       "volumes": [
@@ -128,7 +142,7 @@
           "CMD",
           "python",
           "-c",
-          "import sys\nfrom pathlib import Path\nfrom datetime import timedelta\nfrom uuid import UUID\nfrom goblinshift.platform.settings import Settings\nfrom goblinshift.platform.db import make_engine\nfrom goblinshift.runs.worker.executor_ctl_runner import ExecutorCtlRunner\nif not any(Path(arg).name == sys.argv[1] for arg in Path('/proc/1/cmdline').read_text().split('\\0')):\n    raise SystemExit('expected service process is absent')\nsettings = Settings(db_connect_timeout_s=2)\nengine = make_engine(settings)\ntry:\n    with engine.connect() as connection:\n        connection.exec_driver_sql('SELECT 1').scalar_one()\nfinally:\n    engine.dispose()\nExecutorCtlRunner(settings.executor_ctl_socket, settings.work_root, work_group=settings.executor_group_id, call_timeout=timedelta(seconds=2)).status(UUID('00000000-0000-4000-8000-000000000000'))",
+          "import sys\nfrom pathlib import Path\nif not any(Path(arg).name == sys.argv[1] for arg in Path('/proc/1/cmdline').read_text().split('\\0')):\n    raise SystemExit('expected service process is absent')",
           "gs-maintenance"
         ]
       },
@@ -150,10 +164,11 @@
         "GS_MISSING_SWEEP_MAX_ABSENT_RATIO": null,
         "GS_STORAGE_ROOT": "/var/lib/goblinshift/storage/objects",
         "OTEL_EXPORTER_OTLP_ENDPOINT": "http://otel-collector:4318",
+        "GS_OTLP_TOKEN_FILE": "/run/secrets/otlp_token",
         "OTEL_SERVICE_NAME": "goblinshift-maintenance",
         "GS_EXECUTOR_IMAGE": "${GS_EXECUTOR_IMAGE:?exportada pelo deploy/release.sh (imagem do executor por digest)}",
         "GS_RUNNER": "executor_ctl",
-        "GS_USER_HASH_SECRET": "${GS_USER_HASH_SECRET:?defina a variável privada no recurso da aplicação no Coolify}",
+        "GS_USER_HASH_SECRET_FILE": "/run/secrets/user_hash_secret",
         "GS_WORK_ROOT": "/var/lib/goblinshift/exec-work"
       },
       "group_add": [
@@ -176,6 +191,14 @@
         {
           "source": "db_password",
           "target": "/run/secrets/db_password"
+        },
+        {
+          "source": "user_hash_secret",
+          "target": "/run/secrets/user_hash_secret"
+        },
+        {
+          "source": "otlp_token",
+          "target": "/run/secrets/otlp_token"
         }
       ],
       "stop_grace_period": "30s",
@@ -239,6 +262,7 @@
         "GS_DB_PASSWORD_FILE": "/run/secrets/db_password",
         "GS_ENVIRONMENT": "production",
         "OTEL_EXPORTER_OTLP_ENDPOINT": "http://otel-collector:4318",
+        "GS_OTLP_TOKEN_FILE": "/run/secrets/otlp_token",
         "OTEL_SERVICE_NAME": "goblinshift-api"
       },
       "image": "${GS_APP_IMAGE:-ghcr.io/bipoxdxd/goblinshift:sha-03f15c824029@sha256:54e9c5f01c78fa7e005994a4a3266b0180481c6ed018da289e7648abfdddd2cc}",
@@ -257,6 +281,10 @@
         {
           "source": "db_password",
           "target": "/run/secrets/db_password"
+        },
+        {
+          "source": "otlp_token",
+          "target": "/run/secrets/otlp_token"
         }
       ],
       "pull_policy": "never",
@@ -373,14 +401,7 @@
         "700",
         "/var/lib/goblinshift/storage/objects"
       ],
-      "environment": {
-        "FORWARDED_ALLOW_IPS": "172.30.0.0/24,172.31.0.2",
-        "GS_DB_HOST": "postgres",
-        "GS_DB_PASSWORD_FILE": "/run/secrets/db_password",
-        "GS_ENVIRONMENT": "production",
-        "OTEL_EXPORTER_OTLP_ENDPOINT": "http://otel-collector:4318",
-        "OTEL_SERVICE_NAME": "goblinshift-api"
-      },
+      "environment": {},
       "image": "${GS_APP_IMAGE:-ghcr.io/bipoxdxd/goblinshift:sha-03f15c824029@sha256:54e9c5f01c78fa7e005994a4a3266b0180481c6ed018da289e7648abfdddd2cc}",
       "logging": {
         "driver": "local",
@@ -393,12 +414,6 @@
         "internal": null
       },
       "restart": "no",
-      "secrets": [
-        {
-          "source": "db_password",
-          "target": "/run/secrets/db_password"
-        }
-      ],
       "user": "0",
       "volumes": [
         {
@@ -444,7 +459,7 @@
           "CMD",
           "python",
           "-c",
-          "import sys\nfrom pathlib import Path\nfrom datetime import timedelta\nfrom uuid import UUID\nfrom goblinshift.platform.settings import Settings\nfrom goblinshift.platform.db import make_engine\nfrom goblinshift.runs.worker.executor_ctl_runner import ExecutorCtlRunner\nif not any(Path(arg).name == sys.argv[1] for arg in Path('/proc/1/cmdline').read_text().split('\\0')):\n    raise SystemExit('expected service process is absent')\nsettings = Settings(db_connect_timeout_s=2)\nengine = make_engine(settings)\ntry:\n    with engine.connect() as connection:\n        connection.exec_driver_sql('SELECT 1').scalar_one()\nfinally:\n    engine.dispose()\nExecutorCtlRunner(settings.executor_ctl_socket, settings.work_root, work_group=settings.executor_group_id, call_timeout=timedelta(seconds=2)).status(UUID('00000000-0000-4000-8000-000000000000'))",
+          "import sys\nfrom pathlib import Path\nif not any(Path(arg).name == sys.argv[1] for arg in Path('/proc/1/cmdline').read_text().split('\\0')):\n    raise SystemExit('expected service process is absent')",
           "gs-worker"
         ]
       },
@@ -465,10 +480,11 @@
         "GS_ENVIRONMENT": "production",
         "GS_STORAGE_ROOT": "/var/lib/goblinshift/storage/objects",
         "OTEL_EXPORTER_OTLP_ENDPOINT": "http://otel-collector:4318",
+        "GS_OTLP_TOKEN_FILE": "/run/secrets/otlp_token",
         "OTEL_SERVICE_NAME": "goblinshift-worker",
         "GS_EXECUTOR_IMAGE": "${GS_EXECUTOR_IMAGE:?exportada pelo deploy/release.sh (imagem do executor por digest)}",
         "GS_RUNNER": "executor_ctl",
-        "GS_USER_HASH_SECRET": "${GS_USER_HASH_SECRET:?defina a variável privada no recurso da aplicação no Coolify}",
+        "GS_USER_HASH_SECRET_FILE": "/run/secrets/user_hash_secret",
         "GS_WORK_ROOT": "/var/lib/goblinshift/exec-work"
       },
       "group_add": [
@@ -491,6 +507,14 @@
         {
           "source": "db_password",
           "target": "/run/secrets/db_password"
+        },
+        {
+          "source": "user_hash_secret",
+          "target": "/run/secrets/user_hash_secret"
+        },
+        {
+          "source": "otlp_token",
+          "target": "/run/secrets/otlp_token"
         }
       ],
       "stop_grace_period": "30s",
@@ -551,6 +575,10 @@
       "file": "/srv/goblinshift/secrets/csrf_secret",
       "name": "goblinshift_csrf_secret"
     },
+    "cursor_secret": {
+      "file": "/srv/goblinshift/secrets/cursor_secret",
+      "name": "goblinshift_cursor_secret"
+    },
     "db_password": {
       "file": "/srv/goblinshift/secrets/db_password",
       "name": "goblinshift_db_password"
@@ -566,6 +594,14 @@
     "login_cookie_secret": {
       "file": "/srv/goblinshift/secrets/login_cookie_secret",
       "name": "goblinshift_login_cookie_secret"
+    },
+    "otlp_token": {
+      "file": "/srv/goblinshift/secrets/otlp_token",
+      "name": "goblinshift_otlp_token"
+    },
+    "user_hash_secret": {
+      "file": "/srv/goblinshift/secrets/user_hash_secret",
+      "name": "goblinshift_user_hash_secret"
     }
   }
 }
