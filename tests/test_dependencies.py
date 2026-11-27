@@ -5,9 +5,11 @@ A imagem do executor instala o grupo `executor` a partir do `uv.lock`; o ambient
 outra. Pillow: ADR 018. pikepdf, com o qpdf que vem dentro da wheel: ADR 035.
 
 Também confere o cooldown do Dependabot: todo ecossistema espera o mínimo de dias antes de propor
-uma versão recém-publicada.
+uma versão recém-publicada; o uv da CI igual ao da imagem; e toda action fixada por SHA com a
+versão exata no comentário, que é o que o Dependabot compara.
 """
 
+import re
 import tomllib
 from pathlib import Path
 from typing import Any
@@ -24,6 +26,10 @@ QPDF_VERSION = "12.4.2"
 # D1 (#366): o Dependabot espera 7 dias antes de propor uma versão nova, em todo ecossistema. Um
 # pacote sequestrado costuma ser retirado nesse prazo, antes de virar PR.
 COOLDOWN_MIN_DAYS = 7
+WORKFLOWS = ROOT / ".github" / "workflows"
+UV_IMAGE = re.compile(r"^FROM ghcr\.io/astral-sh/uv:(\d+\.\d+\.\d+)@sha256:[0-9a-f]{64}\b", re.M)
+PINNED_USES = re.compile(r"^\s*-?\s*uses:\s*[\w.-]+/[\w./-]+@[0-9a-f]{40}\b(?P<resto>.*)$")
+EXACT_VERSION_COMMENT = re.compile(r"\s+# v\d+\.\d+\.\d+$")
 
 
 def _pyproject() -> dict[str, object]:
@@ -50,6 +56,23 @@ def _dependabot_updates() -> list[dict[str, Any]]:
     updates = config["updates"]
     assert isinstance(updates, list)
     return updates
+
+
+def _dockerfile_uv_version() -> str:
+    versoes = UV_IMAGE.findall((ROOT / "docker" / "app.Dockerfile").read_text(encoding="utf-8"))
+    assert len(versoes) == 1, versoes
+    return str(versoes[0])
+
+
+def _setup_uv_steps() -> list[tuple[str, dict[str, Any]]]:
+    passos = []
+    for arquivo in sorted(WORKFLOWS.glob("*.yml")):
+        workflow = yaml.safe_load(arquivo.read_text(encoding="utf-8"))
+        for job in (workflow.get("jobs") or {}).values():
+            for passo in job.get("steps") or []:
+                if passo.get("uses", "").startswith("astral-sh/setup-uv@"):
+                    passos.append((arquivo.name, passo))
+    return passos
 
 
 def test_pillow_tem_pin_exato_nas_dependencias_do_projeto() -> None:
@@ -90,3 +113,33 @@ def test_todo_ecossistema_do_dependabot_espera_o_cooldown_minimo() -> None:
         dias = {k: v for k, v in cooldown.items() if k.endswith("-days")}
         assert dias.get("default-days", 0) >= COOLDOWN_MIN_DAYS, item["package-ecosystem"]
         assert all(v >= COOLDOWN_MIN_DAYS for v in dias.values()), item["package-ecosystem"]
+
+
+def test_todo_setup_uv_usa_a_versao_do_dockerfile() -> None:
+    versao = _dockerfile_uv_version()
+    passos = _setup_uv_steps()
+    assert passos
+
+    sem_a_versao = [
+        arquivo for arquivo, passo in passos if (passo.get("with") or {}).get("version") != versao
+    ]
+
+    assert sem_a_versao == []
+
+
+def test_action_fixada_por_sha_traz_a_versao_exata_no_comentario() -> None:
+    fixadas = [
+        (arquivo.name, numero, casamento["resto"])
+        for arquivo in sorted(WORKFLOWS.glob("*.yml"))
+        for numero, linha in enumerate(arquivo.read_text(encoding="utf-8").splitlines(), start=1)
+        if (casamento := PINNED_USES.match(linha))
+    ]
+    assert fixadas
+
+    sem_versao_exata = [
+        (arquivo, numero)
+        for arquivo, numero, resto in fixadas
+        if not EXACT_VERSION_COMMENT.fullmatch(resto)
+    ]
+
+    assert sem_versao_exata == []
