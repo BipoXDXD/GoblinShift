@@ -194,7 +194,13 @@ def test_imagem_do_proprio_run_vem_do_registro_local_e_fica_fora_da_conferencia(
 
 def test_constante_de_imagem_em_testes_e_scripts_tem_digest() -> None:
     constantes = _named_image_constants()
-    assert {nome for _, nome, _ in constantes} >= {"POSTGRES_IMAGE", "K6_IMAGE", "REGISTRY_IMAGE"}
+    encontradas = {(arquivo, nome) for arquivo, nome, _ in constantes}
+    assert encontradas >= {
+        ("tests/conftest.py", "POSTGRES_IMAGE"),
+        ("tests/executor_ctl/test_integration.py", "REGISTRY_IMAGE"),
+        ("deploy/load/run-local.sh", "K6_IMAGE"),
+        ("scripts/ci-oci.sh", "REGISTRY_IMAGE"),
+    }
 
     sem_digest = [
         (arquivo, nome, imagem)
@@ -215,3 +221,12 @@ def test_constante_de_imagem_igual_a_do_compose_quando_a_tag_e_a_mesma() -> None
     ]
 
     assert divergentes == []
+
+
+def test_constantes_com_a_mesma_tag_usam_o_mesmo_digest() -> None:
+    por_tag: dict[str, set[str]] = {}
+    for _, _, imagem in _named_image_constants():
+        if imagem not in NOT_PULLED:
+            por_tag.setdefault(imagem.split("@")[0], set()).add(imagem)
+
+    assert {tag: imagens for tag, imagens in por_tag.items() if len(imagens) > 1} == {}

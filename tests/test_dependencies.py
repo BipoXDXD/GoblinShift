@@ -67,7 +67,7 @@ def _dockerfile_uv_version() -> str:
 
 def _setup_uv_steps() -> list[tuple[str, dict[str, Any]]]:
     passos = []
-    for arquivo in sorted(WORKFLOWS.glob("*.yml")):
+    for arquivo in sorted([*WORKFLOWS.glob("*.yml"), *WORKFLOWS.glob("*.yaml")]):
         workflow = yaml.safe_load(arquivo.read_text(encoding="utf-8"))
         for job in (workflow.get("jobs") or {}).values():
             for passo in job.get("steps") or []:
@@ -131,7 +131,7 @@ def test_todo_setup_uv_usa_a_versao_do_dockerfile() -> None:
 def test_action_fixada_por_sha_traz_a_versao_exata_no_comentario() -> None:
     fixadas = [
         (arquivo.name, numero, casamento["resto"])
-        for arquivo in sorted(WORKFLOWS.glob("*.yml"))
+        for arquivo in sorted([*WORKFLOWS.glob("*.yml"), *WORKFLOWS.glob("*.yaml")])
         for numero, linha in enumerate(arquivo.read_text(encoding="utf-8").splitlines(), start=1)
         if (casamento := PINNED_USES.match(linha))
     ]

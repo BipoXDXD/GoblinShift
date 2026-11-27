@@ -7,6 +7,7 @@ que o build não precisa de script nenhum. Um pacote liberado com `true` no `all
 """
 
 import json
+import re
 from collections.abc import Iterator
 from pathlib import Path
 from typing import Any
@@ -18,14 +19,24 @@ WORKFLOWS = ROOT / ".github" / "workflows"
 
 
 def _jobs() -> Iterator[tuple[str, str, list[dict[str, Any]]]]:
-    for arquivo in sorted(WORKFLOWS.glob("*.yml")):
+    for arquivo in sorted([*WORKFLOWS.glob("*.yml"), *WORKFLOWS.glob("*.yaml")]):
         workflow = yaml.safe_load(arquivo.read_text(encoding="utf-8"))
         for nome, job in (workflow.get("jobs") or {}).items():
             yield arquivo.name, nome, job.get("steps") or []
 
 
+# `npm install`/`npm i` também rodam os scripts de instalação; contam como `npm ci`.
+NPM_INSTALA = (["npm", "ci"], ["npm", "install"], ["npm", "i"])
+
+
 def _comandos(run: str) -> list[list[str]]:
-    return [linha.split() for linha in run.splitlines() if linha.strip()]
+    """Cada comando do `run`, separando linhas e encadeamentos (`&&`, `||`, `;`)."""
+    return [
+        comando.split()
+        for linha in run.splitlines()
+        for comando in re.split(r"&&|\|\||;", linha)
+        if comando.strip()
+    ]
 
 
 def _npm_ci_runs() -> list[tuple[str, str, list[str]]]:
@@ -34,7 +45,7 @@ def _npm_ci_runs() -> list[tuple[str, str, list[str]]]:
         for arquivo, job, passos in _jobs()
         for passo in passos
         for comando in _comandos(passo.get("run", ""))
-        if comando[:2] == ["npm", "ci"]
+        if comando[:2] in NPM_INSTALA
     ]
 
 
