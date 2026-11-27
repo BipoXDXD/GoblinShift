@@ -193,17 +193,27 @@ server {
         error_page 502 504 = @upstream_unavailable;
         include /etc/nginx/snippets/proxy-api.conf;
     }
+    # Documentação e contrato públicos (docs/adr/060-documentacao-publica-da-api.md), com o limite
+    # da API: sem ele, um laço com leitura lenta ocupa as conexões do uvicorn (#442, 31b).
     location = /docs {
+        limit_req zone=api burst=40 nodelay;
+        error_page 429 = @rate_limited;
         include /etc/nginx/snippets/proxy-api.conf;
     }
     location /docs/assets/ {
+        limit_req zone=api burst=40 nodelay;
+        error_page 429 = @rate_limited;
         include /etc/nginx/snippets/proxy-api.conf;
     }
     location = /openapi.json {
+        limit_req zone=api burst=40 nodelay;
+        error_page 429 = @rate_limited;
         include /etc/nginx/snippets/proxy-api.conf;
     }
     # Sondados de fora pelo monitor de uptime (3.7) e pelo scripts/check-zero-downtime.sh.
     location = /livez {
+        limit_req zone=api burst=40 nodelay;
+        error_page 429 = @rate_limited;
         include /etc/nginx/snippets/proxy-api.conf;
     }
     location = /readyz {
@@ -221,6 +231,8 @@ server {
     # Os corpos dos erros do Nginx são conferidos contra o OpenAPI e o catálogo da API em
     # tests/test_nginx_problem_bodies.py.
     location @auth_rate_limited {
+        # Sem a tabela de tipos: a extensão do pedido (`/openapi.json`) não troca o tipo do corpo.
+        types { }
         default_type application/problem+json;
         add_header Retry-After 6 always;
         include /etc/nginx/snippets/problem-headers.conf;
@@ -229,6 +241,8 @@ server {
     # 429 de /api/ e /readyz. Retry-After de 1 s, o menor que o cabeçalho expressa: a cota repõe um
     # pedido a cada 50 ms em /api/ e a cada 200 ms em /readyz.
     location @rate_limited {
+        # Sem a tabela de tipos: a extensão do pedido (`/openapi.json`) não troca o tipo do corpo.
+        types { }
         default_type application/problem+json;
         add_header Retry-After 1 always;
         include /etc/nginx/snippets/problem-headers.conf;
@@ -236,6 +250,8 @@ server {
     }
     # Corpo acima do `client_max_body_size` da rota: o Nginx recusa antes de a API ver o pedido.
     location @body_too_large {
+        # Sem a tabela de tipos: a extensão do pedido (`/openapi.json`) não troca o tipo do corpo.
+        types { }
         default_type application/problem+json;
         include /etc/nginx/snippets/problem-headers.conf;
         return 413 '{"type":"https://goblinshift.dev/problems/body-too-large","title":"Corpo grande demais","status":413,"detail":"O corpo da requisição passa do tamanho aceito por esta rota.","instance":"$problem_instance","code":"BODY_TOO_LARGE","request_id":"$problem_request_id"}';
@@ -245,6 +261,8 @@ server {
     # acesso guarda o 502/504 em `upstream_status` (access-log.conf). Retry-After de 5 s, o mesmo
     # da API com o banco fora e o `valid` do resolver: depois dele o Nginx resolve a API de novo.
     location @upstream_unavailable {
+        # Sem a tabela de tipos: a extensão do pedido (`/openapi.json`) não troca o tipo do corpo.
+        types { }
         default_type application/problem+json;
         add_header Retry-After 5 always;
         include /etc/nginx/snippets/problem-headers.conf;
