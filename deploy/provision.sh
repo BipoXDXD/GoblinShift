@@ -85,19 +85,7 @@ bash "$(dirname "${BASH_SOURCE[0]}")/filesystems.sh"
 
 note "Segredos do GoblinShift (fora do repositório)"
 install -d -m 700 -o "$APP_USER" -g "$APP_USER" "$ROOT/secrets"
-[[ -f "$ROOT/secrets/db_password" ]] || openssl rand -hex 32 > "$ROOT/secrets/db_password"
-# Lido dentro dos containers por outros usuários; protegido pelo diretório 700.
-chmod 644 "$ROOT/secrets/db_password"
-if [[ ! -f "$ROOT/secrets/app.env" ]]; then
-  email="admin@goblinshift.local"
-  password="$(openssl rand -base64 30 | tr -dc 'A-Za-z0-9' | head -c 28)Aa1_"
-  {
-    echo "OPENOBSERVE_ROOT_EMAIL=${email}"
-    echo "OPENOBSERVE_ROOT_PASSWORD=${password}"
-    echo "OPENOBSERVE_BASIC_AUTH=$(printf '%s:%s' "$email" "$password" | base64 -w0)"
-  } > "$ROOT/secrets/app.env"
-  chmod 600 "$ROOT/secrets/app.env"
-fi
+bash "$(dirname "${BASH_SOURCE[0]}")/provision-secrets.sh" "$ROOT/secrets"
 chown "$APP_USER:$APP_USER" "$ROOT/secrets/db_password" "$ROOT/secrets/app.env"
 
 note "Código"
