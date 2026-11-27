@@ -93,6 +93,10 @@
         {
           "source": "openobserve_basic_auth",
           "target": "/run/secrets/openobserve_basic_auth"
+        },
+        {
+          "source": "otlp_token",
+          "target": "/run/secrets/otlp_token"
         }
       ],
       "depends_on": {
@@ -254,6 +258,10 @@
     "openobserve_env": {
       "file": "/srv/goblinshift/secrets/openobserve_env",
       "name": "goblinshift_openobserve_env"
+    },
+    "otlp_token": {
+      "file": "/srv/goblinshift/secrets/otlp_token",
+      "name": "goblinshift_otlp_token"
     }
   }
 }

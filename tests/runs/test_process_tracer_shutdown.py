@@ -58,7 +58,7 @@ class Exporters:
         self.created: list[SpanExporter] = []
         self._make = make
 
-    def __call__(self) -> SpanExporter:
+    def __call__(self, **_: object) -> SpanExporter:
         exporter = self._make()
         self.created.append(exporter)
         return exporter

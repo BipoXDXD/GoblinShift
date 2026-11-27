@@ -10,7 +10,7 @@ import time
 from collections.abc import Iterator, Sequence
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, NoReturn
+from typing import Any, ClassVar, NoReturn
 from unittest.mock import Mock
 from uuid import UUID, uuid4
 
@@ -743,7 +743,7 @@ def production(monkeypatch: pytest.MonkeyPatch) -> Iterator[ProductionTracing]:
         return provider
 
     monkeypatch.setenv("OTEL_EXPORTER_OTLP_ENDPOINT", "http://coletor.invalid")
-    monkeypatch.setattr(telemetry, "OTLPSpanExporter", lambda: exporter)
+    monkeypatch.setattr(telemetry, "OTLPSpanExporter", lambda **_: exporter)
     monkeypatch.setattr(telemetry, "make_tracer_provider", keep_provider)
     engine = create_engine("sqlite://")
     configure_tracing(FastAPI(), engine, TEST_SETTINGS)
@@ -874,3 +874,88 @@ def test_manutencao_nao_escolhe_a_fila_da_api(monkeypatch: pytest.MonkeyPatch) -
         maintenance.serve(TEST_SETTINGS, Mock(), shutdown)
 
     assert calls == [((TEST_SETTINGS, "goblinshift-maintenance"), {})]
+
+
+# Token do Collector (#442, 31j; D3): o receptor OTLP só aceita quem tem o segredo.
+COLLECTOR_CONFIG = ROOT / "docker" / "otel-collector" / "config.yaml"
+OTLP_TOKEN = "t" * 64
+ENDPOINT_VAR = "OTEL_EXPORTER_OTLP_ENDPOINT"
+
+
+class _RecordingExporter(InMemorySpanExporter):
+    calls: ClassVar[list[dict[str, Any]]] = []
+
+    def __init__(self, **kwargs: Any) -> None:
+        super().__init__()
+        type(self).calls.append(kwargs)
+
+
+@pytest.fixture
+def recorded_exporter(monkeypatch: pytest.MonkeyPatch) -> list[dict[str, Any]]:
+    _RecordingExporter.calls = []
+    monkeypatch.setattr(telemetry, "OTLPSpanExporter", _RecordingExporter)
+    monkeypatch.setenv(ENDPOINT_VAR, "http://otel-collector:4318")
+    return _RecordingExporter.calls
+
+
+def test_exporters_mandam_o_token_do_arquivo(
+    tmp_path: Path, recorded_exporter: list[dict[str, Any]]
+) -> None:
+    token_file = tmp_path / "otlp_token"
+    token_file.write_text(f"{OTLP_TOKEN}\n")
+    settings = Settings(otlp_token_file=token_file)
+
+    provider = make_tracer_provider(settings, "goblinshift-api")
+
+    assert provider is not None
+    assert recorded_exporter[0]["headers"] == {"authorization": f"Bearer {OTLP_TOKEN}"}
+    assert OTLP_TOKEN not in repr(settings)
+    provider.shutdown()
+
+
+def test_lote_maior_que_o_limite_do_collector_falha_no_cliente(
+    tmp_path: Path, recorded_exporter: list[dict[str, Any]]
+) -> None:
+    """Sem isso, o exporter manda até 64 MiB e o Collector recusa com um 400 sem contexto."""
+    receiver = yaml.safe_load(COLLECTOR_CONFIG.read_text())["receivers"]["otlp"]["protocols"]
+    token_file = tmp_path / "otlp_token"
+    token_file.write_text(OTLP_TOKEN)
+
+    provider = make_tracer_provider(Settings(otlp_token_file=token_file), "goblinshift-api")
+
+    assert provider is not None
+    assert recorded_exporter[0]["max_request_size"] == receiver["http"]["max_request_body_size"]
+    provider.shutdown()
+
+
+def test_producao_sem_token_nao_sobe_com_endpoint(
+    recorded_exporter: list[dict[str, Any]],
+) -> None:
+    settings = Settings(environment="production", user_hash_secret=SecretStr("u" * 32))
+
+    with pytest.raises(MissingSecretError, match="GS_OTLP_TOKEN_FILE"):
+        make_tracer_provider(settings, "goblinshift-worker")
+    assert recorded_exporter == []
+
+
+def test_desenvolvimento_sem_token_exporta_sem_cabecalho(
+    recorded_exporter: list[dict[str, Any]],
+) -> None:
+    provider = make_tracer_provider(Settings(), "goblinshift-api")
+
+    assert provider is not None
+    assert not recorded_exporter[0].get("headers")
+    provider.shutdown()
+
+
+def test_collector_exige_o_token_e_limita_o_corpo() -> None:
+    config = yaml.safe_load(COLLECTOR_CONFIG.read_text())
+    http = config["receivers"]["otlp"]["protocols"]["http"]
+
+    assert http["auth"] == {"authenticator": "bearertokenauth"}
+    assert config["extensions"]["bearertokenauth"]["filename"] == "/run/secrets/otlp_token"
+    assert "bearertokenauth" in config["service"]["extensions"]
+    # 2048 spans por lote (API_SPAN_QUEUE) com SQL de ~2 KB medem 4,3 MiB em protobuf.
+    batch = telemetry.API_SPAN_QUEUE.max_export_batch_size
+    assert batch is not None
+    assert http["max_request_body_size"] >= batch * 2 * 1024 * 2

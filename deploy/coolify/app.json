@@ -25,6 +25,7 @@
         "GS_ENVIRONMENT": "production",
         "GS_STORAGE_ROOT": "/var/lib/goblinshift/storage/objects",
         "OTEL_EXPORTER_OTLP_ENDPOINT": "http://otel-collector:4318",
+        "GS_OTLP_TOKEN_FILE": "/run/secrets/otlp_token",
         "OTEL_SERVICE_NAME": "goblinshift-api",
         "GS_CSRF_SECRET_FILE": "/run/secrets/csrf_secret",
         "GS_CURSOR_SECRET_FILE": "/run/secrets/cursor_secret",
@@ -91,6 +92,10 @@
         {
           "source": "login_cookie_secret",
           "target": "/run/secrets/login_cookie_secret"
+        },
+        {
+          "source": "otlp_token",
+          "target": "/run/secrets/otlp_token"
         }
       ],
       "volumes": [
@@ -159,6 +164,7 @@
         "GS_MISSING_SWEEP_MAX_ABSENT_RATIO": null,
         "GS_STORAGE_ROOT": "/var/lib/goblinshift/storage/objects",
         "OTEL_EXPORTER_OTLP_ENDPOINT": "http://otel-collector:4318",
+        "GS_OTLP_TOKEN_FILE": "/run/secrets/otlp_token",
         "OTEL_SERVICE_NAME": "goblinshift-maintenance",
         "GS_EXECUTOR_IMAGE": "${GS_EXECUTOR_IMAGE:?exportada pelo deploy/release.sh (imagem do executor por digest)}",
         "GS_RUNNER": "executor_ctl",
@@ -189,6 +195,10 @@
         {
           "source": "user_hash_secret",
           "target": "/run/secrets/user_hash_secret"
+        },
+        {
+          "source": "otlp_token",
+          "target": "/run/secrets/otlp_token"
         }
       ],
       "stop_grace_period": "30s",
@@ -252,6 +262,7 @@
         "GS_DB_PASSWORD_FILE": "/run/secrets/db_password",
         "GS_ENVIRONMENT": "production",
         "OTEL_EXPORTER_OTLP_ENDPOINT": "http://otel-collector:4318",
+        "GS_OTLP_TOKEN_FILE": "/run/secrets/otlp_token",
         "OTEL_SERVICE_NAME": "goblinshift-api"
       },
       "image": "${GS_APP_IMAGE:-ghcr.io/bipoxdxd/goblinshift:sha-03f15c824029@sha256:54e9c5f01c78fa7e005994a4a3266b0180481c6ed018da289e7648abfdddd2cc}",
@@ -270,6 +281,10 @@
         {
           "source": "db_password",
           "target": "/run/secrets/db_password"
+        },
+        {
+          "source": "otlp_token",
+          "target": "/run/secrets/otlp_token"
         }
       ],
       "pull_policy": "never",
@@ -471,6 +486,7 @@
         "GS_ENVIRONMENT": "production",
         "GS_STORAGE_ROOT": "/var/lib/goblinshift/storage/objects",
         "OTEL_EXPORTER_OTLP_ENDPOINT": "http://otel-collector:4318",
+        "GS_OTLP_TOKEN_FILE": "/run/secrets/otlp_token",
         "OTEL_SERVICE_NAME": "goblinshift-worker",
         "GS_EXECUTOR_IMAGE": "${GS_EXECUTOR_IMAGE:?exportada pelo deploy/release.sh (imagem do executor por digest)}",
         "GS_RUNNER": "executor_ctl",
@@ -501,6 +517,10 @@
         {
           "source": "user_hash_secret",
           "target": "/run/secrets/user_hash_secret"
+        },
+        {
+          "source": "otlp_token",
+          "target": "/run/secrets/otlp_token"
         }
       ],
       "stop_grace_period": "30s",
@@ -580,6 +600,10 @@
     "login_cookie_secret": {
       "file": "/srv/goblinshift/secrets/login_cookie_secret",
       "name": "goblinshift_login_cookie_secret"
+    },
+    "otlp_token": {
+      "file": "/srv/goblinshift/secrets/otlp_token",
+      "name": "goblinshift_otlp_token"
     },
     "user_hash_secret": {
       "file": "/srv/goblinshift/secrets/user_hash_secret",

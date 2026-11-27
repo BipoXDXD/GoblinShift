@@ -8,9 +8,9 @@ cd "$(dirname "$0")/.."
 
 umask 077
 mkdir -p .secrets
-if [[ ! -f .secrets/db_password ]]; then
-  openssl rand -hex 32 > .secrets/db_password
-fi
+for name in db_password otlp_token; do
+  [[ -f ".secrets/$name" ]] || openssl rand -hex 32 > ".secrets/$name"
+done
 
 if [[ ! -f .env ]]; then
   echo "OPENOBSERVE_ROOT_EMAIL=admin@goblinshift.local" > .env
@@ -36,5 +36,6 @@ fi
 
 # Os arquivos são lidos dentro dos containers por outros usuários (postgres, app, Collector);
 # a proteção no host vem do diretório .secrets/ com permissão 700.
-chmod 644 .secrets/db_password .secrets/openobserve_env .secrets/openobserve_basic_auth
+chmod 644 .secrets/db_password .secrets/otlp_token .secrets/openobserve_env \
+  .secrets/openobserve_basic_auth
 echo "Segredos locais prontos em .secrets/ e .env"

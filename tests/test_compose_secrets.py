@@ -214,7 +214,7 @@ def test_desenvolvimento_sobe_sem_a_configuracao_do_login() -> None:
     assert result.returncode == 0, result.stderr
     api = json.loads(result.stdout)["services"]["api"]
     assert not set(api["environment"]) & WEB_VARS
-    assert set(secret_targets(api)) == {"db_password"}
+    assert set(secret_targets(api)) == {"db_password", "otlp_token"}
 
 
 def test_producao_sem_ambiente_declarado_nao_interpola(secrets_dir: Path) -> None:
@@ -288,3 +288,37 @@ def test_storage_init_nao_monta_segredo(production: dict[str, Any]) -> None:
     ):
         assert not config.get("secrets")
         assert "GS_DB_PASSWORD_FILE" not in (config.get("environment") or {})
+
+
+# Token do OTLP (#442, 31j): quem exporta manda, o Collector confere.
+OTLP_TOKEN_PATH = f"{MOUNT_ROOT}/otlp_token"
+OTLP_ENDPOINT = "OTEL_EXPORTER_OTLP_ENDPOINT"
+
+
+def _destinations(secrets_dir: Path) -> dict[str, dict[str, Any]]:
+    local = compose_config(("compose.yaml",), {**BASE_ENV, "GS_SECRETS_DIR": str(secrets_dir)})
+    assert local.returncode == 0, local.stderr
+    prod = compose_config(PROD_FILES, {**PROD_ENV, "GS_SECRETS_DIR": str(secrets_dir)})
+    assert prod.returncode == 0, prod.stderr
+    return {
+        "local": json.loads(local.stdout)["services"],
+        "producao": json.loads(prod.stdout)["services"],
+        "coolify": {**_coolify_services("app.json"), **_coolify_services("infra.json")},
+    }
+
+
+@pytest.mark.parametrize("destination", ["local", "producao", "coolify"])
+def test_quem_exporta_otlp_recebe_o_arquivo_do_token(secrets_dir: Path, destination: str) -> None:
+    services = _destinations(secrets_dir)[destination]
+    exporters = {
+        name
+        for name, config in services.items()
+        if OTLP_ENDPOINT in (config.get("environment") or {}) and name != "storage-init"
+    }
+
+    assert {"api", "worker", "maintenance"} <= exporters, destination
+    for name in exporters:
+        config = services[name]
+        assert config["environment"]["GS_OTLP_TOKEN_FILE"] == OTLP_TOKEN_PATH, (destination, name)
+        assert secret_targets(config)["otlp_token"] == OTLP_TOKEN_PATH, (destination, name)
+    assert secret_targets(services["otel-collector"])["otlp_token"] == OTLP_TOKEN_PATH

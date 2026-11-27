@@ -259,6 +259,7 @@ Em produção, o login web ([plano, 3.6](docs/GoblinShiftPlan.md#s3-6)) lê a co
 | `GS_SIGNUP_MODE` (padrão `closed`, [ADR 023](docs/adr/023-cadastro-fechado-ate-a-abertura.md)) | variável no Coolify | operador |
 | `google_client_secret`, `github_client_secret` | arquivo | operador, com `read -rs` (abaixo) |
 | `csrf_secret`, `login_cookie_secret` | arquivo | operador, com `openssl rand -hex 32` (abaixo); a publicação pelo Coolify não os cria |
+| `otlp_token`, `openobserve_basic_auth`, `openobserve_env` | arquivo, da observabilidade | operador ([deploy/openobserve](deploy/openobserve/README.md#segredos)) |
 | `cursor_secret` | arquivo, lido pela API | operador, com `openssl rand -hex 32`, ou o valor antigo (abaixo) |
 | `user_hash_secret` | arquivo, compartilhado pela API, pelo worker e pela manutenção | operador, com `openssl rand -hex 32`, ou o valor antigo (abaixo) |
 

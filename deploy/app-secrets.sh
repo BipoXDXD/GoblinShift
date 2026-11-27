@@ -6,8 +6,8 @@
 #
 # - Gera, uma vez, os que a própria aplicação cria, e nunca troca um que já existe. Todos em
 #   arquivo, ao lado do app.env (#442, 34a: nada de segredo em variável de ambiente): o do cursor
-#   de paginação (3.3), o do `user.hash` dos eventos amplos (3.7) e as chaves do CSRF e do cookie
-#   de login (fatia 6, 3.6).
+#   de paginação (3.3), o do `user.hash` dos eventos amplos (3.7), as chaves do CSRF e do cookie
+#   de login (fatia 6, 3.6) e o token que o Collector exige no OTLP (#442, 31j).
 # - Confere os que o operador grava (client secrets do Google e do GitHub), sem ler o conteúdo.
 #
 # Uso: deploy/app-secrets.sh <app.env>
@@ -17,7 +17,7 @@ env_file="${1:?uso: app-secrets.sh <app.env>}"
 secrets_dir=$(dirname "$env_file")
 
 # Modo 644 dentro do diretório 700, como o db_password: o container lê com o UID da aplicação.
-for name in cursor_secret user_hash_secret csrf_secret login_cookie_secret; do
+for name in cursor_secret user_hash_secret csrf_secret login_cookie_secret otlp_token; do
   file="$secrets_dir/$name"
   [[ -s "$file" ]] && continue
   key=$(openssl rand -hex 32)

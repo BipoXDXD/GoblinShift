@@ -47,6 +47,7 @@ BUSYBOX_IMAGE = (
     "busybox:1.37.0@sha256:bdf57e528e45e4433820e045b29b4597825a1c9e38353532d90a01445013f82e"
 )
 O2_PORT = 5080
+OTLP_TOKEN = secrets.token_hex(32)
 CREDENTIALS = Credentials(email="root@goblinshift.test", password="Teste#" + secrets.token_hex(8))
 READY_TIMEOUT_S = 90.0
 POLL_S = 0.5
@@ -176,7 +177,7 @@ class Telemetry:
         return int(rows[0]["n"]) if rows else 0
 
 
-def _secret_files(directory: Path) -> dict[str, Path]:
+def write_secret_files(directory: Path) -> dict[str, Path]:
     """Os segredos montados como em produção (#442, 34a): nada de senha em variável de ambiente.
 
     Modo 644, como em /srv/goblinshift/secrets: o root do contêiner, sem DAC_OVERRIDE, não lê
@@ -186,6 +187,7 @@ def _secret_files(directory: Path) -> dict[str, Path]:
     files = {
         "openobserve_env": f"ZO_ROOT_USER_PASSWORD={CREDENTIALS.password}\n",
         "openobserve_basic_auth": auth,
+        "otlp_token": f"{OTLP_TOKEN}\n",
     }
     paths = {}
     for name, content in files.items():
@@ -200,12 +202,12 @@ def _secret_files(directory: Path) -> dict[str, Path]:
 def telemetry(tmp_path_factory: pytest.TempPathFactory) -> Iterator[Telemetry]:
     secrets_dir = tmp_path_factory.mktemp("secrets")
     secrets_dir.chmod(0o755)
-    secret_files = _secret_files(secrets_dir)
+    secret_files = write_secret_files(secrets_dir)
     with (
         Network() as network,
         _openobserve(network, secret_files["openobserve_env"]) as o2,
         _filled_volume() as volumes,
-        _collector(network, volumes, secret_files["openobserve_basic_auth"]),
+        _collector(network, volumes, secret_files),
     ):
         base_url = f"http://{o2.get_container_host_ip()}:{o2.get_exposed_port(O2_PORT)}"
         api = OpenObserve(base_url, CREDENTIALS)
@@ -296,12 +298,24 @@ class _filled_volume:  # noqa: N801 (usado como gerenciador de contexto, como as
                 client.volumes.get(name).remove(force=True)
 
 
-def _collector(network: Network, volumes: dict[str, str], basic_auth: Path) -> DockerContainer:
+def collector_secret_mounts(container: DockerContainer, files: dict[str, Path]) -> DockerContainer:
+    """O Collector só sobe com o Basic auth do OpenObserve e o token do OTLP montados."""
+    for name in ("openobserve_basic_auth", "otlp_token"):
+        container = container.with_volume_mapping(str(files[name]), f"/run/secrets/{name}", "ro")
+    return container
+
+
+def _collector(
+    network: Network, volumes: dict[str, str], secret_files: dict[str, Path]
+) -> DockerContainer:
+    container = collector_secret_mounts(
+        DockerContainer(compose_image("otel-collector")).with_command(
+            ["--config=/etc/otelcol/config.yaml"]
+        ),
+        secret_files,
+    )
     container = (
-        DockerContainer(compose_image("otel-collector"))
-        .with_command(["--config=/etc/otelcol/config.yaml"])
-        .with_volume_mapping(str(basic_auth), "/run/secrets/openobserve_basic_auth", "ro")
-        .with_env("GS_HOSTMETRICS_INTERVAL", "5s")
+        container.with_env("GS_HOSTMETRICS_INTERVAL", "5s")
         .with_volume_mapping(str(COLLECTOR_CONFIG), "/etc/otelcol/config.yaml", "ro")
         .with_network(network)
         .with_kwargs(**compose_privileges("otel-collector"))

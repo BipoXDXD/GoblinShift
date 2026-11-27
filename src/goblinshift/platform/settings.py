@@ -161,6 +161,9 @@ class Settings(BaseSettings):
     github_client_secret_file: Path | None = None
     csrf_secret_file: Path | None = None
     login_cookie_secret_file: Path | None = None
+    # Token que o Collector exige no OTLP (#442, 31j): sem ele, quem alcança a rede interna
+    # injeta spans e logs falsos nos alertas. Fora da produção, ausente = sem cabeçalho.
+    otlp_token_file: Path | None = None
     # Teto de cada chamada ao Google e ao GitHub (3.2, "Timeouts em toda integração").
     oauth_http_timeout_s: float = Field(default=5.0, gt=0)
 
@@ -277,6 +280,15 @@ class Settings(BaseSettings):
         if secret is not None:
             return secret.get_secret_value().encode()
         return self._server_key(self.environment == "production", name, secret_file, dev)
+
+    def otlp_headers(self) -> dict[str, str]:
+        """Cabeçalho do exporter OTLP; em produção, o arquivo do token é obrigatório."""
+        if self.otlp_token_file is None:
+            if self.environment == "production":
+                raise MissingSecretError("GS_OTLP_TOKEN_FILE é obrigatório em produção")
+            return {}
+        token = _read_secret("GS_OTLP_TOKEN_FILE", self.otlp_token_file)
+        return {"authorization": f"Bearer {token}"}
 
     def executor_image_for_runs(self) -> str:
         """Imagem que a Run fixa; recusa a combinação que não serve ao ambiente.

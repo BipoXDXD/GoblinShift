@@ -4,6 +4,14 @@ receivers:
     protocols:
       http:
         endpoint: 0.0.0.0:4318
+        # Só com o token (#442, 31j): o Nginx também está na rede interna, e quem a alcança
+        # injetaria spans e logs falsos nos alertas. Sem token ou com token errado: 401.
+        auth:
+          authenticator: bearertokenauth
+        # Igual ao OTLP_MAX_REQUEST_BYTES do exporter (src/goblinshift/platform/telemetry.py):
+        # 2048 spans de SQL com ~2 KB medem 4,3 MiB; 8 MiB dão folga de ~2x. Vale também para o
+        # corpo descomprimido; acima dele, 400.
+        max_request_body_size: 8388608
   # Ocupação dos filesystems de tamanho fixo (3.8), para o alerta de disco acima de 85%
   # (deploy/openobserve/sql/causa-disco.sql). Na VPS, o compose.prod.yaml monta cada um em
   # /hostfs/<nome>, só leitura; sem as montagens (desenvolvimento), não sai métrica nenhuma.
@@ -40,9 +48,12 @@ exporters:
 extensions:
   health_check:
     endpoint: 0.0.0.0:13133
+  # O arquivo é relido quando muda; sem ele, o Collector não sobe.
+  bearertokenauth:
+    filename: /run/secrets/otlp_token
 
 service:
-  extensions: [health_check]
+  extensions: [health_check, bearertokenauth]
   pipelines:
     traces:
       receivers: [otlp]

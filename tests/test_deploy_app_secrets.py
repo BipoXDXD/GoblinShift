@@ -16,7 +16,13 @@ import pytest
 
 ROOT = Path(__file__).resolve().parent.parent
 SCRIPT = ROOT / "deploy" / "app-secrets.sh"
-GENERATED_FILES = ("cursor_secret", "user_hash_secret", "csrf_secret", "login_cookie_secret")
+GENERATED_FILES = (
+    "cursor_secret",
+    "user_hash_secret",
+    "csrf_secret",
+    "login_cookie_secret",
+    "otlp_token",
+)
 OPERATOR_FILES = ("google_client_secret", "github_client_secret")
 HEX_SECRET = re.compile(r"[0-9a-f]{64}")
 # O container lê com outro UID, dentro do diretório 700 (README, "Segredos do login").

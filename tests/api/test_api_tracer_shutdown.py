@@ -43,7 +43,7 @@ def otlp(monkeypatch: pytest.MonkeyPatch) -> Iterator[pytest.MonkeyPatch]:
 
 
 def _api_with(otlp: pytest.MonkeyPatch, exporter: SpanExporter) -> TestClient:
-    otlp.setattr(telemetry, "OTLPSpanExporter", lambda: exporter)
+    otlp.setattr(telemetry, "OTLPSpanExporter", lambda **_: exporter)
     app = create_app(Settings(environment="test", db_port=1, db_connect_timeout_s=1))
     return TestClient(app)
 
