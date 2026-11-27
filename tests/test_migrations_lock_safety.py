@@ -19,6 +19,7 @@ from tests.migration_lock_check import (
     checked_revisions,
     concurrent_in_transaction_lines,
     concurrent_index_without_cleanup_lines,
+    schema_change_beside_autocommit_lines,
     unmarked_blocking_lines,
 )
 from tests.migration_sql import SAFE_STATEMENTS
@@ -46,11 +47,13 @@ def test_migrations_so_bloqueiam_com_a_marca_lock_ok() -> None:
         blocking = unmarked_blocking_lines(source)
         concurrent = concurrent_in_transaction_lines(source)
         without_cleanup = concurrent_index_without_cleanup_lines(source)
-        if blocking or concurrent or without_cleanup:
+        not_repeatable = schema_change_beside_autocommit_lines(source)
+        if blocking or concurrent or without_cleanup or not_repeatable:
             problems[name] = {
                 "sem lock-ok": blocking,
                 "CONCURRENTLY dentro de transação": concurrent,
                 "índice CONCURRENTLY sem DROP IF EXISTS antes": without_cleanup,
+                "mudança de schema na revisão do autocommit_block": not_repeatable,
             }
 
     assert problems == {}
@@ -1098,3 +1101,116 @@ def test_troca_antes_da_criacao_nao_anula_a_dispensa() -> None:
     )
 
     assert unmarked_blocking_lines(source) == []
+
+
+# Revisão com autocommit_block: o retry do lock_timeout repete a revisão inteira ----------------
+
+
+@pytest.mark.parametrize(
+    "change",
+    [
+        'op.add_column("run", sa.Column("a", sa.Text()))',
+        'op.create_table("t", sa.Column("c", sa.Integer()))',
+        'op.execute("ALTER TABLE run ADD COLUMN a text")',
+        'op.execute("UPDATE run SET a = 1; ALTER TABLE run ADD COLUMN b text")',
+        "op.execute(sql)",
+    ],
+    ids=["add-column", "create-table", "ddl-em-execute", "ddl-junto-de-update", "sql-sem-texto"],
+)
+def test_mudanca_de_schema_antes_do_autocommit_na_mesma_revisao_e_recusada(change: str) -> None:
+    # O bloco faz commit do que veio antes, mas o carimbo da revisão só sai depois dele: o retry
+    # repete a revisão inteira, e um ADD COLUMN já aplicado falha com DuplicateColumn.
+    source = (
+        "def upgrade() -> None:\n"
+        f"    {change}  # lock-ok: coluna nova\n"
+        "    with op.get_context().autocommit_block():\n"
+        '        op.create_index("ix", "run", ["a"], postgresql_concurrently=True)\n'
+    )
+
+    assert schema_change_beside_autocommit_lines(source + IMPORTS) == [2]
+
+
+@pytest.mark.parametrize(
+    "rows",
+    [
+        'op.execute("UPDATE run SET a = b WHERE a IS NULL")',
+        'op.execute("DELETE FROM run WHERE a IS NULL")',
+    ],
+    ids=["update", "delete"],
+)
+def test_dados_antes_do_autocommit_passam(rows: str) -> None:
+    # Só linhas: quem escreve a migration as faz idempotentes, e a revisão do PR confere.
+    source = (
+        "def upgrade() -> None:\n"
+        f"    {rows}  # lock-ok: backfill\n"
+        "    with op.get_context().autocommit_block():\n"
+        '        op.create_index("ix", "run", ["a"], postgresql_concurrently=True)\n'
+    )
+
+    assert schema_change_beside_autocommit_lines(source + IMPORTS) == []
+
+
+@pytest.mark.parametrize(
+    "change",
+    [
+        'op.add_column("run", sa.Column("a", sa.Text()))',
+        'op.execute("ALTER TABLE run ADD COLUMN a text")',
+        'op.drop_index("ix", table_name="run", postgresql_concurrently=True)',
+        "op.execute(sql)",
+    ],
+    ids=["add-column", "ddl-em-execute", "drop-concorrente-sem-if-exists", "sql-sem-texto"],
+)
+def test_mudanca_de_schema_dentro_do_autocommit_e_recusada(change: str) -> None:
+    # Dentro do bloco cada instrução é comitada na hora: o retry a repete e ela falha.
+    source = (
+        "def upgrade() -> None:\n"
+        "    with op.get_context().autocommit_block():\n"
+        f"        {change}  # lock-ok: coluna nova\n"
+        '        op.create_index("ix", "run", ["a"], postgresql_concurrently=True)\n'
+    )
+
+    assert schema_change_beside_autocommit_lines(source + IMPORTS) == [3]
+
+
+@pytest.mark.parametrize(
+    ("drop", "create"),
+    [
+        (
+            'op.drop_index("ix", table_name="run", postgresql_concurrently=True, if_exists=True)',
+            'op.create_index("ix", "run", ["a"], postgresql_concurrently=True)',
+        ),
+        (
+            'op.execute("DROP INDEX CONCURRENTLY IF EXISTS ix")',
+            'op.execute("CREATE INDEX CONCURRENTLY ix ON run (a)")',
+        ),
+    ],
+    ids=["operacoes-do-alembic", "sql-literal"],
+)
+def test_limpeza_e_indice_concorrentes_dentro_do_autocommit_passam(drop: str, create: str) -> None:
+    source = (
+        "def upgrade() -> None:\n"
+        "    with op.get_context().autocommit_block():\n"
+        f"        {drop}  # lock-ok: limpeza\n"
+        f"        {create}\n"
+    )
+
+    assert schema_change_beside_autocommit_lines(source + IMPORTS) == []
+
+
+def test_revisao_sem_autocommit_pode_mudar_o_schema() -> None:
+    # Sem o bloco, a revisão roda numa transação só: o retry começa do zero.
+    source = _upgrade('op.add_column("run", sa.Column("a", sa.Text()))')
+
+    assert schema_change_beside_autocommit_lines(source) == []
+
+
+def test_mudanca_de_schema_so_no_downgrade_fica_de_fora() -> None:
+    source = (
+        "def upgrade() -> None:\n"
+        "    with op.get_context().autocommit_block():\n"
+        '        op.create_index("ix", "run", ["a"], postgresql_concurrently=True)\n\n\n'
+        "def downgrade() -> None:\n"
+        '    op.drop_column("run", "a")\n'
+    )
+
+    assert schema_change_beside_autocommit_lines(source + IMPORTS) == []

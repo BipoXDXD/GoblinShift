@@ -80,21 +80,8 @@ EOF
 chown "$APP_USER:$APP_USER" "/home/$APP_USER/.ssh/authorized_keys"
 chmod 600 "/home/$APP_USER/.ssh/authorized_keys"
 
-note "Filesystems de tamanho fixo (compartimentos de disco)"
-install -d -m 755 "$ROOT" "$ROOT/images"
-declare -A sizes=([pg]=10G [storage]=24G [exec-work]=6G [telemetry]=10G)
-for name in pg storage exec-work telemetry; do
-  img="$ROOT/images/$name.img"
-  mnt="$ROOT/$name"
-  if [[ ! -f "$img" ]]; then
-    fallocate -l "${sizes[$name]}" "$img"
-    mkfs.ext4 -q -m 0 -L "gs-$name" "$img"
-  fi
-  install -d "$mnt"
-  grep -q " $mnt " /etc/fstab || echo "$img $mnt ext4 loop,noatime,nofail 0 2" >> /etc/fstab
-  mountpoint -q "$mnt" || mount "$mnt"
-done
-install -d "$ROOT/pg/data" "$ROOT/telemetry/data"
+note "Filesystems de tamanho fixo (compartimentos de disco; área do executor sem exec)"
+bash "$(dirname "${BASH_SOURCE[0]}")/filesystems.sh"
 
 note "Segredos do GoblinShift (fora do repositório)"
 install -d -m 700 -o "$APP_USER" -g "$APP_USER" "$ROOT/secrets"

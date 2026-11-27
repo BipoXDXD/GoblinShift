@@ -219,6 +219,7 @@ def test_parada_na_limpeza_remove_a_area_em_curso_e_mantem_as_seguintes(
         "expire_queue",
         "apply_deadlines",
         "release_orphan_holds",
+        "report_unreported_finishes",
         "discard_stale_candidates",
     )
     first = areas[0]

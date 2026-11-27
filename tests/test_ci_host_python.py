@@ -44,6 +44,7 @@ NOT_HOST_PYTHON = {
     "tests/acceptance/test_media_mill_load.py": "lê o catálogo da aplicação",
     "tests/executor_ctl/test_area_busy.py": "testa o cliente do worker, que importa a aplicação",
     "tests/executor_ctl/test_client_deadlines.py": "confronta o cliente do worker com o servidor",
+    "tests/executor_ctl/test_install_host.py": "instalador como root no Debian (host_installer)",
     "tests/executor_ctl/test_integration.py": "Docker real (marcador executor_ctl)",
     "tests/executor_ctl/test_capabilities.py": "instalador como root no Debian (host_installer)",
     "tests/executor_ctl/test_policy_native.py": "precisa de runner Linux com root",

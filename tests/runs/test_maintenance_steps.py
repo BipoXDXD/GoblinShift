@@ -39,6 +39,7 @@ STEPS: dict[str, dict[str, int]] = {
     "expire_queue": {"queue_expired": 2},
     "apply_deadlines": {"deadlines": 3},
     "release_orphan_holds": {"holds_released": 4, "download_holds_released": 11},
+    "report_unreported_finishes": {"finishes_reported": 34},
     "discard_stale_candidates": {"candidates_discarded": 5},
     "sweep_work_areas": {"work_areas_removed": 6},
     "expire_incomplete_uploads": {"incomplete_uploads_expired": 20},

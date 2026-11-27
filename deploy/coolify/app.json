@@ -157,7 +157,8 @@
         "GS_WORK_ROOT": "/var/lib/goblinshift/exec-work"
       },
       "group_add": [
-        "61001"
+        "61001",
+        "61002"
       ],
       "image": "${GS_APP_IMAGE:-ghcr.io/bipoxdxd/goblinshift:sha-03f15c824029@sha256:54e9c5f01c78fa7e005994a4a3266b0180481c6ed018da289e7648abfdddd2cc}",
       "logging": {
@@ -471,7 +472,8 @@
         "GS_WORK_ROOT": "/var/lib/goblinshift/exec-work"
       },
       "group_add": [
-        "61001"
+        "61001",
+        "61002"
       ],
       "image": "${GS_APP_IMAGE:-ghcr.io/bipoxdxd/goblinshift:sha-03f15c824029@sha256:54e9c5f01c78fa7e005994a4a3266b0180481c6ed018da289e7648abfdddd2cc}",
       "logging": {

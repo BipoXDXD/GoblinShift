@@ -10,7 +10,8 @@ ROOT = Path(__file__).resolve().parent.parent
 COMPOSE_FILES = sorted([*ROOT.glob("compose*.yaml"), ROOT / "deploy" / "edge" / "compose.yaml"])
 CTL_DIR = "/run/goblinshift"
 EXECUTOR_CTL_CLIENTS = {"worker", "maintenance"}
-EXECUTOR_GROUP = "61001"
+# gs-exec (área de trabalho) e gs-ctl (socket do executor-ctl; D11).
+EXECUTOR_GROUPS = ["61001", "61002"]
 
 
 def services(compose_file: Path) -> dict[str, dict[str, Any]]:
@@ -74,7 +75,7 @@ def test_producao_usa_o_executor_ctl_com_a_imagem_obrigatoria() -> None:
 def test_producao_monta_socket_e_area_de_trabalho_com_o_grupo_do_executor(name: str) -> None:
     service = services(ROOT / "compose.prod.yaml")[name]
 
-    assert service["group_add"] == [EXECUTOR_GROUP]
+    assert service["group_add"] == EXECUTOR_GROUPS
     assert CTL_DIR in volume_targets(service)
     work_root = service["environment"]["GS_WORK_ROOT"]
     assert work_root in volume_targets(service)

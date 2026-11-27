@@ -159,6 +159,7 @@ def test_detalhe_por_item_guarda_avisos_e_contagens_sem_valor_de_celula(
             "duplicate_of": None,
             # O nome da coluna vai para a tela (1.3); o valor da célula, nunca.
             "formula_cells": {"columns": [{"name": "nome", "cells": 1}], "more_columns": 0},
+            "comparison": {"kind": "table", "records_before": 1, "records_after": 1},
         },
         {
             "warnings": [],
@@ -166,6 +167,7 @@ def test_detalhe_por_item_guarda_avisos_e_contagens_sem_valor_de_celula(
             "counts": {},
             "duplicate_of": None,
             "formula_cells": None,
+            "comparison": None,
         },
     ]
     assert "SEGREDO" not in str(details)

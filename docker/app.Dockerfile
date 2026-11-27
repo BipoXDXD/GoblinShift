@@ -17,10 +17,11 @@ RUN --mount=type=cache,target=/root/.cache/uv \
     uv sync --locked --no-dev --no-editable
 
 FROM python:3.14.10-slim-trixie@sha256:930e1abba7c4e8f96ed93e8012c35d174d7732752731bbd5e8e757d7ec6f3966
-# Sobe o apt e a zlib até a base oficial trazer as correções da CVE-2026-109518 (apt 3.0.4) e das
-# CVE-2026-76844 e CVE-2026-85091 (zlib1g deb13u1), que barram a release no Trivy.
+# Sobe apt, zlib e libzstd até a base oficial trazer as correções da CVE-2026-109518 (apt 3.0.4),
+# das CVE-2026-76844 e CVE-2026-85091 (zlib1g deb13u1) e da CVE-2026-124851 (libzstd1 deb13u1),
+# que barram a release no Trivy.
 RUN apt-get update -qq \
- && apt-get install -yq --no-install-recommends --only-upgrade apt libapt-pkg7.0 zlib1g \
+ && apt-get install -yq --no-install-recommends --only-upgrade apt libapt-pkg7.0 zlib1g libzstd1 \
  && rm -rf /var/lib/apt/lists/*
 # Packaging tools are build-only. Remove their bundled dependency copies from runtime.
 RUN rm -rf /usr/local/lib/python3.14/site-packages/pip \
@@ -39,8 +40,12 @@ COPY migrations ./migrations
 RUN --mount=type=bind,source=scripts/check_runtime_licenses.py,target=/tmp/check_runtime_licenses.py \
     /app/.venv/bin/python -I -B /tmp/check_runtime_licenses.py
 ARG GS_SERVICE_VERSION=dev
+# A imagem nasce em produção (issue #442, D6): sem a variável, `Settings` cairia no padrão
+# `development` e pularia segredos, https e executor-ctl. A pilha local e os e2e declaram o próprio
+# ambiente no Compose (tests/test_app_image_environment.py).
 ENV PATH="/app/.venv/bin:$PATH" \
     PYTHONUNBUFFERED=1 \
+    GS_ENVIRONMENT=production \
     GS_SERVICE_VERSION=${GS_SERVICE_VERSION}
 USER app
 EXPOSE 8000

@@ -180,8 +180,10 @@ services:
         condition: service_completed_successfully
       storage-init:
         condition: service_completed_successfully
-    # O SIGTERM não interrompe a tentativa em curso. Este prazo é menor que o teto dela (10 min):
-    # a que não terminar a tempo leva SIGKILL e volta pelo lease vencido.
+    # No SIGTERM, uma tentativa longa (restante > carência) é cedida: o worker para o executor
+    # e devolve a Run para retry_wait sem gastar tentativa física. No pior caso do `stop`
+    # (Docker lento, até ~167 s), este prazo vence e o SIGKILL chega no meio; é inofensivo,
+    # porque `stop` e `remove` são idempotentes e a manutenção termina o serviço.
     stop_grace_period: 30s
     restart: unless-stopped
 
@@ -198,6 +200,9 @@ services:
     depends_on: *worker-deps
     # A volta para entre os passos, e um passo pode esperar o prazo de uma chamada ao executor-ctl
     # (a sonda da imagem, 10 s) antes do prazo do tracing: a carência padrão de 10 s não cabe.
+    # O `stop` do executor-ctl num `_confirm_ended` pode levar até ~170 s (STOP_BASE_TIMEOUT mais a
+    # carência do executor) e leva SIGKILL no meio quando o serviço é parado: é inofensivo, porque
+    # `stop` e `remove` são idempotentes e a próxima volta da manutenção refaz o passo.
     stop_grace_period: 30s
     restart: unless-stopped
 

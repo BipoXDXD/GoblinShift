@@ -104,7 +104,17 @@ class Host:
     """O que a configuração instalada do executor-ctl diz sobre este host."""
 
     config: Config
+    # gs-exec: área e `--user` do executor. gs-ctl: só o socket de controle (D11).
     group_id: int
+    socket_group_id: int
+
+    @classmethod
+    def from_config(cls, config: Config) -> "Host":
+        return cls(
+            config,
+            group_id=grp.getgrnam(config.group).gr_gid,
+            socket_group_id=grp.getgrnam(config.socket_group).gr_gid,
+        )
 
 
 @dataclass(frozen=True)
@@ -128,7 +138,7 @@ def main() -> int:
     print(f"Docker: {_first_line('docker', 'version', '--format', '{{.Server.Version}}')}")
     print(f"kernel do host: {os.uname().release}\n")
     config = load_config(DEFAULT_CONFIG_PATH)
-    host = Host(config, grp.getgrnam(config.group).gr_gid)
+    host = Host.from_config(config)
     subprocess.run(["docker", "pull", "--quiet", PROBE_IMAGE], check=True)
 
     outcomes = [
@@ -266,7 +276,7 @@ def _restart_command(containers: list[str]) -> str:
 
 
 def check_control_socket(host: Host) -> Outcome:
-    """O serviço systemd está no ar, com o socket root:gs-exec 0660, e responde ao status."""
+    """O serviço systemd está no ar, com o socket root:gs-ctl 0660, e responde ao status."""
     criterion = "executor-ctl responde no socket"
     path = host.config.socket
     try:
@@ -278,14 +288,14 @@ def check_control_socket(host: Host) -> Outcome:
     permissions_ok = (
         stat.S_ISSOCK(info.st_mode)
         and info.st_uid == 0
-        and info.st_gid == host.group_id
+        and info.st_gid == host.socket_group_id
         and mode == 0o660
     )
     answered = response.status == 200 and response.body.get("state") == "absent"
     return Outcome(
         criterion,
         permissions_ok and answered,
-        f"dono {info.st_uid}:{info.st_gid} (gs-exec = {host.group_id}), modo {mode:o}; "
+        f"dono {info.st_uid}:{info.st_gid} (gs-ctl = {host.socket_group_id}), modo {mode:o}; "
         f"status de tentativa inexistente: HTTP {response.status} {response.body}",
     )
 
@@ -454,6 +464,21 @@ def check_app_without_docker_socket() -> Outcome:
     return Outcome(criterion, blocked, evidence or "o socket abriu")
 
 
+def executor_options(host: Host, attempt: uuid.UUID, work_dir: Path) -> list[str]:
+    """As opções do perfil de produção, com o teto de I/O da configuração (D13), se houver.
+
+    Sem o teto, a sonda de disco não mediria o que o executor de verdade consegue escrever.
+    """
+    throttle = profile.disk_throttle(host.config.work_area, host.config.io_limits)
+    return profile.run_options(
+        attempt,
+        work_dir=work_dir,
+        runtime=host.config.runtime,
+        executor_gid=host.group_id,
+        throttle=throttle,
+    )
+
+
 def run_probe(host: Host, probe: str, *, timeout_s: float) -> ProbeRun:
     attempt = uuid.uuid4()
     name = profile.container_name(attempt)
@@ -461,9 +486,7 @@ def run_probe(host: Host, probe: str, *, timeout_s: float) -> ProbeRun:
     with attempt_workspace(host, attempt) as docker:
         # As mesmas regras do start de produção: recusa área suja e prepara as permissões.
         prepared = workarea.prepare_for_start(area, attempt, host.group_id)
-        options = profile.run_options(
-            attempt, work_dir=prepared.path, runtime=host.config.runtime, executor_gid=host.group_id
-        )
+        options = executor_options(host, attempt, prepared.path)
         started = time.monotonic()
         _docker_output(
             "run",

@@ -22,7 +22,6 @@ teto (1.7). Imprime o tempo para o ADR 018. Usa só a biblioteca padrão (Python
 """
 
 import argparse
-import grp
 import json
 import os
 import subprocess
@@ -40,6 +39,7 @@ from acceptance.run import (
     Host,
     Outcome,
     attempt_workspace,
+    executor_options,
     run_with_maintenance_suspended,
 )
 from executor_ctl import profile, workarea
@@ -63,7 +63,7 @@ def main(argv: list[str]) -> int:
         print("rode com sudo", file=sys.stderr)
         return 2
     config = load_config(DEFAULT_CONFIG_PATH)
-    host = Host(config, grp.getgrnam(config.group).gr_gid)
+    host = Host.from_config(config)
     if options.skip_build:
         require_image()
     else:
@@ -169,9 +169,7 @@ def measure(
         work_dir = workarea.attempt_dir(area, attempt)
         _fill_work_dir(work_dir, fixtures, expected, host.group_id)
         prepared = workarea.prepare_for_start(area, attempt, host.group_id)
-        options = profile.run_options(
-            attempt, work_dir=prepared.path, runtime=host.config.runtime, executor_gid=host.group_id
-        )
+        options = executor_options(host, attempt, prepared.path)
         started = time.monotonic()
         _docker("run", "--detach", *options, IMAGE)
         timed_out = False

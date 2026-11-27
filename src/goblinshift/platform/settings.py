@@ -1,22 +1,28 @@
 """Configuração lida do ambiente (prefixo `GS_`)."""
 
+import logging
 from dataclasses import dataclass, field
 from functools import cached_property
 from pathlib import Path
 from typing import Literal
 from urllib.parse import urlsplit
 
-from pydantic import Field, SecretStr, field_validator
+from pydantic import Field, SecretStr, ValidationError, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 from sqlalchemy import URL
 
 MIN_SECRET_CHARS = 32
+# Código de saída de processo com configuração inválida: distingue "configuração" de falha comum.
+EXIT_CONFIGURATION = 2
 # Imagem do executor sempre por digest (contrato da fatia 4): `<repositório>@sha256:<64 hex>`.
 EXECUTOR_IMAGE_PATTERN = r"^[a-z0-9]+(?:[._/:-][a-z0-9]+)*@sha256:[0-9a-f]{64}$"
 # O Runner local roda o código do próprio repositório: a Run registra isto no lugar do digest.
 LOCAL_EXECUTOR_IMAGE = "local-dev"
 # Grupo `gs-exec` do host, que o executor (UID 61000) e o worker compartilham.
 EXECUTOR_GROUP_ID = 61001
+# Teto signed int32 aceito por `statement_timeout`, `lock_timeout` e
+# `idle_in_transaction_session_timeout`.
+PG_MAX_TIMEOUT_MS = 2_147_483_647
 # Só para desenvolvimento e testes; em produção a ausência do segredo impede a API de subir.
 _DEV_CURSOR_KEY = "goblinshift-dev-only-cursor-key-not-a-secret"
 _DEV_USER_HASH_KEY = "goblinshift-dev-only-user-hash-key-not-a-secret"
@@ -66,13 +72,21 @@ class WebIdentityConfig:
 
 
 class Settings(BaseSettings):
-    model_config = SettingsConfigDict(env_prefix="GS_", extra="ignore", frozen=True)
+    # `hide_input_in_errors=True` omite a entrada em `str`/`repr` (e `describe_config_error`
+    # usa `include_input=False` em `errors()`); `nan`/`inf` nunca são válidos (#442, 54 a e b).
+    model_config = SettingsConfigDict(
+        env_prefix="GS_",
+        extra="ignore",
+        frozen=True,
+        hide_input_in_errors=True,
+        allow_inf_nan=False,
+    )
 
     environment: Literal["development", "test", "production"] = "development"
     service_version: str = "dev"
 
     db_host: str = "localhost"
-    db_port: int = 5432
+    db_port: int = Field(default=5432, gt=0, le=65535)
     db_name: str = "goblinshift"
     db_user: str = "goblinshift"
     # Em produção a senha vem só de um arquivo de segredo do Compose (GS_DB_PASSWORD_FILE),
@@ -81,13 +95,13 @@ class Settings(BaseSettings):
     db_password_file: Path | None = None
 
     # Timeouts de 3.2: defesa contra consultas presas e transações esquecidas.
-    db_statement_timeout_ms: int = 5_000
-    db_lock_timeout_ms: int = 2_000
-    db_idle_in_transaction_timeout_ms: int = 30_000
-    db_connect_timeout_s: int = 5
-    db_pool_size: int = 10
-    db_pool_max_overflow: int = 5
-    db_pool_timeout_s: float = 5.0
+    db_statement_timeout_ms: int = Field(default=5_000, gt=0, le=PG_MAX_TIMEOUT_MS)
+    db_lock_timeout_ms: int = Field(default=2_000, gt=0, le=PG_MAX_TIMEOUT_MS)
+    db_idle_in_transaction_timeout_ms: int = Field(default=30_000, gt=0, le=PG_MAX_TIMEOUT_MS)
+    db_connect_timeout_s: int = Field(default=5, gt=0)
+    db_pool_size: int = Field(default=10, gt=0)
+    db_pool_max_overflow: int = Field(default=5, ge=0)
+    db_pool_timeout_s: float = Field(default=5.0, gt=0)
 
     alembic_ini: Path = Path("alembic.ini")
 
@@ -107,23 +121,23 @@ class Settings(BaseSettings):
     # (deploy/coolify/release/receiver.py).
     executor_image: str | None = Field(default=None, pattern=EXECUTOR_IMAGE_PATTERN)
     executor_ctl_socket: Path = Path("/run/goblinshift/executor-ctl.sock")
-    executor_group_id: int = EXECUTOR_GROUP_ID
+    executor_group_id: int = Field(default=EXECUTOR_GROUP_ID, gt=0)
     # Raiz das áreas de trabalho das tentativas; com o `executor_ctl`, o filesystem de tamanho
     # fixo do host, montado no worker e na manutenção.
     work_root: Path = Path(".work")
     # Lease da tentativa; o coordenador o renova a cada terço do prazo (3.4).
-    worker_lease_s: float = 60.0
+    worker_lease_s: float = Field(default=60.0, gt=0)
     # Garantia contra NOTIFY perdido: o worker consulta a fila pelo menos nesse intervalo.
-    worker_poll_interval_s: float = 2.0
+    worker_poll_interval_s: float = Field(default=2.0, gt=0)
     # Teto de cada tentativa (1.7, "Duração").
-    attempt_timeout_s: float = 600.0
-    maintenance_interval_s: float = 30.0
+    attempt_timeout_s: float = Field(default=600.0, gt=0)
+    maintenance_interval_s: float = Field(default=30.0, gt=0)
     # Cotas diárias por conta (1.7): o padrão de toda conta, que `gs-admin set-limits` sobrepõe
     # conta a conta. Os tetos de armazenamento ficam no livro-razão (ADR 024).
     quota_runs_per_24h: int = Field(default=30, gt=0)
     quota_input_bytes_per_24h: int = Field(default=2 * 1024**3, gt=0)
     # Lotes da manutenção toleram consultas mais longas que a API (3.2).
-    maintenance_statement_timeout_ms: int = 30_000
+    maintenance_statement_timeout_ms: int = Field(default=30_000, gt=0, le=PG_MAX_TIMEOUT_MS)
 
     # Chave HMAC dos cursores da listagem (1.6). Trocá-la invalida os cursores emitidos, o que
     # só custa ao cliente recomeçar a paginação.
@@ -296,3 +310,23 @@ def _read_secret(name: str, path: Path) -> str:
     if not value:
         raise MissingSecretError(f"{name} aponta para um arquivo vazio")
     return value
+
+
+def describe_config_error(error: ValidationError) -> list[str]:
+    """`<campo>:<tipo>` de cada erro, nunca o valor: a linha vai ao log do contêiner."""
+    return [
+        f"{'.'.join(str(part) for part in detail['loc'])}:{detail['type']}"
+        for detail in error.errors(include_input=False, include_url=False, include_context=False)
+    ]
+
+
+def load_settings_or_exit(logger: logging.Logger) -> Settings:
+    """`Settings()` do ambiente; inválida, uma linha com campo e tipo e saída 2, sem traceback."""
+    try:
+        return Settings()
+    except ValidationError as error:
+        logger.error(
+            "configuração inválida",
+            extra={"fields": {"config_errors": describe_config_error(error)}},
+        )
+        raise SystemExit(EXIT_CONFIGURATION) from None

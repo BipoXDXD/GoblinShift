@@ -15,8 +15,7 @@ from concurrent.futures import ThreadPoolExecutor
 from contextlib import contextmanager
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
-from types import SimpleNamespace
-from typing import Any, cast
+from typing import cast
 
 import psycopg
 import pytest
@@ -33,7 +32,11 @@ from goblinshift.runs.lifecycle import MIN_RETRY_JITTER, Status
 from goblinshift.runs.store import LostFencing, lease_expired
 from goblinshift.runs.tables import attempt, run
 from goblinshift.runs.worker.claim import ClaimedAttempt
-from goblinshift.runs.worker.coordinator import Coordinator, CoordinatorConfig
+from goblinshift.runs.worker.coordinator import (
+    DEFAULT_ATTEMPT_TIMEOUT,
+    Coordinator,
+    CoordinatorConfig,
+)
 from goblinshift.runs.worker.runner import (
     ExecutorPhase,
     ExecutorStatus,
@@ -324,10 +327,16 @@ class _RunningUntilRenewed:
         return ExecutorStatus(ExecutorPhase.EXITED, exit_code=0)
 
 
-def worker_without_database(runner: object) -> Coordinator:
+def worker_without_database(
+    runner: object,
+    *,
+    lease: timedelta = timedelta(seconds=0.3),
+    attempt_timeout: timedelta = DEFAULT_ATTEMPT_TIMEOUT,
+) -> Coordinator:
     config = CoordinatorConfig(
-        lease=timedelta(seconds=0.3),
+        lease=lease,
         status_poll=timedelta(seconds=0.001),
+        attempt_timeout=attempt_timeout,
         jitter=lambda: MIN_RETRY_JITTER,
     )
     return Coordinator(
@@ -339,13 +348,20 @@ def worker_without_database(runner: object) -> Coordinator:
 
 
 def attempt_without_database() -> ClaimedAttempt:
-    fields: dict[str, Any] = {
-        "run_id": uuid.uuid4(),
-        "attempt_id": uuid.uuid4(),
-        "generation": 1,
-        "number": 1,
-    }
-    return cast(ClaimedAttempt, SimpleNamespace(**fields))
+    return ClaimedAttempt(
+        run_id=uuid.uuid4(),
+        owner_id=uuid.uuid4(),
+        attempt_id=uuid.uuid4(),
+        generation=1,
+        number=1,
+        recipe_id="image.resize",
+        recipe_version=1,
+        executor_image="registry.example/executor@sha256:" + "0" * 64,
+        parameters={},
+        input_upload_ids=(),
+        traceparent=None,
+        queue_wait_ms=0,
+    )
 
 
 def test_pool_esgotado_na_renovacao_tambem_e_transitorio(
@@ -460,6 +476,16 @@ class _StopFailsOnce:
         return self.status(attempt_id)
 
 
+def _record_loop_renewal(events: list[str]) -> None:
+    """Grava só a renovação da própria volta do `supervise` (thread do teste).
+
+    O `stop` também renova numa thread enquanto bloqueia, em ordem livre com o próprio `stop`; essa
+    renovação tem teste em `test_background_renewal.py` e fica fora da sequência afirmada aqui.
+    """
+    if threading.current_thread() is threading.main_thread():
+        events.append("lease")
+
+
 def _stop_failures(caplog: pytest.LogCaptureFixture) -> list[logging.LogRecord]:
     return [r for r in caplog.records if r.name == COORDINATOR_LOGGER and r.msg == STOP_FAILED]
 
@@ -473,7 +499,7 @@ def test_stop_que_falha_mantem_lease_e_tenta_de_novo(
     worker = worker_without_database(runner)
 
     def renew(_claimed: ClaimedAttempt) -> Status:
-        events.append("lease")
+        _record_loop_renewal(events)
         return Status.STOPPING
 
     monkeypatch.setattr(worker, "renew_lease", renew)
@@ -511,7 +537,7 @@ def test_stop_do_teto_da_tentativa_que_falha_tenta_de_novo_e_marca_o_estouro(
     )
 
     def renew(_claimed: ClaimedAttempt) -> Status:
-        events.append("lease")
+        _record_loop_renewal(events)
         return Status.RUNNING
 
     monkeypatch.setattr(worker, "renew_lease", renew)

@@ -46,6 +46,9 @@ EMPTY_CHAR = "\x00"
 PLAIN_COLUMN_FIELDS = frozenset({"colname", "typeName", "constraints", "is_local", "location"})
 UNSET_VALUES = (None, False, "", EMPTY_CHAR)
 
+# Instruções que só mudam linhas, sem tocar no schema.
+ROW_CHANGES = (ast.UpdateStmt, ast.DeleteStmt)
+
 # A allowlist mínima: tipo de nó → condição em que ele não reescreve nem varre tabela em uso.
 SAFE_STATEMENTS: dict[type[Any], Callable[[Any], bool]] = {
     # Tabela nova; PARTITION OF e INHERITS travam a tabela-mãe.
@@ -91,6 +94,27 @@ def analyze_sql(sql: str) -> SqlFacts:
         created_concurrent_indexes=[n for f in facts for n in f.created_concurrent_indexes],
         dropped_concurrent_indexes=[n for f in facts for n in f.dropped_concurrent_indexes],
     )
+
+
+def only_changes_rows(sql: str) -> bool:
+    """Toda instrução do texto é UPDATE ou DELETE: mexe em linhas, nunca no schema.
+
+    Texto que não parseia, ou com trecho que o split descartou, não conta como só linhas.
+    """
+    try:
+        statements = split(sql, with_parser=False)
+    except ParseError:
+        return False
+    if not statements or _code_tokens(sql) > sum(_code_tokens(s) for s in statements):
+        return False
+    for statement in statements:
+        try:
+            (raw,) = parse_sql(statement)
+        except ParseError:
+            return False
+        if not isinstance(raw.stmt, ROW_CHANGES):
+            return False
+    return True
 
 
 def _code_tokens(sql: str) -> int:

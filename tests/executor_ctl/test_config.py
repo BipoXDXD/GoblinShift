@@ -7,12 +7,14 @@ from typing import Any
 import pytest
 
 from executor_ctl.config import Config, ConfigError, load_config
+from executor_ctl.profile import IoLimits
 
 pytestmark = [pytest.mark.host_python, pytest.mark.usefixtures("synthetic_policy_metadata")]
 
 VALID: dict[str, Any] = {
     "socket": "/run/goblinshift/executor-ctl.sock",
     "group": "gs-exec",
+    "socket_group": "gs-ctl",
     "work_area": "/srv/goblinshift/exec-work",
     "runtime": "runsc",
     "images_file": "/var/lib/coolify-release/goblinshift/executor-images.json",
@@ -31,6 +33,7 @@ def test_configuracao_valida_vira_config_com_montagem_exigida(tmp_path: Path) ->
     assert config == Config(
         socket=Path("/run/goblinshift/executor-ctl.sock"),
         group="gs-exec",
+        socket_group="gs-ctl",
         work_area=Path("/srv/goblinshift/exec-work"),
         runtime="runsc",
         images_file=Path("/var/lib/coolify-release/goblinshift/executor-images.json"),
@@ -55,6 +58,8 @@ def test_require_mount_pode_ser_desligado_para_testes(tmp_path: Path) -> None:
         ({"work_area": "/srv/a,dst=/etc"}, "vírgula quebraria o --mount"),
         ({"socket": 7}, "tipo errado"),
         ({"group": "gs exec"}, "grupo com espaço"),
+        ({"socket_group": "gs ctl"}, "grupo do socket com espaço"),
+        ({"socket_group": 61002}, "grupo do socket como número"),
         ({"require_mount": "sim"}, "booleano como texto"),
         ({"extra": 1}, "chave desconhecida"),
     ],
@@ -90,6 +95,7 @@ def test_runc_continua_valido_na_config_montada_no_codigo() -> None:
     config = Config(
         socket=Path(VALID["socket"]),
         group="gs-exec",
+        socket_group="gs-ctl",
         work_area=Path(VALID["work_area"]),
         runtime="runc",
         images_file=Path(VALID["images_file"]),
@@ -104,6 +110,21 @@ def test_chave_obrigatoria_ausente_e_recusada(tmp_path: Path) -> None:
 
     with pytest.raises(ConfigError, match="images_file"):
         load_config(write_config(tmp_path, content))
+
+
+def test_configuracao_sem_socket_group_e_recusada(tmp_path: Path) -> None:
+    content = {key: value for key, value in VALID.items() if key != "socket_group"}
+
+    with pytest.raises(ConfigError, match="socket_group"):
+        load_config(write_config(tmp_path, content))
+
+
+def test_socket_group_igual_ao_group_e_recusado(tmp_path: Path) -> None:
+    # Com o mesmo grupo, o executor (--user=61000:<group>) voltaria a alcançar o socket.
+    path = write_config(tmp_path, {**VALID, "socket_group": VALID["group"]})
+
+    with pytest.raises(ConfigError, match="socket_group"):
+        load_config(path)
 
 
 def test_json_que_nao_e_objeto_e_recusado(tmp_path: Path) -> None:
@@ -162,3 +183,48 @@ def test_config_por_symlink_e_recusada(tmp_path: Path) -> None:
     link.symlink_to(real)
     with pytest.raises(ConfigError):
         load_config(link)
+
+
+IO_LIMITS = {"read_bps": 104857600, "write_bps": 52428800, "read_iops": 2000, "write_iops": 1000}
+
+
+def test_sem_io_limits_a_config_fica_sem_teto(tmp_path: Path) -> None:
+    assert load_config(write_config(tmp_path, VALID)).io_limits is None
+
+
+def test_io_limits_valido_vira_os_quatro_tetos(tmp_path: Path) -> None:
+    config = load_config(write_config(tmp_path, {**VALID, "io_limits": IO_LIMITS}))
+
+    assert config.io_limits == IoLimits(
+        read_bps=104857600, write_bps=52428800, read_iops=2000, write_iops=1000
+    )
+
+
+@pytest.mark.parametrize(
+    "io_limits",
+    [
+        {**IO_LIMITS, "write_bps": 0},
+        {**IO_LIMITS, "read_iops": -1},
+        {**IO_LIMITS, "read_bps": True},
+        {**IO_LIMITS, "write_iops": 1.5},
+        {**IO_LIMITS, "write_iops": "1000"},
+        {key: value for key, value in IO_LIMITS.items() if key != "read_bps"},
+        {**IO_LIMITS, "read_latency": 1},
+        [104857600, 52428800, 2000, 1000],
+        None,
+    ],
+    ids=[
+        "zero",
+        "negativo",
+        "booleano",
+        "fracionario",
+        "texto",
+        "chave-ausente",
+        "chave-desconhecida",
+        "lista",
+        "nulo",
+    ],
+)
+def test_io_limits_com_valor_zero_ou_negativo_e_recusado(tmp_path: Path, io_limits: object) -> None:
+    with pytest.raises(ConfigError):
+        load_config(write_config(tmp_path, {**VALID, "io_limits": io_limits}))
