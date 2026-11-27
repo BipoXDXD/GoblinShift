@@ -16,7 +16,7 @@ Uso numa rota:
 
 from collections.abc import Callable, Iterator
 from datetime import UTC, datetime
-from typing import Annotated
+from typing import Annotated, NoReturn
 
 from fastapi import Depends, Request
 from fastapi.routing import iter_route_contexts
@@ -201,18 +201,16 @@ CurrentPrincipal = Annotated[Principal, Depends(authenticate)]
 def optional_session(request: Request, session: DbSession, now: Now) -> Principal | None:
     """Sessão do cookie, ou None sem sessão válida (`POST /auth/logout`).
 
-    A mutação passa pelo CSRF com ou sem sessão. Com sessão válida, como em `authenticate`: sem
-    isso, outro site derrubaria a sessão do usuário. Sem ela (expirada ou revogada), não há sessão
-    a que o HMAC se ligue: valem a mesma origem e o par cookie e header, que outro site não monta,
-    para que ninguém de fora mande o navegador apagar os dados da origem (`Clear-Site-Data`).
+    A mutação confere a mesma origem e o par cookie e header, com ou sem sessão, e não o HMAC:
+    outro site não monta o par (o cookie é `__Host-`), então não derruba a sessão do usuário nem
+    manda o navegador apagar os dados da origem (`Clear-Site-Data`). Sem o HMAC, a troca do
+    segredo do CSRF não impede ninguém de sair (#442, 46a). A recusa com sessão válida vai à
+    auditoria, como em `authenticate`.
     """
     _reject_simultaneous_credentials(request)
     principal = _session_from_cookie(request, session, now)
     if request.method not in SAFE_METHODS:
-        if principal is None:
-            _verify_anonymous_csrf(request)
-        else:
-            _verify_csrf(request, session, principal, now)
+        _verify_csrf_pair(request, session, principal, now)
     # Sair não é uso: a sessão vai ser revogada, e o uso não é registrado.
     if principal is not None:
         record_principal(principal.owner_id, principal.via)
@@ -361,16 +359,15 @@ def _verify_csrf(request: Request, session: Session, principal: Principal, now: 
         principal.session_id,
         request.cookies.get(CSRF_COOKIE),
         request.headers.get(CSRF_HEADER),
+        previous_key=web_identity.csrf_previous_key,
     )
     if cross_site or not token_matches:
-        # Transação própria, como em `_audit_failure`; agregada por conta e minuto, para que a
-        # rajada forjada por outro site não inunde a auditoria.
-        with session.begin():
-            record_csrf_failure(session, user_id=principal.owner_id, ip=client_ip(request), now=now)
-        raise ApiProblem(ProblemCode.CSRF_FAILED, _CSRF_DETAIL)
+        _refuse_csrf(request, session, principal, now)
 
 
-def _verify_anonymous_csrf(request: Request) -> None:
+def _verify_csrf_pair(
+    request: Request, session: Session, principal: Principal | None, now: datetime
+) -> None:
     web_identity: WebIdentityConfig = request.app.state.web_identity
     cross_site = cross_site_request(
         request.headers.get("sec-fetch-site"),
@@ -381,7 +378,18 @@ def _verify_anonymous_csrf(request: Request) -> None:
         request.cookies.get(CSRF_COOKIE), request.headers.get(CSRF_HEADER)
     )
     if cross_site or not pair_matches:
-        raise ApiProblem(ProblemCode.CSRF_FAILED, _CSRF_DETAIL)
+        _refuse_csrf(request, session, principal, now)
+
+
+def _refuse_csrf(
+    request: Request, session: Session, principal: Principal | None, now: datetime
+) -> NoReturn:
+    if principal is not None:
+        # Transação própria, como em `_audit_failure`; agregada por conta e minuto, para que a
+        # rajada forjada por outro site não inunde a auditoria.
+        with session.begin():
+            record_csrf_failure(session, user_id=principal.owner_id, ip=client_ip(request), now=now)
+    raise ApiProblem(ProblemCode.CSRF_FAILED, _CSRF_DETAIL)
 
 
 def _audit_failure(

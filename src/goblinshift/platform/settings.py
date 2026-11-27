@@ -69,6 +69,8 @@ class WebIdentityConfig:
     csrf_key: bytes = field(repr=False)
     # Assina o cookie `__Secure-gs_login`, que leva só o marcador do estado do login (ADR 025).
     login_cookie_key: bytes = field(repr=False)
+    # Chave anterior do CSRF, só durante a troca do segredo (ADR 025); fora dela, None.
+    csrf_previous_key: bytes | None = field(default=None, repr=False)
 
 
 class Settings(BaseSettings):
@@ -157,6 +159,8 @@ class Settings(BaseSettings):
     github_client_id: str | None = None
     github_client_secret_file: Path | None = None
     csrf_secret_file: Path | None = None
+    # Só durante a troca do segredo do CSRF, por até 8 h, e opcional também em produção (ADR 025).
+    csrf_secret_previous_file: Path | None = None
     login_cookie_secret_file: Path | None = None
     # Teto de cada chamada ao Google e ao GitHub (3.2, "Timeouts em toda integração").
     oauth_http_timeout_s: float = Field(default=5.0, gt=0)
@@ -202,6 +206,16 @@ class Settings(BaseSettings):
                 self.login_cookie_secret_file,
                 _DEV_LOGIN_COOKIE_KEY,
             ),
+            csrf_previous_key=self._previous_csrf_key(production),
+        )
+
+    def _previous_csrf_key(self, production: bool) -> bytes | None:
+        """Chave anterior do CSRF, com as regras da atual; sem o arquivo, None em todo ambiente."""
+        if self.csrf_secret_previous_file is None:
+            return None
+        # Com o arquivo, `_server_key` só o lê e confere o tamanho: o padrão de dev nunca vale.
+        return self._server_key(
+            production, "GS_CSRF_SECRET_PREVIOUS_FILE", self.csrf_secret_previous_file, ""
         )
 
     def checked_public_origin(self) -> str:

@@ -5,6 +5,7 @@ nova entra sozinha. A mutação legítima de referência é o cancelamento de um
 passar pelo CSRF dá 404, e não 403.
 """
 
+import dataclasses
 from datetime import UTC, datetime, timedelta
 from uuid import UUID, uuid4
 
@@ -36,6 +37,9 @@ MUTATIONS = [
     for method, path, _rule in entries()
     if method in _MUTATING
 ]
+# `POST /auth/logout` confere o par e a origem, não o HMAC (#442, 46a): o token de outra sessão
+# tem teste próprio, `test_logout_confere_o_par_e_nao_o_hmac`.
+HMAC_MUTATIONS = [param for param in MUTATIONS if param.values != ("POST", "/auth/logout")]
 
 
 def _send(client: TestClient, method: str, path: str, headers: dict[str, str]) -> httpx.Response:
@@ -102,7 +106,7 @@ def test_mutacao_por_cookie_com_origin_de_outra_origem_e_recusada(
     assert_problem(_send(client, method, path, headers), 403, "CSRF_FAILED")
 
 
-@pytest.mark.parametrize(("method", "path"), MUTATIONS)
+@pytest.mark.parametrize(("method", "path"), HMAC_MUTATIONS)
 def test_mutacao_por_cookie_com_token_de_outra_sessao_e_recusada(
     app: FastAPI, client: TestClient, factory: sessionmaker[Session], method: str, path: str
 ) -> None:
@@ -245,3 +249,109 @@ def test_mutacao_legitima_estende_a_sessao_depois_de_um_minuto(
         AFTER_A_MINUTE,
         AFTER_A_MINUTE + timedelta(minutes=30),
     )
+
+
+# --- Troca do segredo do CSRF (#442, 46a) -----------------------------------------------------
+
+# Baixa entropia de propósito, para o gitleaks não confundir com segredo real.
+NEW_KEY = b"n" * 32
+LOGOUT = "/auth/logout"
+
+
+def _use_csrf_keys(app: FastAPI, *, current: bytes, previous: bytes | None) -> None:
+    app.state.web_identity = dataclasses.replace(
+        app.state.web_identity, csrf_key=current, csrf_previous_key=previous
+    )
+
+
+def _revoked_at(factory: sessionmaker[Session], session_id: UUID) -> datetime | None:
+    with factory() as session:
+        revoked: datetime | None = session.execute(
+            select(web_session.c.revoked_at).where(web_session.c.id == session_id)
+        ).scalar_one()
+    return revoked
+
+
+def test_logout_com_o_par_revoga_mesmo_com_o_segredo_trocado(
+    app: FastAPI, client: TestClient, factory: sessionmaker[Session]
+) -> None:
+    issued = open_session(app, new_user(factory))
+    _use_csrf_keys(app, current=NEW_KEY, previous=None)
+
+    response = client.post(LOGOUT, headers=session_headers(app, issued))
+
+    assert response.status_code == 204
+    assert _revoked_at(factory, issued.session_id) is not None
+
+
+def test_logout_confere_o_par_e_nao_o_hmac(
+    app: FastAPI, client: TestClient, factory: sessionmaker[Session]
+) -> None:
+    user_id = new_user(factory)
+    mine, other = open_session(app, user_id), open_session(app, user_id)
+    headers = session_headers(app, mine)
+    # Par bem formado e igual, mas assinado para outra sessão: outro site não o monta, porque o
+    # cookie é `__Host-`. Revoga a sessão do cookie, e só ela.
+    headers["Cookie"] = headers["Cookie"].replace(mine.csrf_token, other.csrf_token)
+    headers["X-CSRF-Token"] = other.csrf_token
+
+    response = client.post(LOGOUT, headers=headers)
+
+    assert response.status_code == 204
+    assert _revoked_at(factory, mine.session_id) is not None
+    assert _revoked_at(factory, other.session_id) is None
+
+
+def test_logout_sem_o_par_com_sessao_valida_e_auditado(
+    app: FastAPI, client: TestClient, factory: sessionmaker[Session]
+) -> None:
+    headers = session_headers(app, open_session(app, new_user(factory)))
+    del headers["X-CSRF-Token"]
+
+    assert_problem(client.post(LOGOUT, headers=headers), 403, "CSRF_FAILED")
+    assert _csrf_failures(factory) == ["failure"]
+
+
+def test_mutacao_com_a_chave_anterior_configurada_passa(
+    app: FastAPI, client: TestClient, factory: sessionmaker[Session]
+) -> None:
+    issued = open_session(app, new_user(factory))
+    old_key: bytes = app.state.web_identity.csrf_key
+    _use_csrf_keys(app, current=NEW_KEY, previous=old_key)
+
+    response = _send(client, "POST", CANCEL, session_headers(app, issued))
+
+    assert_problem(response, 404, "NOT_FOUND")
+
+
+def test_mutacao_sem_a_chave_anterior_403(
+    app: FastAPI, client: TestClient, factory: sessionmaker[Session]
+) -> None:
+    issued = open_session(app, new_user(factory))
+    _use_csrf_keys(app, current=NEW_KEY, previous=None)
+
+    response = _send(client, "POST", CANCEL, session_headers(app, issued))
+
+    assert_problem(response, 403, "CSRF_FAILED")
+
+
+def test_logout_cross_site_continua_recusado(
+    app: FastAPI, client: TestClient, factory: sessionmaker[Session]
+) -> None:
+    issued = open_session(app, new_user(factory))
+    _use_csrf_keys(app, current=NEW_KEY, previous=None)
+    headers = {**session_headers(app, issued), "Sec-Fetch-Site": "cross-site"}
+
+    response = client.post(LOGOUT, headers=headers)
+
+    assert_problem(response, 403, "CSRF_FAILED")
+    assert _revoked_at(factory, issued.session_id) is None
+
+
+def test_get_com_cookie_csrf_da_chave_antiga_continua_200(
+    app: FastAPI, client: TestClient, factory: sessionmaker[Session]
+) -> None:
+    issued = open_session(app, new_user(factory))
+    _use_csrf_keys(app, current=NEW_KEY, previous=None)
+
+    assert client.get("/api/v1/me", headers=session_headers(app, issued)).status_code == 200
