@@ -25,7 +25,12 @@ _COMMON_HEADERS = (
     # Nenhuma resposta da API é recurso para outro site embutir (img, script, fetch no-cors). O
     # download baixado pela própria origem, por navegação ou fetch, não é afetado.
     ("cross-origin-resource-policy", "same-origin"),
-    ("permissions-policy", "camera=(), microphone=(), geolocation=()"),
+    # Nega o que a aplicação não usa; o mesmo valor nos snippets do Nginx (#442, 31i).
+    (
+        "permissions-policy",
+        "camera=(), microphone=(), geolocation=(), payment=(), usb=(), serial=(), bluetooth=(), "
+        "display-capture=(), browsing-topics=()",
+    ),
     ("cache-control", "no-store"),
 )
 
