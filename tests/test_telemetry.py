@@ -12,7 +12,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, NoReturn
 from unittest.mock import Mock
-from uuid import UUID
+from uuid import UUID, uuid4
 
 import pytest
 import sqlalchemy
@@ -24,11 +24,24 @@ from fastapi import FastAPI, Request
 from fastapi.testclient import TestClient
 from opentelemetry.exporter.otlp.proto.common.trace_encoder import encode_spans
 from opentelemetry.instrumentation.sqlalchemy import SQLAlchemyInstrumentor
+from opentelemetry.propagate import get_global_textmap, set_global_textmap
+from opentelemetry.propagators.composite import CompositePropagator
 from opentelemetry.sdk.resources import Resource
 from opentelemetry.sdk.trace import ReadableSpan, TracerProvider
 from opentelemetry.sdk.trace.export import SimpleSpanProcessor, SpanExporter, SpanExportResult
 from opentelemetry.sdk.trace.export.in_memory_span_exporter import InMemorySpanExporter
-from opentelemetry.trace import Link, SpanKind, Status, StatusCode
+from opentelemetry.trace import (
+    Link,
+    NonRecordingSpan,
+    SpanContext,
+    SpanKind,
+    Status,
+    StatusCode,
+    TraceFlags,
+    format_span_id,
+    format_trace_id,
+    set_span_in_context,
+)
 from pydantic import SecretStr, ValidationError
 from sqlalchemy import Engine, create_engine, text
 from sqlalchemy.event import listen as real_listen
@@ -37,6 +50,7 @@ from sqlalchemy.exc import OperationalError
 from goblinshift.entrypoints import maintenance, worker
 from goblinshift.entrypoints.api import health
 from goblinshift.entrypoints.api.app import create_app
+from goblinshift.entrypoints.api.runs import _current_traceparent
 from goblinshift.entrypoints.shutdown import ShutdownFlag
 from goblinshift.platform import telemetry
 from goblinshift.platform.settings import MissingSecretError, Settings
@@ -185,6 +199,17 @@ def test_sem_exportador_nem_endpoint_nao_ha_processador(monkeypatch: pytest.Monk
     assert make_span_processor(None) is None
 
 
+@pytest.fixture(autouse=True)
+def _restore_global_propagator() -> Iterator[None]:
+    # `configure_tracing` esvazia o propagador global do processo: sem devolver o anterior, o
+    # resultado de outro teste dependeria da ordem de execução.
+    previous = get_global_textmap()
+    try:
+        yield
+    finally:
+        set_global_textmap(previous)
+
+
 # Spans de banco com a instrumentação real da API, sobre SQLite para não depender de Docker
 
 
@@ -192,6 +217,7 @@ CANARY = f"CANARY-{UUID(int=11)}"
 TEST_SETTINGS = Settings.model_validate({"environment": "test"})
 REVISION = "rev-teste"
 QUERY_ROUTE = "/consulta"
+UPLOAD_CONTENT_ROUTE = "/api/v1/uploads/{upload_id}/content"
 
 
 @dataclass(frozen=True)
@@ -237,6 +263,10 @@ def traced_app(tmp_path: Path) -> Iterator[TracedApp]:
     def query(request: Request) -> dict[str, int]:
         with request.app.state.engine.connect() as conn:
             return {"valor": conn.execute(text("SELECT 1")).scalar_one()}
+
+    @app.get(UPLOAD_CONTENT_ROUTE)
+    def upload_content(upload_id: UUID) -> dict[str, str]:
+        return {"upload": str(upload_id)}
 
     exporter = InMemorySpanExporter()
     configure_tracing(app, engine, Settings.model_validate({"environment": "test"}), exporter)
@@ -297,6 +327,48 @@ def test_span_de_banco_e_filho_da_requisicao_e_nao_conta_como_evento(
         assert "main" not in (span.attributes or {})
 
 
+@pytest.mark.parametrize(
+    ("method", "path", "status", "target", "url"),
+    [
+        # Sem rota: nenhum template para pôr no lugar do caminho; a URL fica só com a origem.
+        ("GET", "/api/v1/x/{c}", 404, "unmatched", "http://localhost"),
+        # 422: o parâmetro não é UUID, mas a rota casou e o template está em `http.route`.
+        (
+            "GET",
+            "/api/v1/uploads/{c}/content",
+            422,
+            UPLOAD_CONTENT_ROUTE,
+            f"http://localhost{UPLOAD_CONTENT_ROUTE}",
+        ),
+        # 405: a instrumentação grava o template também no casamento parcial.
+        (
+            "DELETE",
+            "/api/v1/uploads/{c}/content",
+            405,
+            UPLOAD_CONTENT_ROUTE,
+            f"http://localhost{UPLOAD_CONTENT_ROUTE}",
+        ),
+    ],
+)
+def test_caminho_do_span_e_so_o_template_da_rota(
+    traced_app: TracedApp, method: str, path: str, status: int, target: str, url: str
+) -> None:
+    canary = f"CANARY-{uuid4()}"
+    with TestClient(traced_app.app) as client:
+        response = client.request(method, path.format(c=canary))
+
+    assert response.status_code == status
+
+    spans = traced_app.exporter.get_finished_spans()
+    (main,) = [s for s in spans if (s.attributes or {}).get("main") is True]
+    attributes = main.attributes or {}
+    assert attributes["http.target"] == target
+    assert attributes["http.url"] == url
+    for span in spans:
+        assert canary not in span.name
+        assert canary not in json.dumps(dict(span.attributes or {}), default=str)
+
+
 def test_header_host_do_cliente_nao_vai_ao_evento_da_requisicao(traced_app: TracedApp) -> None:
     with TestClient(traced_app.app) as client:
         assert client.get(QUERY_ROUTE, headers={"Host": "canario.invalid"}).status_code == 200
@@ -345,6 +417,52 @@ def test_sonda_readyz_nao_gera_span_de_banco(traced_app: TracedApp) -> None:
 
     assert response.status_code == 200
     assert traced_app.exporter.get_finished_spans() == ()
+
+
+# Contexto de trace do cliente (37 a): nem amostragem nem `trace_id` vêm de fora
+
+SENT_TRACE = "4bf92f3577b34da6a3ce929d0e0e4736"
+SENT_SPAN = "00f067aa0ba902b7"
+
+
+def _all_span_text(spans: Sequence[ReadableSpan]) -> str:
+    # `to_json` traz nome, contexto (com o `tracestate`), atributos, eventos e links.
+    return "\n".join(span.to_json() for span in spans)
+
+
+@pytest.mark.parametrize(
+    "header",
+    [
+        f"00-{SENT_TRACE}-{SENT_SPAN}-00",
+        f"00-{SENT_TRACE}-{SENT_SPAN}-01",
+        f"ff-{SENT_TRACE}-{SENT_SPAN}-01",
+        "lixo",
+    ],
+)
+def test_traceparent_do_cliente_nao_decide_amostragem_nem_trace_id(
+    traced_app: TracedApp, header: str
+) -> None:
+    with TestClient(traced_app.app) as client:
+        response = client.get(
+            QUERY_ROUTE,
+            headers={"traceparent": header, "tracestate": f"k={CANARY}", "baggage": f"k={CANARY}"},
+        )
+
+    assert response.status_code == 200
+    spans = traced_app.exporter.get_finished_spans()
+    (main,) = [s for s in spans if (s.attributes or {}).get("main") is True]
+    assert format_trace_id(main.context.trace_id) != SENT_TRACE
+    assert main.parent is None
+    assert CANARY not in _all_span_text(spans)
+
+
+def test_traceparent_da_aceitacao_vem_do_span_corrente_sem_o_propagador_global() -> None:
+    set_global_textmap(CompositePropagator([]))
+    with TracerProvider().get_tracer("t").start_as_current_span("s") as span:
+        context = span.get_span_context()
+        assert context.trace_flags.sampled
+        ids = f"{format_trace_id(context.trace_id)}-{format_span_id(context.span_id)}"
+        assert _current_traceparent() == f"00-{ids}-{context.trace_flags:02x}"
 
 
 # Eventos `exception` dos spans do SQLAlchemy: o banco fora do ar não pode expor a conexão
@@ -706,6 +824,17 @@ def test_sem_escolha_a_fila_fica_no_padrao_do_sdk(monkeypatch: pytest.MonkeyPatc
     assert provider is not None
     provider.shutdown()
     assert recorded == [{"max_queue_size": None, "max_export_batch_size": None}]
+
+
+def test_provider_amostra_mesmo_com_pai_remoto_nao_amostrado() -> None:
+    provider = make_tracer_provider(TEST_SETTINGS, "t", InMemorySpanExporter())
+    assert provider is not None
+    unsampled = SpanContext(1, 2, is_remote=True, trace_flags=TraceFlags(TraceFlags.DEFAULT))
+    parent = set_span_in_context(NonRecordingSpan(unsampled))
+    try:
+        assert provider.get_tracer("t").start_span("x", context=parent).is_recording()
+    finally:
+        provider.shutdown()
 
 
 def test_worker_nao_escolhe_a_fila_da_api(monkeypatch: pytest.MonkeyPatch) -> None:
