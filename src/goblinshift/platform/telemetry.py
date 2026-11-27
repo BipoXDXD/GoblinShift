@@ -35,11 +35,21 @@ from opentelemetry.instrumentation.fastapi import FastAPIInstrumentor
 from opentelemetry.instrumentation.sqlalchemy import SQLAlchemyInstrumentor
 from opentelemetry.instrumentation.sqlalchemy.engine import EngineTracer
 from opentelemetry.instrumentation.utils import unwrap
+from opentelemetry.propagate import set_global_textmap
+from opentelemetry.propagators.textmap import (
+    CarrierT,
+    Getter,
+    Setter,
+    TextMapPropagator,
+    default_getter,
+    default_setter,
+)
 from opentelemetry.sdk.resources import Resource
 from opentelemetry.sdk.trace import Event as SdkEvent
 from opentelemetry.sdk.trace import ReadableSpan, SpanProcessor, TracerProvider
 from opentelemetry.sdk.trace import Span as SdkSpan
 from opentelemetry.sdk.trace.export import BatchSpanProcessor, SimpleSpanProcessor, SpanExporter
+from opentelemetry.sdk.trace.sampling import ALWAYS_ON
 from opentelemetry.trace import (
     NoOpTracer,
     Span,
@@ -407,7 +417,11 @@ UNKNOWN_ADDRESS = "unknown"
 # Atributos que a instrumentação ASGI preenche com a URL completa, query string incluída, ou com
 # o IP do cliente; nomes antigos e novos das convenções semânticas.
 _URL_ATTRIBUTES = ("http.url", "url.full")
-_TARGET_ATTRIBUTES = ("http.target",)
+_TARGET_ATTRIBUTES = ("http.target", "url.path")
+# Template da rota que a instrumentação FastAPI grava antes do hook, também no casamento parcial
+# (405); sem rota, este valor fica no lugar do caminho.
+_ROUTE_ATTRIBUTE = "http.route"
+UNMATCHED_ROUTE = "unmatched"
 # Preenchidos com o header `Host`, que o cliente escreve como quiser.
 _SERVER_NAME_ATTRIBUTES = ("http.server_name", "server.address")
 _QUERY_ATTRIBUTES = ("url.query",)
@@ -518,19 +532,22 @@ def _main_event_starter(public_origin: str) -> Callable[[Span, dict[str, Any]], 
 def _redact_request_attributes(
     span: Span, scope: dict[str, Any], public_origin: str, server_name: str
 ) -> None:
-    """Tira a query string, o IP completo e os headers que a instrumentação ASGI pôs no span.
+    """Tira o caminho, a query string, o IP completo e os headers que a instrumentação ASGI pôs.
 
-    A query carrega filtros e cursores, que são dados do usuário; User-Agent e Host são texto
-    livre do cliente, e nenhum header entra no evento (3.7). Só sobrescreve os atributos que já
-    existem, para não inventar nomes de outra versão das convenções.
+    O caminho cru carrega ids e qualquer texto de uma URL sem rota; no lugar dele vai o template
+    da rota (ou `UNMATCHED_ROUTE`), e a URL vira `public_origin` + template (sem rota, só a
+    origem: `UNMATCHED_ROUTE` colado nela pareceria outro host). A query carrega
+    filtros e cursores, que são dados do usuário; User-Agent e Host são texto livre do cliente,
+    e nenhum header entra no evento (3.7). Só sobrescreve os atributos que já existem, para não
+    inventar nomes de outra versão das convenções.
     """
     present = getattr(span, "attributes", None) or {}
-    path = str(scope.get("path", ""))
+    route = present.get(_ROUTE_ATTRIBUTE)
     client = scope.get("client")
     address = truncate_client_address(str(client[0])) if client else UNKNOWN_ADDRESS
     for names, value in (
-        (_URL_ATTRIBUTES, f"{public_origin}{path}"),
-        (_TARGET_ATTRIBUTES, path),
+        (_URL_ATTRIBUTES, f"{public_origin}{route}" if route else public_origin),
+        (_TARGET_ATTRIBUTES, str(route) if route else UNMATCHED_ROUTE),
         (_SERVER_NAME_ATTRIBUTES, server_name),
         (_QUERY_ATTRIBUTES, ""),
         (_CLIENT_ADDRESS_ATTRIBUTES, address),
@@ -644,6 +661,34 @@ def _without_exception_detail(event: SdkEvent) -> SdkEvent:
 TRACING_SHUTDOWN_TIMEOUT_S = 1.5
 
 
+class _IgnoreIncomingContext(TextMapPropagator):
+    """Propagador que não lê nem escreve contexto: cada requisição começa um trace novo.
+
+    `CompositePropagator([])` (o que `OTEL_PROPAGATORS=none` monta) devolve `None` no `extract`
+    e derruba a instrumentação ASGI; este devolve o contexto vazio.
+    """
+
+    def extract(
+        self,
+        carrier: CarrierT,
+        context: Context | None = None,
+        getter: Getter[CarrierT] = default_getter,
+    ) -> Context:
+        return context if context is not None else Context()
+
+    def inject(
+        self,
+        carrier: CarrierT,
+        context: Context | None = None,
+        setter: Setter[CarrierT] = default_setter,
+    ) -> None:
+        return None
+
+    @property
+    def fields(self) -> set[str]:
+        return set()
+
+
 @dataclass(frozen=True)
 class ApiTracing:
     """Tracer dos eventos que a API emite fora da requisição e o provider que a parada encerra."""
@@ -691,6 +736,11 @@ def configure_tracing(
     Sem `exporter` e sem endpoint OTLP, não instrumenta nada e devolve um tracer que não grava.
     `exporter` serve aos testes, que leem os spans de um `InMemorySpanExporter`.
     """
+    # A API não aceita contexto de trace de fora: com o propagador global vazio, a instrumentação
+    # ignora `traceparent`, `tracestate` e `baggage` e cada requisição abre um trace novo. O
+    # Nginx já apaga esses cabeçalhos (proxy-api.conf); isto cobre quem chega sem passar por ele.
+    # Quem precisa do `traceparent` (aceitação, worker) usa um propagador explícito.
+    set_global_textmap(_IgnoreIncomingContext())
     provider = make_tracer_provider(settings, "goblinshift-api", exporter, API_SPAN_QUEUE)
     if provider is None:
         return ApiTracing(NoOpTracer())
@@ -762,6 +812,9 @@ def make_tracer_provider(
             "deployment.environment": settings.environment,
         }
     )
-    provider = TracerProvider(resource=resource)
+    # `ALWAYS_ON`, não o `ParentBased` padrão: um pai remoto sem amostragem não descarta o span
+    # do evento amplo nem os contadores dos alertas. Amostrar é decisão do servidor, nunca de quem
+    # manda o `traceparent`.
+    provider = TracerProvider(resource=resource, sampler=ALWAYS_ON)
     provider.add_span_processor(processor)
     return provider

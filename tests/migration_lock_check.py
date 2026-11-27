@@ -22,6 +22,10 @@ negativo. Quem precisa dela marca `# lock-ok: <motivo>` na linha da operação o
 comentário logo acima. Operação sobre uma tabela que a mesma função acabou de criar não trava
 ninguém e dispensa a marca.
 
+Numa revisão com `autocommit_block()`, o retry do `lock_timeout` repete a revisão inteira: nela
+não pode haver mudança de schema (`schema_change_beside_autocommit_lines`), só dados e, dentro do
+bloco, o par `DROP INDEX CONCURRENTLY IF EXISTS` / CREATE INDEX CONCURRENTLY.
+
 `op` e `sa` só valem pelo import (`from alembic import op`, `import sqlalchemy as sa`) quando o
 nome não é ligado de nenhuma outra forma no módulo nem tem atributo atribuído; `import *` anula
 todos. O check lê o módulo inteiro, salvo as funções que só o `downgrade()` alcança. Continua
@@ -35,7 +39,7 @@ from collections import Counter
 from collections.abc import Callable, Iterator, Mapping
 
 from tests.migration_source import comments, is_marked
-from tests.migration_sql import PLACEHOLDER, IndexName, analyze_sql
+from tests.migration_sql import PLACEHOLDER, IndexName, analyze_sql, only_changes_rows
 
 REVISION_FILE = re.compile(r"^(\d{4})_\w+\.py$")
 LOCK_OK_MARK = re.compile(r"#\s*lock-ok:\s*\S")
@@ -267,6 +271,67 @@ def concurrent_index_without_cleanup_lines(source: str) -> list[int]:
                 unsafe.append(call.lineno)
             dropped.difference_update(created)
     return sorted(unsafe)
+
+
+def schema_change_beside_autocommit_lines(source: str) -> list[int]:
+    """Mudanças de schema numa revisão com `autocommit_block()`, dentro ou fora dele.
+
+    O bloco faz commit do que veio antes dele, e dentro dele cada instrução é comitada na hora,
+    mas o Alembic só grava o carimbo da revisão no fim. Se o CREATE INDEX CONCURRENTLY estoura o
+    `lock_timeout`, o retry do ADR 057 roda a revisão inteira de novo, e um ADD COLUMN já
+    aplicado falha com DuplicateColumn, sem retry. Passam só `op.get_context()`, `execute` de
+    SQL literal em que toda instrução é UPDATE ou DELETE (a idempotência delas fica com a
+    revisão do PR) e, dentro do bloco, o `DROP INDEX CONCURRENTLY IF EXISTS` e o CREATE INDEX
+    CONCURRENTLY que os checks de CONCURRENTLY reconhecem, uma instrução por chamada. A mudança
+    de schema vai para a revisão anterior (Split Phase). Nenhuma marca libera.
+    """
+    tree = ast.parse(source)
+    roots = _checked_roots(tree)
+    trusted = _trusted_names(tree, _binding_counts(tree))
+    blocks = [block for root in roots for block in _autocommit_blocks(root, trusted)]
+    if not blocks:
+        return []
+    assignments = _assignments(tree, _upgrade_scope(tree))
+    inside_autocommit = {id(call) for block in blocks for call in _calls_in_order(block)}
+    return sorted(
+        node.lineno
+        for root in roots
+        for node in ast.walk(root)
+        if isinstance(node, ast.Call)
+        and _changes_schema(node, trusted, assignments)
+        and not (id(node) in inside_autocommit and _is_concurrent_index_step(node, assignments))
+    )
+
+
+def _is_concurrent_index_step(call: ast.Call, assignments: Assignments) -> bool:
+    """`DROP INDEX CONCURRENTLY IF EXISTS` ou CREATE INDEX CONCURRENTLY, repetíveis no retry."""
+    name = _operation(call)
+    if name in {"create_index", "drop_index"}:
+        return bool(
+            _created_concurrent_indexes(call, assignments)
+            or _dropped_concurrent_indexes(call, assignments)
+        )
+    if name in EXECUTE_OPERATIONS:
+        texts = _sql_texts(call, assignments)
+        return bool(texts) and all(_is_single_concurrent_index_statement(text) for text in texts)
+    return False
+
+
+def _is_single_concurrent_index_statement(sql: str) -> bool:
+    facts = analyze_sql(sql)
+    return facts.statements == 1 and bool(
+        facts.created_concurrent_indexes or facts.dropped_concurrent_indexes
+    )
+
+
+def _changes_schema(call: ast.Call, trusted: Trusted, assignments: Assignments) -> bool:
+    """Operação do Alembic que pode mexer no schema; na dúvida, mexe."""
+    name = _op_operation(call, trusted)
+    if name is None or name == "get_context":
+        return False
+    if name in EXECUTE_OPERATIONS:
+        return not all(only_changes_rows(text) for text in _sql_texts(call, assignments))
+    return True
 
 
 def _checked_roots(tree: ast.Module) -> list[ast.stmt]:

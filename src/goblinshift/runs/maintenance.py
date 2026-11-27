@@ -85,6 +85,13 @@ DEFAULT_BATCH_SIZE = 50
 UNREADABLE_LOG_SAMPLE = 5
 # Alerta de causa (3.7): Run em `stopping` há mais que isto sem confirmar a parada.
 STUCK_STOPPING_AFTER = timedelta(minutes=10)
+# `run.finished` ao menos uma vez (D5 do #442): a Run terminal sem a marca de reportada é reemitida
+# passada a carência, que deixa quem a concluiu emitir primeiro; mais velha que o horizonte, não
+# volta, para uma falha que se repete não reemitir a mesma Run para sempre.
+UNREPORTED_FINISH_GRACE = timedelta(minutes=5)
+UNREPORTED_FINISH_HORIZON = timedelta(hours=24)
+# Contagem do evento do ciclo: Runs cujo `run.finished` a varredura reemitiu.
+FINISHES_REPORTED = "finishes_reported"
 # Contagem do evento do ciclo: passos que levantaram exceção. O ciclo segue para os outros, e a
 # volta conta como falha (`entrypoints/maintenance.run_cycles`, causa `gs-causa-ciclos-falhando`).
 STEPS_FAILED = "steps_failed"
@@ -248,6 +255,9 @@ class Maintenance:
         # Onde a varredura de ausentes parou. Só em memória: reiniciar o processo recomeça do
         # primeiro objeto, o que custa uma volta a mais e nada mais.
         self._missing_resume_after: uuid.UUID | None = None
+        # Onde a varredura das áreas de trabalho parou. Só em memória: evita que áreas vivas ou
+        # com falha no início do lote escondam as seguintes; ao passar do fim, volta ao início.
+        self._work_resume_after: uuid.UUID | None = None
         # Candidatos que ficaram no disco no ciclo em curso. Em atributo porque vêm de vários
         # passos, por `_decide`, cujo retorno já é a transição.
         self._candidates_left_on_disk = 0
@@ -308,6 +318,7 @@ class Maintenance:
             _Step("expire_queue", lambda: {"queue_expired": self.expire_queue()}),
             _Step("apply_deadlines", lambda: {"deadlines": self.apply_deadlines()}),
             _Step("release_orphan_holds", self.release_orphan_holds),
+            _Step("report_unreported_finishes", self.report_unreported_finishes),
             _Step("discard_stale_candidates", self.discard_stale_candidates),
             _Step(
                 "sweep_work_areas",
@@ -550,6 +561,22 @@ class Maintenance:
             )
         return len(terminal)
 
+    def report_unreported_finishes(self) -> dict[str, int]:
+        """Reemite o `run.finished` das Runs terminais que quem as concluiu não reportou.
+
+        Só as terminadas entre a carência e o horizonte, as mais antigas primeiro, até um lote. O
+        reporter grava a marca depois de emitir e engole a própria falha: a Run sem marca volta no
+        ciclo seguinte. Sem `on_finished` (manutenção sem telemetria), não há o que emitir.
+        """
+        on_finished = self._on_finished
+        if on_finished is None:
+            return {FINISHES_REPORTED: 0}
+        batch = self._config.batch_size
+        ids = self._at_db_now(lambda s, now: _unreported_finishes(s, now, batch))
+        for run_id in ids:
+            on_finished(run_id)
+        return {FINISHES_REPORTED: len(ids)}
+
     def discard_stale_candidates(self) -> dict[str, int]:
         """Candidatos de tentativas encerradas que não viraram artefato (gerações vencidas)."""
         with self._factory() as session, session.begin():
@@ -579,25 +606,51 @@ class Maintenance:
         """Remove executor e área de tentativas encerradas (ou sem registro) que ficaram para trás.
 
         A tentativa viva (`ended_at` nulo) é do worker ou da reconciliação de lease: não é tocada.
-        `should_stop` é conferido antes de cada área, nunca no meio dela.
+        Avança por cursor em ordem de UUID para que áreas presas ou vivas não travem as seguintes;
+        `should_stop` é conferido antes de cada área, nunca no meio dela, e áreas não examinadas
+        na interrupção não avançam o cursor.
         """
         try:
-            present = self._runner.list_work()[: self._config.batch_size]
+            present = sorted(self._runner.list_work())
         except OSError as error:
             logger.warning("área de trabalho ilegível", extra={"fields": exception_fields(error)})
             return 0
-        if not present:
+        remaining = [
+            attempt_id
+            for attempt_id in present
+            if self._work_resume_after is None or attempt_id > self._work_resume_after
+        ]
+        if not remaining:
+            self._work_resume_after = None
             return 0
-        live = self._live_attempts(present)
-        left_behind = [attempt_id for attempt_id in present if attempt_id not in live]
+        window = remaining[: self._config.batch_size]
+        if not window:
+            return 0
+        live = self._live_attempts(window)
+        left_behind_remaining = sum(1 for attempt_id in window if attempt_id not in live)
         removed = 0
-        for position, attempt_id in enumerate(left_behind):
+        last_examined: uuid.UUID | None = None
+        stopped = False
+        for attempt_id in window:
+            if attempt_id in live:
+                last_examined = attempt_id
+                continue
             if should_stop():
-                _log_items_left("sweep_work_areas", len(left_behind) - position)
+                _log_items_left("sweep_work_areas", left_behind_remaining)
+                stopped = True
                 break
+            left_behind_remaining -= 1
             status = self._confirm_ended(attempt_id, run_id=None)
             if status is not None and self._try_remove(attempt_id):
                 removed += 1
+            last_examined = attempt_id
+        if stopped:
+            if last_examined is not None:
+                self._work_resume_after = last_examined
+        elif len(remaining) > len(window):
+            self._work_resume_after = window[-1]
+        else:
+            self._work_resume_after = None
         return removed
 
     def _live_attempts(self, present: list[uuid.UUID]) -> set[uuid.UUID]:
@@ -839,7 +892,7 @@ class Maintenance:
                 "storage_global_max_bytes": storage.storage_max_bytes,
             }
 
-    def _at_db_now(self, step: Callable[[Session, datetime], int]) -> int:
+    def _at_db_now[T](self, step: Callable[[Session, datetime], T]) -> T:
         with self._factory() as session, session.begin():
             return step(session, db_now(session))
 
@@ -910,6 +963,22 @@ class Maintenance:
             release_pending=stopped.release_pending,
             discarded_keys=first.discarded_keys + stopped.discarded_keys,
         )
+
+
+def _unreported_finishes(session: Session, now: datetime, limit: int) -> list[uuid.UUID]:
+    return list(
+        session.execute(
+            select(run.c.id)
+            .where(
+                run.c.finished_at.is_not(None),
+                run.c.finished_reported_at.is_(None),
+                run.c.finished_at <= now - UNREPORTED_FINISH_GRACE,
+                run.c.finished_at >= now - UNREPORTED_FINISH_HORIZON,
+            )
+            .order_by(run.c.finished_at, run.c.id)
+            .limit(limit)
+        ).scalars()
+    )
 
 
 def _lease_expired() -> ColumnElement[bool]:

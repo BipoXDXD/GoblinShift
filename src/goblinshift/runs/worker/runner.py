@@ -26,6 +26,7 @@ Num container sem init (PID 1 que não colhe órfãos), o Compose precisa de `in
 
 import contextlib
 import json
+import logging
 import os
 import shutil
 import signal
@@ -66,6 +67,8 @@ EXECUTOR_MODULE = "goblinshift.processing.executor"
 SUPERVISOR_MODULE = "goblinshift.runs.worker.local_supervisor"
 STARTED_MARKER = "started"
 LOG_FILE = "executor.log"
+
+logger = logging.getLogger(__name__)
 
 
 class ExecutorPhase(StrEnum):
@@ -220,17 +223,42 @@ class LocalRunner:
     def remove(self, attempt_id: uuid.UUID) -> None:
         if self.status(attempt_id).is_running:
             raise RunnerError(f"executor de {attempt_id} ainda vivo; pare antes de remover")
-        shutil.rmtree(self.work_dir(attempt_id), ignore_errors=True)
-        shutil.rmtree(self._meta_dir(attempt_id), ignore_errors=True)
+        _remove_tree(self.work_dir(attempt_id), attempt_id=attempt_id)
+        _remove_tree(self._meta_dir(attempt_id), attempt_id=attempt_id)
 
     def _meta_dir(self, attempt_id: uuid.UUID) -> Path:
         # Fora da área do executor: ele não lê nem adultera o que o supervisor registra.
         return self._root / f"{container_name(attempt_id)}.runner"
 
 
+def _remove_tree(path: Path, *, attempt_id: uuid.UUID | None = None) -> None:
+    if not path.exists():
+        return
+    errors: list[BaseException] = []
+
+    def _record_error(_func: object, failed_path: object, exc: BaseException) -> None:
+        if isinstance(exc, FileNotFoundError) and failed_path in (path, str(path)):
+            return
+        errors.append(exc)
+
+    with contextlib.suppress(FileNotFoundError):
+        shutil.rmtree(path, onexc=_record_error)
+    if errors:
+        fields: dict[str, object] = {
+            "failures": len(errors),
+            "errnos": sorted(
+                {e.errno for e in errors if isinstance(e, OSError) and e.errno is not None}
+            ),
+            "error_type": type(errors[0]).__name__,
+        }
+        if attempt_id is not None:
+            fields["attempt_id"] = str(attempt_id)
+        logger.warning("arquivo da área não removido", extra={"fields": fields})
+
+
 def create_work_layout(work_dir: Path, *, group: int | None) -> None:
     """Recria `work_dir` vazio com `inputs/` e `out/`; com `group`, o diretório passa a ele."""
-    shutil.rmtree(work_dir, ignore_errors=True)
+    _remove_tree(work_dir, attempt_id=parse_attempt_id(work_dir.name))
     work_dir.mkdir(mode=0o700)
     if group is not None:
         os.chown(work_dir, -1, group)
