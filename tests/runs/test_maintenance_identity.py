@@ -10,6 +10,7 @@ import secrets
 import uuid
 from collections.abc import Callable
 from datetime import UTC, datetime, timedelta
+from functools import partial
 from pathlib import Path
 
 import psycopg
@@ -128,6 +129,18 @@ def request_deletion(factory: sessionmaker[Session], owner_id: uuid.UUID) -> Non
         request_account_deletion(session, owner_id, datetime.now(UTC))
 
 
+def real_canceller(
+    factory: sessionmaker[Session], storage: FileStorage
+) -> Callable[[uuid.UUID], object]:
+    """O cancelador que `serve` passa à purga, sem o `run.finished`."""
+    return partial(cancel_active_run, factory, storage, on_finished=None)
+
+
+def keep_run(_owner_id: uuid.UUID) -> None:
+    """Cancelador que não cancela: para os testes em que a Run da conta não importa ou precisa
+    seguir ativa."""
+
+
 def cycles_until_purged(
     factory: sessionmaker[Session],
     maintenance: Maintenance,
@@ -163,7 +176,9 @@ def test_delete_me_remove_tudo_em_poucos_ciclos_sem_usos(
         run_ids = list(session.execute(select(run.c.id).where(run.c.owner_id == owner)).scalars())
     request_deletion(factory, owner)
 
-    cycles = cycles_until_purged(factory, maintenance, AccountJobs(factory), owner)
+    jobs = AccountJobs(factory, cancel_active_run=real_canceller(factory, storage))
+
+    cycles = cycles_until_purged(factory, maintenance, jobs, owner)
 
     assert cycles <= 3
     assert set(count_owned(factory, owner).values()) == {0}
@@ -189,7 +204,8 @@ def test_delete_me_outra_conta_intacta(
     other_files = committed_keys(factory, other)
     request_deletion(factory, owner)
 
-    cycles_until_purged(factory, maintenance, AccountJobs(factory), owner)
+    jobs = AccountJobs(factory, cancel_active_run=real_canceller(factory, storage))
+    cycles_until_purged(factory, maintenance, jobs, owner)
 
     assert count_owned(factory, other) == before
     assert all(on_disk(storage, key) for key in other_files)
@@ -209,7 +225,11 @@ def test_purga_interrompida_no_meio_e_retomada_termina(
 ) -> None:
     owner, _ = full_account(factory, storage, work_root, "ana")
     request_deletion(factory, owner)
-    jobs = AccountJobs(factory, config=AccountJobsConfig(batch_size=1))
+    jobs = AccountJobs(
+        factory,
+        cancel_active_run=real_canceller(factory, storage),
+        config=AccountJobsConfig(batch_size=1),
+    )
     real_batch = files_purge.purge_owner_batch
     calls = 0
 
@@ -240,7 +260,8 @@ def test_execucao_ativa_adia_a_purga_ate_terminar(
     owner = create_user(factory, "ana")
     queue_run(factory, storage, owner)
     request_deletion(factory, owner)
-    jobs = AccountJobs(factory)
+    # Sem o cancelador da purga: a Run segue ativa até o cancelamento explícito abaixo.
+    jobs = AccountJobs(factory, cancel_active_run=keep_run)
 
     maintenance.run_cycle()
     counts = jobs.run_cycle()
@@ -261,7 +282,7 @@ def test_conta_sem_pedido_nao_e_purgada(
     queue_run(factory, storage, owner)
 
     maintenance.run_cycle()
-    AccountJobs(factory).run_cycle()
+    AccountJobs(factory, cancel_active_run=real_canceller(factory, storage)).run_cycle()
 
     assert count_owned(factory, owner)["app_user"] == 1
     assert count_owned(factory, owner)["run"] == 1
@@ -279,7 +300,8 @@ def test_auditoria_da_conta_purgada_fica(
         )
     request_deletion(factory, owner)
 
-    cycles_until_purged(factory, maintenance, AccountJobs(factory), owner)
+    jobs = AccountJobs(factory, cancel_active_run=real_canceller(factory, storage))
+    cycles_until_purged(factory, maintenance, jobs, owner)
 
     with factory() as session:
         users = session.execute(select(audit_event.c.user_id)).scalars().all()
@@ -318,7 +340,7 @@ def test_ciclo_aplica_a_retencao_da_identidade(factory: sessionmaker[Session]) -
         count_request(session, owner, RequestClass.READ, now - timedelta(minutes=3))
         count_request(session, owner, RequestClass.READ, now)
 
-    counts = AccountJobs(factory, clock=lambda: now).run_cycle()
+    counts = AccountJobs(factory, cancel_active_run=keep_run, clock=lambda: now).run_cycle()
 
     assert counts["login_states_removed"] == 1
     assert counts["web_sessions_removed"] == 1
@@ -337,7 +359,7 @@ def test_ciclo_de_contas_conta_api_keys_removed(factory: sessionmaker[Session]) 
         )
         active = issue_key(session, owner_id=owner, scopes=frozenset(Scope), now=now, days=30)
 
-    counts = AccountJobs(factory, clock=lambda: now).run_cycle()
+    counts = AccountJobs(factory, cancel_active_run=keep_run, clock=lambda: now).run_cycle()
 
     assert counts["api_keys_removed"] == 1
     with factory() as session:
@@ -368,7 +390,7 @@ def test_exclusao_atrasada_gera_alerta(
         )
 
     with caplog.at_level(logging.WARNING, logger="goblinshift.maintenance"):
-        counts = AccountJobs(factory, clock=lambda: now).run_cycle()
+        counts = AccountJobs(factory, cancel_active_run=keep_run, clock=lambda: now).run_cycle()
 
     assert counts["accounts_deletion_overdue"] == 1
     alerts = [r for r in caplog.records if getattr(r, "fields", {}).get("alert")]
@@ -441,7 +463,7 @@ def test_falha_na_purga_nao_impede_limpezas_nem_alerta(
     monkeypatch.setattr(identity_purge, "claim_accounts_for_purge", timing_out)
 
     with caplog.at_level(logging.WARNING):
-        counts = AccountJobs(factory, clock=lambda: now).run_cycle()
+        counts = AccountJobs(factory, cancel_active_run=keep_run, clock=lambda: now).run_cycle()
 
     assert counts["login_states_removed"] == 1
     assert counts["request_windows_removed"] == 1
@@ -482,7 +504,7 @@ def test_falha_na_purga_de_uma_conta_nao_impede_as_outras(
 
     maintenance.run_cycle()
     with caplog.at_level(logging.ERROR, logger="goblinshift.maintenance"):
-        counts = AccountJobs(factory).run_cycle()
+        counts = AccountJobs(factory, cancel_active_run=keep_run).run_cycle()
 
     assert count_owned(factory, other)["app_user"] == 0
     assert count_owned(factory, stuck)["app_user"] == 1
@@ -497,7 +519,7 @@ def test_falha_na_purga_de_uma_conta_nao_impede_as_outras(
 
 
 def test_ciclo_de_contas_sem_falha_conta_zero_passos_falhos(factory: sessionmaker[Session]) -> None:
-    counts = AccountJobs(factory).run_cycle()
+    counts = AccountJobs(factory, cancel_active_run=keep_run).run_cycle()
 
     assert (counts["account_steps_failed"], counts["accounts_purge_failed"]) == (0, 0)
 
@@ -513,7 +535,7 @@ def test_banco_inalcancavel_ainda_derruba_o_ciclo_de_contas(
     monkeypatch.setattr(identity_purge, "claim_accounts_for_purge", refused)
 
     with pytest.raises(DBAPIError):
-        AccountJobs(factory).run_cycle()
+        AccountJobs(factory, cancel_active_run=keep_run).run_cycle()
 
 
 def test_banco_inalcancavel_na_purga_de_uma_conta_derruba_o_ciclo(
@@ -541,10 +563,69 @@ def test_banco_inalcancavel_na_purga_de_uma_conta_derruba_o_ciclo(
     maintenance.run_cycle()
 
     with pytest.raises(DBAPIError):
-        AccountJobs(factory).run_cycle()
+        AccountJobs(factory, cancel_active_run=keep_run).run_cycle()
 
     assert attempted == [first]
     assert count_owned(factory, second)["app_user"] == 1
+
+
+def test_cancelamento_falho_na_purga_conta_e_tenta_no_ciclo_seguinte(
+    factory: sessionmaker[Session],
+    storage: FileStorage,
+    maintenance: Maintenance,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """51a: a Run que o `DELETE /me` não cancelou é cancelada pela purga; uma falha no
+    cancelamento conta, fica no log e a conta volta no ciclo seguinte."""
+    owner = create_user(factory, "ana")
+    queue_run(factory, storage, owner)
+    request_deletion(factory, owner)
+    real = real_canceller(factory, storage)
+    calls = 0
+
+    def failing_once(owner_id: uuid.UUID) -> object:
+        nonlocal calls
+        calls += 1
+        if calls == 1:
+            raise statement_timeout()
+        return real(owner_id)
+
+    jobs = AccountJobs(factory, cancel_active_run=failing_once)
+    maintenance.run_cycle()
+    with caplog.at_level(logging.ERROR, logger="goblinshift.maintenance"):
+        counts = jobs.run_cycle()
+
+    assert counts["accounts_cancel_failed"] == 1
+    assert counts["account_steps_failed"] == 1
+    assert count_owned(factory, owner)["app_user"] == 1
+    [failure] = [r for r in caplog.records if r.getMessage() == "purga: cancelamento falhou"]
+    assert failure.fields == {  # type: ignore[attr-defined]
+        "user_id": str(owner),
+        "error_type": "OperationalError",
+        "sqlstate": QUERY_CANCELED,
+    }
+
+    cycles_until_purged(factory, maintenance, jobs, owner)
+
+    assert calls >= 2
+    assert set(count_owned(factory, owner).values()) == {0}
+
+
+def test_banco_inalcancavel_no_cancelamento_da_purga_derruba_o_ciclo(
+    factory: sessionmaker[Session], storage: FileStorage, maintenance: Maintenance
+) -> None:
+    owner = create_user(factory, "ana")
+    queue_run(factory, storage, owner)
+    request_deletion(factory, owner)
+
+    def refused(_owner_id: uuid.UUID) -> object:
+        raise connection_refused()
+
+    maintenance.run_cycle()
+    with pytest.raises(DBAPIError):
+        AccountJobs(factory, cancel_active_run=refused).run_cycle()
+
+    assert count_owned(factory, owner)["run"] == 1
 
 
 def test_contas_com_falha_permanente_na_frente_nao_impedem_a_purga_das_seguintes(
@@ -569,7 +650,11 @@ def test_contas_com_falha_permanente_na_frente_nao_impedem_a_purga_das_seguintes
         return real_batch(session, owner_id, limit)
 
     monkeypatch.setattr(runs_purge, "purge_owner_batch", failing_for_stuck)
-    jobs = AccountJobs(factory, config=AccountJobsConfig(accounts_per_cycle=per_cycle))
+    jobs = AccountJobs(
+        factory,
+        cancel_active_run=keep_run,
+        config=AccountJobsConfig(accounts_per_cycle=per_cycle),
+    )
 
     for _ in range(MAX_CYCLES):
         maintenance.run_cycle()

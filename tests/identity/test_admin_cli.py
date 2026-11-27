@@ -6,6 +6,7 @@ import io
 from collections.abc import Iterator
 from contextlib import contextmanager
 from datetime import UTC, datetime, timedelta
+from functools import partial
 from pathlib import Path
 from uuid import UUID, uuid4, uuid7
 
@@ -39,6 +40,7 @@ from goblinshift.platform.settings import Settings
 from goblinshift.runs.finished import RunFinishedReporter
 from goblinshift.runs.lifecycle import Status
 from goblinshift.runs.maintenance import Maintenance
+from goblinshift.runs.purge import cancel_active_run
 from goblinshift.runs.quotas import QuotaOverride, quota_override
 from goblinshift.runs.tables import run as run_table
 from tests.identity.support import HASHER, new_user
@@ -450,7 +452,8 @@ def test_conta_bloqueada_com_exclusao_pedida_e_purgada_pela_manutencao(
 
     assert exit_code == EXIT_OK
     maintenance = Maintenance(factory, storage, local_runner(tmp_path / "work"))
-    jobs = AccountJobs(factory)
+    canceller = partial(cancel_active_run, factory, storage, on_finished=None)
+    jobs = AccountJobs(factory, cancel_active_run=canceller)
     for _ in range(MAX_PURGE_CYCLES):
         maintenance.run_cycle()
         jobs.run_cycle()

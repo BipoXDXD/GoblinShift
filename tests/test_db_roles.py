@@ -10,6 +10,7 @@ dos dois altera o `audit_event`, nem o `gs_app` o apaga.
 import re
 from collections.abc import Callable, Iterator
 from datetime import UTC, datetime, timedelta
+from functools import partial
 from pathlib import Path
 from uuid import UUID
 
@@ -32,6 +33,7 @@ from goblinshift.identity import (
 from goblinshift.platform.db import make_engine, make_session_factory, unit_of_work
 from goblinshift.platform.settings import Settings
 from goblinshift.runs.maintenance import Maintenance
+from goblinshift.runs.purge import cancel_active_run
 from tests.conftest import POSTGRES_IMAGE, run_migrations
 from tests.runs.worker_support import (
     claim,
@@ -296,7 +298,38 @@ def test_worker_e_manutencao_rodam_o_ciclo_de_uma_run_com_os_papeis_novos(
     assert run_row(app, run_id)["status"] == "succeeded"
     # Manutenção: reconciliação e retenção das Runs, contas e janelas, sem erro de permissão.
     Maintenance(maintenance, storage, runner).run_cycle()
-    AccountJobs(maintenance).run_cycle()
+    canceller = partial(cancel_active_run, maintenance, storage, on_finished=None)
+    AccountJobs(maintenance, cancel_active_run=canceller).run_cycle()
+
+
+@pytest.mark.integration
+def test_manutencao_cancela_e_purga_a_run_da_conta_pedida_com_o_papel_novo(
+    runtime_factory: Callable[[str], sessionmaker[Session]], owner: Engine, tmp_path: Path
+) -> None:
+    """51a: a Run que o `DELETE /me` não cancelou é cancelada pela purga, como `gs_maintenance`."""
+    app = runtime_factory("gs_app")
+    maintenance = runtime_factory("gs_maintenance")
+    storage = FileStorage(tmp_path / "storage")
+    user_id = create_user(app, "cancelamento-na-purga")
+    run_id = queue_run(app, storage, user_id)
+    with unit_of_work(app) as session:
+        request_account_deletion(session, user_id, datetime.now(UTC))
+    canceller = partial(cancel_active_run, maintenance, storage, on_finished=None)
+    jobs = AccountJobs(maintenance, cancel_active_run=canceller)
+
+    counts = jobs.run_cycle()
+
+    assert counts["accounts_cancel_failed"] == 0
+    assert run_row(app, run_id)["status"] == "canceled"
+    cycles = Maintenance(maintenance, storage, local_runner(tmp_path / "work"))
+    for _ in range(5):
+        cycles.run_cycle()
+        jobs.run_cycle()
+    with owner.connect() as connection:
+        remaining = connection.execute(
+            text("SELECT count(*) FROM app_user WHERE id = :id"), {"id": user_id}
+        ).scalar_one()
+    assert remaining == 0
 
 
 @pytest.mark.integration
@@ -312,7 +345,12 @@ def test_manutencao_apaga_o_audit_event_vencido_e_a_conta_pedida(
         request_account_deletion(session, user_id, now)
     later = now + AFTER_AUDIT_RETENTION
 
-    counts = AccountJobs(runtime_factory("gs_maintenance"), clock=lambda: later).run_cycle()
+    jobs = AccountJobs(
+        runtime_factory("gs_maintenance"),
+        cancel_active_run=lambda _owner_id: None,
+        clock=lambda: later,
+    )
+    counts = jobs.run_cycle()
 
     # Outro teste do módulo pode deixar outra conta com exclusão pedida: os contadores são do
     # ciclo inteiro, e a prova de que a conta pedida sumiu é relê-la.
