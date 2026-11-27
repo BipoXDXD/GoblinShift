@@ -35,7 +35,9 @@ BASE_IMAGE = (
 )
 TEST_IMAGE_TAG = "goblinshift-executor-ctl-test:latest"
 # Só para o Docker sem o image store do containerd, em que imagem construída não tem digest.
-REGISTRY_IMAGE = "registry:3.0.0"
+REGISTRY_IMAGE = (
+    "registry:3.0.0@sha256:6c5666b861f3505b116bb9aa9b25175e71210414bd010d92035ff64018f9457e"
+)
 FAKE_EXECUTOR = Path(__file__).with_name("fake_executor.py")
 WAIT_TIMEOUT_S = 30.0
 POLL_S = 0.1
