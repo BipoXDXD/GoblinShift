@@ -115,6 +115,7 @@ def chaves() -> Iterator[Chaves]:
     home.mkdir(mode=0o700)
     try:
         geradas: Chaves = {}
+        subchaves: dict[str, list[str]] = {}
         for nome in ("boa", "intrusa"):
             uid = f"{nome} <{nome}@teste.invalid>"
             _gpg(
@@ -130,12 +131,24 @@ def chaves() -> Iterator[Chaves]:
                 "never",
             )
             colunas = _gpg(home, "--with-colons", "--list-keys", uid).decode()
+            primaria = next(
+                linha.split(":")[9] for linha in colunas.splitlines() if linha.startswith("fpr:")
+            )
+            # Subchave de cifra: a impressão digital dela não pode valer como a da chave.
+            _gpg(home, "--pinentry-mode", "loopback", "--passphrase", "", "--quick-add-key",
+                 primaria, "cv25519", "encr", "never")  # fmt: skip
+            colunas = _gpg(home, "--with-colons", "--list-keys", uid).decode()
+            subchaves[nome] = [
+                linha.split(":")[9] for linha in colunas.splitlines() if linha.startswith("fpr:")
+            ][1:]
             fingerprint = next(
                 linha.split(":")[9] for linha in colunas.splitlines() if linha.startswith("fpr:")
             )
             arquivo = raiz / f"{nome}.asc"
             arquivo.write_bytes(_gpg(home, "--armor", "--export", uid))
             geradas[nome] = (arquivo, fingerprint)
+            assert len(subchaves[nome]) == 1
+            geradas[f"{nome}-subchave"] = (arquivo, subchaves[nome][0])
         yield geradas
     finally:
         # Encerra o agente que o gpg subiu para este GNUPGHOME.
@@ -176,6 +189,48 @@ def test_chave_apt_com_fingerprint_diferente_e_recusada(tmp_path: Path, chaves: 
     assert errado in resultado.stderr
 
 
+def test_impressao_digital_da_subchave_e_recusada(tmp_path: Path, chaves: Chaves) -> None:
+    arquivo, subchave = chaves["boa-subchave"]
+
+    assert _verify(tmp_path, arquivo, subchave).returncode != 0
+
+
+def test_arquivo_que_nao_e_chave_e_recusado(tmp_path: Path, chaves: Chaves) -> None:
+    _, fingerprint = chaves["boa"]
+    lixo = tmp_path / "lixo.asc"
+    lixo.write_text("<html>não é uma chave</html>\n")
+
+    assert _verify(tmp_path, lixo, fingerprint).returncode != 0
+
+
+def test_impressao_digital_esperada_vazia_recusa_tudo(tmp_path: Path) -> None:
+    lixo = tmp_path / "lixo.asc"
+    lixo.write_text("<html>não é uma chave</html>\n")
+
+    assert _verify(tmp_path, lixo, "").returncode != 0
+
+
+def test_sem_gpg_a_recusa_diz_o_motivo(tmp_path: Path, chaves: Chaves) -> None:
+    arquivo, fingerprint = chaves["boa"]
+    script = tmp_path / "verify.sh"
+    script.write_text(f'source "{APT_KEY_SH}"\nverify_apt_key "$1" "$2"\n')
+    vazio = tmp_path / "sem-gpg"
+    vazio.mkdir()
+    (vazio / "awk").symlink_to(shutil.which("awk") or "/usr/bin/awk")
+
+    resultado = subprocess.run(  # noqa: S603 - argumentos montados pelo teste, sem shell
+        [BASH, str(script), str(arquivo), fingerprint],
+        env={"PATH": str(vazio)},
+        capture_output=True,
+        text=True,
+        timeout=TIMEOUT_S,
+        check=False,
+    )
+
+    assert resultado.returncode != 0
+    assert "gpg" in resultado.stderr and "impressão digital ''" not in resultado.stderr
+
+
 def test_arquivo_com_chave_a_mais_e_recusado(tmp_path: Path, chaves: Chaves) -> None:
     boa, fingerprint = chaves["boa"]
     intrusa, _ = chaves["intrusa"]
@@ -208,7 +263,11 @@ def test_provision_confere_a_chave_do_docker_pela_impressao_digital() -> None:
 
 
 def _run_gvisor(
-    tmp_path: Path, *, installed: str | None, fingerprint: str | None = None
+    tmp_path: Path,
+    *,
+    installed: str | None,
+    fingerprint: str | None = None,
+    keyring_exists: bool = False,
 ) -> tuple[subprocess.CompletedProcess[str], list[str]]:
     """Roda uma cópia do gvisor.sh com /etc e /usr/share trocados por diretórios do teste."""
     deploy = tmp_path / "deploy"
@@ -217,6 +276,8 @@ def _run_gvisor(
     (etc / "apt" / "sources.list.d").mkdir(parents=True)
     (etc / "docker").mkdir()
     (tmp_path / "keyrings").mkdir()
+    if keyring_exists:
+        (tmp_path / "keyrings" / "gvisor-archive-keyring.gpg").write_text("anel antigo\n")
     texto = (
         GVISOR_SH.read_text(encoding="utf-8")
         .replace("[[ $EUID -eq 0 ]]", "[[ 0 -eq 0 ]]")
@@ -285,6 +346,25 @@ def test_chave_do_gvisor_errada_para_antes_da_fonte(tmp_path: Path) -> None:
     assert resultado.returncode != 0
     assert not (tmp_path / "etc" / "apt" / "sources.list.d" / "gvisor.list").exists()
     assert not any(linha.startswith("apt-get install -yq runsc") for linha in linhas)
+
+
+def test_anel_existente_com_chave_errada_para_antes_da_fonte(tmp_path: Path) -> None:
+    resultado, linhas = _run_gvisor(
+        tmp_path, installed=None, fingerprint="0" * 40, keyring_exists=True
+    )
+
+    assert resultado.returncode != 0
+    assert not any(linha.startswith("curl") for linha in linhas)
+    assert not (tmp_path / "etc" / "apt" / "sources.list.d" / "gvisor.list").exists()
+
+
+def test_runsc_ja_instalado_passa_a_fonte_para_a_suite_fixada(tmp_path: Path) -> None:
+    fonte = tmp_path / "etc" / "apt" / "sources.list.d" / "gvisor.list"
+
+    resultado, _ = _run_gvisor(tmp_path, installed="20250101.0", keyring_exists=True)
+
+    assert resultado.returncode == 0, resultado.stderr
+    assert f"releases {_version_env()['GVISOR_SUITE']} main" in fonte.read_text()
 
 
 def test_runsc_ja_instalado_na_versao_fixada_e_segurado(tmp_path: Path) -> None:

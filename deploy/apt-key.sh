@@ -5,6 +5,14 @@
 # Usado por deploy/gvisor.sh, deploy/provision.sh e scripts/ci-install-runsc.sh.
 verify_apt_key() {
   local arquivo=$1 esperado=$2 primarias
+  if [[ ! $esperado =~ ^[0-9A-F]{40}$ ]]; then
+    echo "impressão digital esperada inválida: '${esperado}' (40 hex, maiúsculas)" >&2
+    return 1
+  fi
+  if ! command -v gpg >/dev/null; then
+    echo "gpg ausente: instale o gnupg antes de conferir a chave apt (${arquivo})" >&2
+    return 1
+  fi
   primarias=$(gpg --batch --show-keys --with-colons "$arquivo" 2>/dev/null |
     awk -F: '$1 == "pub" { p = 1; next } $1 == "fpr" && p { print $10; p = 0 }') || primarias=""
   if [[ $primarias != "$esperado" ]]; then

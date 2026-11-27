@@ -22,12 +22,9 @@ KEYRING=/usr/share/keyrings/gvisor-archive-keyring.gpg
 note() { printf '==> %s\n' "$*"; }
 has_runsc_runtime() { docker info --format '{{json .Runtimes}}' | grep -q '"runsc"'; }
 
-note "Pacote runsc ${GVISOR_VERSION} (repositório oficial do gVisor, suíte fixada)"
-if ! dpkg -s runsc >/dev/null 2>&1; then
-  # O pós-instalação do pacote já registra o runtime no daemon.json e recarrega o Docker.
-  [[ -f /etc/docker/daemon.json ]] && cp -n /etc/docker/daemon.json /etc/docker/daemon.json.antes-do-gvisor
-  export DEBIAN_FRONTEND=noninteractive
-  apt-get install -yq curl gnupg
+# Anel conferido pela impressão digital e fonte na suíte fixada; vale também no host que já tem o
+# runsc, para a troca de versão descrita abaixo achar o pacote.
+configure_repo() {
   if [[ ! -f "$KEYRING" ]]; then
     key=$(mktemp)
     trap 'rm -f "$key"' EXIT
@@ -39,13 +36,23 @@ if ! dpkg -s runsc >/dev/null 2>&1; then
   verify_apt_key "$KEYRING" "$GVISOR_KEY_FINGERPRINT"
   echo "deb [arch=$(dpkg --print-architecture) signed-by=${KEYRING}] https://storage.googleapis.com/gvisor/releases ${GVISOR_SUITE} main" \
     > /etc/apt/sources.list.d/gvisor.list
+}
+
+note "Pacote runsc ${GVISOR_VERSION} (repositório oficial do gVisor, suíte fixada)"
+if ! dpkg -s runsc >/dev/null 2>&1; then
+  # O pós-instalação do pacote já registra o runtime no daemon.json e recarrega o Docker.
+  [[ -f /etc/docker/daemon.json ]] && cp -n /etc/docker/daemon.json /etc/docker/daemon.json.antes-do-gvisor
+  export DEBIAN_FRONTEND=noninteractive
+  apt-get install -yq curl gnupg
+  configure_repo
   apt-get update -q
   apt-get install -yq "runsc=${GVISOR_VERSION}"
   # Segurado: um `apt upgrade` não troca o runtime do sandbox sem o teste de aceitação.
   apt-mark hold runsc
 else
   # Trocar a versão é mudança no host, feita pelo dono: `apt-mark unhold runsc`,
-  # `apt-get install runsc=<nova>`, `apt-mark hold runsc` e o teste de aceitação.
+  # `apt-get update`, `apt-get install runsc=<nova>`, `apt-mark hold runsc` e o teste de aceitação.
+  configure_repo
   instalada=$(dpkg-query -W -f='${Version}' runsc)
   apt-mark hold runsc
   if [[ $instalada != "$GVISOR_VERSION" ]]; then
