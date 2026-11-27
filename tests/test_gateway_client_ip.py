@@ -35,6 +35,7 @@ from tests.gateway_support import (
     docker,
     gateway_image,
     gateway_proxy,
+    gateway_security_args,
     proxy_header,
     without_origin_certificate,
 )
@@ -119,6 +120,7 @@ def gateway(tmp_path_factory: pytest.TempPathFactory) -> Iterator[Gateway]:
         )  # fmt: skip
         docker(
             "run", "-d", "--name", proxy, "--network", network, "-p", "127.0.0.1::443",
+            *gateway_security_args(),
             "-v", f"{workdir / 'caddy'}:/etc/caddy:ro", image,
         )  # fmt: skip
         published = docker("port", proxy, "443/tcp").splitlines()[0].rsplit(":", 1)[1]
@@ -334,6 +336,7 @@ def origin_gateway(tmp_path_factory: pytest.TempPathFactory) -> Iterator[OriginG
             (config / "conf.d" / site.name).write_text(site.read_text())
         docker(
             "run", "-d", "--name", proxy, "--network", network, "-p", "127.0.0.1::443",
+            *gateway_security_args(),
             "-v", f"{config}:/etc/caddy:ro",
             "-v", f"{certificates}:{ORIGIN_CERT_DIR}:ro", gateway_image(),
         )  # fmt: skip

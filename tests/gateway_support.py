@@ -50,6 +50,18 @@ def gateway_proxy() -> dict[str, Any]:
     return proxy
 
 
+def gateway_security_args() -> list[str]:
+    """`cap_drop` e `security_opt` do proxy no `gateway.json`, como argumentos do `docker run`.
+
+    Os testes sobem o Caddy com as mesmas restrições da produção: se faltar uma capability (ler o
+    certificado, abrir a 443), o teste falha aqui, e não na Tarefa 28.
+    """
+    proxy = gateway_proxy()
+    caps = [arg for cap in proxy.get("cap_drop", []) for arg in ("--cap-drop", cap)]
+    options = [arg for opt in proxy.get("security_opt", []) for arg in ("--security-opt", opt)]
+    return caps + options
+
+
 def gateway_image() -> str:
     image: str = gateway_proxy()["image"]
     return image

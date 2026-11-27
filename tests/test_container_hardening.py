@@ -28,6 +28,7 @@ Os destinos conferidos são os que sobem de verdade: o Compose local, o da aceit
 de produção (mesclados pelo próprio `docker compose config`) e o JSON publicado pelo Coolify.
 """
 
+import json
 from typing import Any
 
 import pytest
@@ -150,3 +151,17 @@ def test_storage_init_mantem_o_chown(destinations: dict[str, dict[str, Any]]) ->
     # Roda como root para criar a pasta dos objetos com o dono `app`: precisa de CHOWN.
     assert "CHOWN" not in _caps(destinations["producao"]["storage-init"].get("cap_drop"))
     assert "CHOWN" not in _caps(destinations["coolify"]["storage-init"].get("cap_drop"))
+
+
+def test_proxy_do_gateway_fica_so_com_net_bind_service() -> None:
+    """Caddy como root só precisa abrir a 80 e a 443 (#442, 33b; D2).
+
+    A medição está nos testes `gateway` (tests/test_gateway_client_ip.py), que sobem o Caddy com
+    estas mesmas restrições, servem TLS e leem o certificado do volume.
+    """
+    gateway = json.loads((ROOT / "deploy" / "coolify" / "gateway.json").read_text())
+    proxy = gateway["services"]["proxy"]
+
+    assert DOCKER_DEFAULT_CAPS - _caps(proxy.get("cap_drop")) == {"NET_BIND_SERVICE"}
+    assert not proxy.get("cap_add")
+    assert NO_NEW_PRIVILEGES in proxy.get("security_opt", [])
