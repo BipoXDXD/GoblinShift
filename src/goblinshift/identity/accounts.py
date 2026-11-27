@@ -342,15 +342,21 @@ def request_account_deletion(session: Session, owner_id: UUID, now: datetime) ->
 
 
 def issue_key_for_session(
-    session: Session, *, owner_id: UUID, scopes: frozenset[Scope], days: int, now: datetime
+    session: Session,
+    *,
+    owner_id: UUID,
+    session_id: UUID,
+    scopes: frozenset[Scope],
+    days: int,
+    now: datetime,
 ) -> IssuedKey:
-    """Emite chave pela sessão web, dentro dos dois tetos da conta.
+    """Emite chave pela sessão web `session_id`, dentro dos dois tetos da conta.
 
-    Com `MAX_ACTIVE_KEYS` ativas levanta `ActiveKeyLimitError`; com `MAX_STORED_KEYS` guardadas,
-    contando revogadas e vencidas, `StoredKeyLimitError`. A linha da conta fica travada
-    (`FOR UPDATE`) da contagem até o INSERT: duas emissões simultâneas se enfileiram, e a segunda
-    conta a chave da primeira (sem write skew). A mesma trava enfileira a emissão atrás de um
-    bloqueio ou pedido de exclusão, que a recusa.
+    A linha da conta fica travada (`FOR UPDATE`) da reconferência até o INSERT. A mesma trava
+    enfileira a emissão atrás de um bloqueio, pedido de exclusão ou `logout-all`
+    (`sessions.revoke_all_credentials`), que a recusam: conta inativa, ou sessão que não existe,
+    é de outra conta, foi revogada ou venceu, levantam `UnknownAccountError`. Os tetos ficam em
+    `_issue_locked`.
     """
     account = session.execute(
         select(app_user.c.id)
@@ -363,6 +369,23 @@ def issue_key_for_session(
     ).first()
     if account is None:
         raise UnknownAccountError(f"conta {owner_id} não existe ou não está ativa")
+    # O Principal foi lido noutra transação: sem reconferir aqui, a emissão que esperou o
+    # `logout-all` sairia com chave ativa de uma sessão já revogada.
+    if not sessions.session_still_valid(session, session_id=session_id, owner_id=owner_id, now=now):
+        raise UnknownAccountError(f"a sessão {session_id} não vale mais para a conta {owner_id}")
+    return _issue_locked(session, owner_id=owner_id, scopes=scopes, days=days, now=now)
+
+
+def _issue_locked(
+    session: Session, *, owner_id: UUID, scopes: frozenset[Scope], days: int, now: datetime
+) -> IssuedKey:
+    """Miolo da emissão, com a linha da conta já travada por quem chama.
+
+    Com `MAX_ACTIVE_KEYS` ativas levanta `ActiveKeyLimitError`; com `MAX_STORED_KEYS` guardadas,
+    contando revogadas e vencidas, `StoredKeyLimitError`. Como a trava vale da contagem até o
+    INSERT, duas emissões simultâneas se enfileiram, e a segunda conta a chave da primeira (sem
+    write skew).
+    """
     active, stored = session.execute(
         select(
             func.count().filter(api_key.c.revoked_at.is_(None), api_key.c.expires_at > now),

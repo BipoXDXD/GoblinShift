@@ -28,7 +28,7 @@ from goblinshift.identity import (
 from goblinshift.identity.accounts import MAX_LISTED_KEYS, StoredKeyLimitError
 from goblinshift.identity.tables import api_key, app_user
 from goblinshift.platform.db import unit_of_work
-from tests.identity.support import HASHER, new_user
+from tests.identity.support import HASHER, new_user, new_web_session
 from tests.lock_support import in_thread, wait_until_someone_waits_for_a_lock
 
 pytestmark = pytest.mark.integration
@@ -37,9 +37,19 @@ NOW = datetime(2026, 10, 14, 12, 0, tzinfo=UTC)
 READ = frozenset({Scope.FILES_READ})
 
 
-def issue(factory: sessionmaker[Session], owner_id: UUID, now: datetime = NOW) -> IssuedKey:
+def issue(
+    factory: sessionmaker[Session],
+    owner_id: UUID,
+    now: datetime = NOW,
+    *,
+    session_id: UUID | None = None,
+) -> IssuedKey:
+    """Emite pela sessão `session_id`, ou por uma sessão nova da conta."""
+    web = session_id or new_web_session(factory, owner_id, now=NOW)
     with unit_of_work(factory) as session:
-        return issue_key_for_session(session, owner_id=owner_id, scopes=READ, days=30, now=now)
+        return issue_key_for_session(
+            session, owner_id=owner_id, session_id=web, scopes=READ, days=30, now=now
+        )
 
 
 def revoke(factory: sessionmaker[Session], owner_id: UUID, key: IssuedKey) -> None:
@@ -89,7 +99,14 @@ def test_chave_emitida_pela_sessao_autentica_com_os_escopos_pedidos(
     scopes = frozenset({Scope.RUNS_READ, Scope.RUNS_WRITE})
 
     with unit_of_work(factory) as session:
-        issued = issue_key_for_session(session, owner_id=owner, scopes=scopes, days=7, now=NOW)
+        issued = issue_key_for_session(
+            session,
+            owner_id=owner,
+            session_id=new_web_session(factory, owner, now=NOW),
+            scopes=scopes,
+            days=7,
+            now=NOW,
+        )
 
     assert issued.expires_at == NOW + timedelta(days=7)
     with unit_of_work(factory) as session:
@@ -105,7 +122,14 @@ def test_sexta_chave_ativa_e_recusada(factory: sessionmaker[Session]) -> None:
         issue(factory, owner)
 
     with pytest.raises(ActiveKeyLimitError), unit_of_work(factory) as session:
-        issue_key_for_session(session, owner_id=owner, scopes=READ, days=30, now=NOW)
+        issue_key_for_session(
+            session,
+            owner_id=owner,
+            session_id=new_web_session(factory, owner, now=NOW),
+            scopes=READ,
+            days=30,
+            now=NOW,
+        )
 
     assert active_count(factory, owner) == MAX_ACTIVE_KEYS
 
@@ -117,7 +141,12 @@ def test_chave_revogada_ou_vencida_libera_vaga(factory: sessionmaker[Session]) -
     # Uma vencida (emitida há 31 dias com validade de 30) e uma revogada não contam.
     with unit_of_work(factory) as session:
         issue_key_for_session(
-            session, owner_id=owner, scopes=READ, days=30, now=NOW - timedelta(days=30)
+            session,
+            owner_id=owner,
+            session_id=new_web_session(factory, owner, now=NOW),
+            scopes=READ,
+            days=30,
+            now=NOW - timedelta(days=30),
         )
     revoked = issue(factory, owner)
     with unit_of_work(factory) as session:
@@ -133,7 +162,12 @@ def test_vencida_no_instante_exato_nao_conta(factory: sessionmaker[Session]) -> 
         issue(factory, owner)
     with unit_of_work(factory) as session:
         issue_key_for_session(
-            session, owner_id=owner, scopes=READ, days=1, now=NOW - timedelta(days=1)
+            session,
+            owner_id=owner,
+            session_id=new_web_session(factory, owner, now=NOW),
+            scopes=READ,
+            days=1,
+            now=NOW - timedelta(days=1),
         )
 
     issue(factory, owner)
@@ -147,6 +181,7 @@ def test_um_segundo_antes_de_vencer_ainda_conta(factory: sessionmaker[Session]) 
         issue_key_for_session(
             session,
             owner_id=owner,
+            session_id=new_web_session(factory, owner, now=NOW),
             scopes=READ,
             days=1,
             now=NOW - timedelta(days=1) + timedelta(seconds=1),
@@ -209,10 +244,14 @@ def test_emissao_concorrente_espera_a_trava_e_ve_a_quinta_chave(
     owner = new_user(factory)
     for _ in range(MAX_ACTIVE_KEYS - 1):
         issue(factory, owner)
+    # As sessões nascem antes da trava: o INSERT da sessão também esperaria a conta travada.
+    first_web, second_web = (new_web_session(factory, owner, now=NOW) for _ in range(2))
 
     with factory() as first, first.begin():
-        issue_key_for_session(first, owner_id=owner, scopes=READ, days=30, now=NOW)
-        second = in_thread(lambda: issue(factory, owner))
+        issue_key_for_session(
+            first, owner_id=owner, session_id=first_web, scopes=READ, days=30, now=NOW
+        )
+        second = in_thread(lambda: issue(factory, owner, session_id=second_web))
         wait_until_someone_waits_for_a_lock(factory, "a segunda emissão")
 
     with pytest.raises(ActiveKeyLimitError):
@@ -237,14 +276,21 @@ def test_conta_bloqueada_ou_em_exclusao_nao_emite_chave(
 
 def test_conta_inexistente_nao_emite_chave(factory: sessionmaker[Session]) -> None:
     with pytest.raises(UnknownAccountError):
-        issue(factory, uuid7())
+        issue(factory, uuid7(), session_id=uuid7())
 
 
 def test_sem_escopo_e_recusado(factory: sessionmaker[Session]) -> None:
     owner = new_user(factory)
 
     with pytest.raises(InvalidScopesError), unit_of_work(factory) as session:
-        issue_key_for_session(session, owner_id=owner, scopes=frozenset(), days=30, now=NOW)
+        issue_key_for_session(
+            session,
+            owner_id=owner,
+            session_id=new_web_session(factory, owner, now=NOW),
+            scopes=frozenset(),
+            days=30,
+            now=NOW,
+        )
 
 
 @pytest.mark.parametrize("days", [0, 91])
@@ -252,7 +298,14 @@ def test_validade_fora_da_faixa_e_recusada(factory: sessionmaker[Session], days:
     owner = new_user(factory)
 
     with pytest.raises(InvalidKeyLifetimeError), unit_of_work(factory) as session:
-        issue_key_for_session(session, owner_id=owner, scopes=READ, days=days, now=NOW)
+        issue_key_for_session(
+            session,
+            owner_id=owner,
+            session_id=new_web_session(factory, owner, now=NOW),
+            scopes=READ,
+            days=days,
+            now=NOW,
+        )
 
     assert active_count(factory, owner) == 0
 
@@ -313,7 +366,12 @@ def test_listagem_poe_as_ativas_antes_das_vencidas_e_revogadas(
     active = issue(factory, owner, NOW - timedelta(days=10))
     with unit_of_work(factory) as session:
         expired = issue_key_for_session(
-            session, owner_id=owner, scopes=READ, days=1, now=NOW - timedelta(days=5)
+            session,
+            owner_id=owner,
+            session_id=new_web_session(factory, owner, now=NOW),
+            scopes=READ,
+            days=1,
+            now=NOW - timedelta(days=5),
         )
     revoked = issue(factory, owner, NOW - timedelta(days=1))
     with unit_of_work(factory) as session:

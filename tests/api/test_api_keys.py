@@ -10,6 +10,7 @@ from fastapi.testclient import TestClient
 from sqlalchemy import func, select, update
 from sqlalchemy.orm import Session, sessionmaker
 
+from goblinshift.entrypoints.api import api_keys as api_keys_route
 from goblinshift.identity import (
     MAX_ACTIVE_KEYS,
     MAX_KEY_DAYS,
@@ -17,6 +18,8 @@ from goblinshift.identity import (
     Scope,
     authenticate_api_key,
     issue_key,
+    issue_key_for_session,
+    revoke_session,
 )
 from goblinshift.identity.keys import MIN_KEY_DAYS
 from goblinshift.identity.tables import api_key, app_user, audit_event
@@ -43,7 +46,7 @@ SUMMARY_KEYS = {
 
 @pytest.fixture
 def sessions(app: FastAPI) -> SimulatedSessions:
-    return SimulatedSessions(app, NOW)
+    return SimulatedSessions(app, NOW, persisted=True)
 
 
 def create_key(client: TestClient, body: object = VALID) -> dict[str, Any]:
@@ -287,6 +290,30 @@ def test_conta_bloqueada_depois_da_autenticacao_nao_emite(
     sessions.sign_in(owner)
     with unit_of_work(factory) as session:
         session.execute(update(app_user).where(app_user.c.id == owner).values(status="blocked"))
+
+    response = client.post(KEYS, json=VALID)
+
+    assert_problem(response, 401, "AUTHENTICATION_REQUIRED")
+    assert key_count(factory, owner) == 0
+
+
+def test_post_api_keys_com_sessao_revogada_no_meio_401(
+    client: TestClient,
+    factory: sessionmaker[Session],
+    sessions: SimulatedSessions,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    # O `logout` (ou o `logout-all`) confirma entre a autenticação e a emissão: o Principal já foi
+    # lido, então só a reconferência da sessão sob a trava da conta impede a chave.
+    owner = new_user(factory)
+    sessions.sign_in(owner)
+
+    def revoke_then_issue(session: Session, **kwargs: Any) -> object:
+        with unit_of_work(factory) as other:
+            revoke_session(other, sessions.session_id, NOW)
+        return issue_key_for_session(session, **kwargs)
+
+    monkeypatch.setattr(api_keys_route, "issue_key_for_session", revoke_then_issue)
 
     response = client.post(KEYS, json=VALID)
 

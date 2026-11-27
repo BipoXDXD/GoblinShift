@@ -101,11 +101,18 @@ def create_api_key(
     request: Request,
     response: Response,
 ) -> CreatedApiKey:
+    if principal.session_id is None:
+        raise RuntimeError("Principal de sessão sem session_id")
     scopes = frozenset(command.scopes)
     try:
         with session.begin():
             issued = issue_key_for_session(
-                session, owner_id=principal.owner_id, scopes=scopes, days=command.days, now=now
+                session,
+                owner_id=principal.owner_id,
+                session_id=principal.session_id,
+                scopes=scopes,
+                days=command.days,
+                now=now,
             )
             _audit(session, AuditEventType.KEY_ISSUED, principal.owner_id, request, now)
     except ActiveKeyLimitError:

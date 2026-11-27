@@ -7,7 +7,8 @@ regra já vale. As hipóteses:
 - (b) `issue_key_for_session` concede escopo que a conta não tem, ou emite para conta inativa;
 - (c) `authenticate_api_key` e `authenticate_session` divergem sobre status e exclusão;
 - (d) bloqueio concorrente com um login em andamento deixa uma sessão viva;
-- (e) `revoke_key` (por `public_id`, sem dono) alcançável fora da CLI do administrador.
+- (e) `revoke_key` (por `public_id`, sem dono) alcançável fora da CLI do administrador;
+- (f) emissão com o Principal lido antes do `logout-all` sobrevive com chave ativa (#442, 49b).
 """
 
 import threading
@@ -18,7 +19,7 @@ from pathlib import Path
 from uuid import UUID
 
 import pytest
-from sqlalchemy import select, text, update
+from sqlalchemy import func, select, text, update
 from sqlalchemy.orm import Session, sessionmaker
 
 from goblinshift.identity import (
@@ -34,12 +35,14 @@ from goblinshift.identity import (
     issue_key_for_session,
     request_account_deletion,
     resolve_login,
+    revoke_all_credentials,
     start_session,
     unblock_account,
 )
-from goblinshift.identity.tables import app_user, web_session
+from goblinshift.identity.tables import api_key, app_user, web_session
 from goblinshift.platform.db import unit_of_work
-from tests.identity.support import HASHER, new_key, new_user
+from tests.identity.support import HASHER, new_key, new_user, new_web_session
+from tests.lock_support import in_thread, wait_until_someone_waits_for_a_lock
 
 pytestmark = pytest.mark.integration
 
@@ -93,7 +96,14 @@ def test_emissao_sem_escopo_e_recusada(factory: sessionmaker[Session]) -> None:
     user_id = new_user(factory)
 
     with pytest.raises(InvalidScopesError), unit_of_work(factory) as session:
-        issue_key_for_session(session, owner_id=user_id, scopes=frozenset(), days=30, now=NOW)
+        issue_key_for_session(
+            session,
+            owner_id=user_id,
+            session_id=new_web_session(factory, user_id, now=NOW),
+            scopes=frozenset(),
+            days=30,
+            now=NOW,
+        )
 
 
 @pytest.mark.parametrize("state", ["blocked", "deletion_requested"])
@@ -103,17 +113,30 @@ def test_emissao_para_conta_inativa_e_recusada(factory: sessionmaker[Session], s
         with unit_of_work(factory) as session:
             request_account_deletion(session, user_id, NOW)
 
+    web = new_web_session(factory, user_id, now=NOW)
+
     with pytest.raises(UnknownAccountError), unit_of_work(factory) as session:
         issue_key_for_session(
-            session, owner_id=user_id, scopes=frozenset({Scope.RUNS_READ}), days=30, now=NOW
+            session,
+            owner_id=user_id,
+            session_id=web,
+            scopes=frozenset({Scope.RUNS_READ}),
+            days=30,
+            now=NOW,
         )
 
 
 def test_chave_emitida_tem_so_os_escopos_pedidos(factory: sessionmaker[Session]) -> None:
     user_id = new_user(factory)
+    web = new_web_session(factory, user_id, now=NOW)
     with unit_of_work(factory) as session:
         issued = issue_key_for_session(
-            session, owner_id=user_id, scopes=frozenset({Scope.FILES_READ}), days=30, now=NOW
+            session,
+            owner_id=user_id,
+            session_id=web,
+            scopes=frozenset({Scope.FILES_READ}),
+            days=30,
+            now=NOW,
         )
 
     with unit_of_work(factory) as session:
@@ -262,3 +285,79 @@ def test_revoke_key_sem_dono_so_e_chamada_pela_cli_do_administrador() -> None:
     )
 
     assert callers == ["entrypoints/admin_cli.py"]
+
+
+# --- (f) emissão contra o `logout-all` --------------------------------------------------------
+
+
+def _issue(factory: sessionmaker[Session], user_id: UUID, web: UUID, now: datetime = NOW) -> object:
+    with unit_of_work(factory) as session:
+        return issue_key_for_session(
+            session,
+            owner_id=user_id,
+            session_id=web,
+            scopes=frozenset({Scope.RUNS_READ}),
+            days=30,
+            now=now,
+        )
+
+
+def _active_keys(factory: sessionmaker[Session], user_id: UUID) -> int:
+    with factory() as session:
+        count: int = session.execute(
+            select(func.count())
+            .select_from(api_key)
+            .where(api_key.c.owner_id == user_id, api_key.c.revoked_at.is_(None))
+        ).scalar_one()
+    return count
+
+
+def test_emissao_com_principal_de_antes_do_logout_all_e_recusada(
+    factory: sessionmaker[Session],
+) -> None:
+    # O Principal foi lido numa transação; o `logout-all` confirmou antes da emissão começar.
+    user_id = new_user(factory)
+    web = new_web_session(factory, user_id, now=NOW)
+    with unit_of_work(factory) as session:
+        revoke_all_credentials(session, user_id, NOW)
+
+    with pytest.raises(UnknownAccountError):
+        _issue(factory, user_id, web)
+
+    assert _active_keys(factory, user_id) == 0
+
+
+def test_emissao_espera_o_logout_all_e_e_recusada(factory: sessionmaker[Session]) -> None:
+    user_id = new_user(factory)
+    web = new_web_session(factory, user_id, now=NOW)
+
+    with unit_of_work(factory) as logout:
+        revoke_all_credentials(logout, user_id, NOW)
+        emission = in_thread(lambda: _issue(factory, user_id, web))
+        wait_until_someone_waits_for_a_lock(factory, "a emissão")
+
+    with pytest.raises(UnknownAccountError):
+        emission.result()
+    assert _active_keys(factory, user_id) == 0
+
+
+def test_emissao_com_sessao_de_outra_conta_e_recusada(factory: sessionmaker[Session]) -> None:
+    user_id, other = new_user(factory), new_user(factory)
+    others_session = new_web_session(factory, other, now=NOW)
+
+    with pytest.raises(UnknownAccountError):
+        _issue(factory, user_id, others_session)
+
+    assert _active_keys(factory, user_id) == 0
+
+
+def test_emissao_com_sessao_vencida_e_recusada(factory: sessionmaker[Session]) -> None:
+    # Fronteira igual à de `resolve_session`: no instante do prazo a sessão já não vale. O prazo de
+    # inatividade nunca passa do absoluto, então vencer um basta para cobrir os dois.
+    user_id = new_user(factory)
+    web = new_web_session(factory, user_id, now=NOW)
+
+    with pytest.raises(UnknownAccountError):
+        _issue(factory, user_id, web, NOW + timedelta(minutes=30))
+
+    assert _active_keys(factory, user_id) == 0
