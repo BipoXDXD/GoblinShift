@@ -57,3 +57,16 @@ updates:
       interval: weekly
     cooldown:
       default-days: 7
+
+  # Imagens base dos Dockerfiles (docker/*.Dockerfile), fixadas por tag e digest: o Dependabot
+  # propõe o digest novo da mesma tag e a tag nova. Os digests de compose*.yaml e de
+  # deploy/coolify/*.json seguem à mão, e tests/test_compose_image_digests.py confere a coerência;
+  # o uv da imagem anda junto com o `version:` de todo setup-uv (tests/test_dependencies.py).
+  # O `FROM app` do worker-dev.Dockerfile é a imagem local, sem registro.
+  - package-ecosystem: docker
+    directory: /docker
+    open-pull-requests-limit: 1
+    schedule:
+      interval: weekly
+    cooldown:
+      default-days: 7

@@ -43,7 +43,7 @@ jobs:
           node-version-file: web/.nvmrc
           cache: npm
           cache-dependency-path: web/package-lock.json
-      - run: npm ci
+      - run: npm ci --ignore-scripts
       - name: WebKit fixado pelo Playwright do lockfile
         run: npx playwright install webkit
       - run: npm run build
@@ -84,7 +84,7 @@ jobs:
           node-version-file: web/.nvmrc
           cache: npm
           cache-dependency-path: web/package-lock.json
-      - run: npm ci
+      - run: npm ci --ignore-scripts
       - name: Versão do Playwright (chave do cache do navegador)
         id: playwright
         run: echo "version=$(npm ls @playwright/test --json | jq -r '.dependencies["@playwright/test"].version')" >> "$GITHUB_OUTPUT"

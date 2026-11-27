@@ -74,6 +74,7 @@ jobs:
           python-version-file: .python-version
       - uses: astral-sh/setup-uv@68559e99cc807c1eb7e9238fd43a15bba460eec2 # v10.3.3
         with:
+          version: "0.12.15"
           # Job com chave de produção: nada restaurado de cache, tudo conferido pelo uv.lock.
           enable-cache: false
       - run: uv sync --locked
