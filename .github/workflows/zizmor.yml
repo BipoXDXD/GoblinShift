@@ -1,16 +1,14 @@
 name: Auditoria dos workflows
 
-# zizmor (análise estática de segurança do GitHub Actions e do dependabot.yml) só quando muda o que
-# ele audita (`.github/`) ou o script que o instala: fora disso não há o que auditar, e o job fica
-# fora do commit stage do ci.yml. O scripts/ci-zizmor.sh instala o zizmor por hash (versão e hashes
-# em .github/zizmor/requirements.txt) e é o mesmo portão local; o achado justificado leva
-# `# zizmor: ignore[...]` na própria linha.
+# zizmor (análise estática de segurança do GitHub Actions e do dependabot.yml) em todo PR e em todo
+# push na main, sem filtro de caminho: com filtro, o check fica pendente nos PRs que não mexem em
+# `.github/` e não pode ser obrigatório na proteção da branch. Roda offline, em segundos. O
+# scripts/ci-zizmor.sh instala o zizmor por hash (versão e hashes em .github/zizmor/requirements.txt)
+# e é o mesmo portão local; o achado justificado leva `# zizmor: ignore[...]` na própria linha.
 on:
   pull_request:
-    paths: [".github/**", "scripts/ci-zizmor.sh"]
   push:
     branches: [main]
-    paths: [".github/**", "scripts/ci-zizmor.sh"]
 
 permissions:
   contents: read
