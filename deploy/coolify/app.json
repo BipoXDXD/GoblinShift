@@ -50,6 +50,7 @@
         ],
         "timeout": "3s"
       },
+      "stop_grace_period": "15s",
       "image": "${GS_APP_IMAGE:-ghcr.io/bipoxdxd/goblinshift:sha-03f15c824029@sha256:54e9c5f01c78fa7e005994a4a3266b0180481c6ed018da289e7648abfdddd2cc}",
       "logging": {
         "driver": "local",
@@ -136,7 +137,7 @@
           "CMD",
           "python",
           "-c",
-          "import sys\nfrom pathlib import Path\nfrom datetime import timedelta\nfrom uuid import UUID\nfrom goblinshift.platform.settings import Settings\nfrom goblinshift.platform.db import make_engine\nfrom goblinshift.runs.worker.executor_ctl_runner import ExecutorCtlRunner\nif not any(Path(arg).name == sys.argv[1] for arg in Path('/proc/1/cmdline').read_text().split('\\0')):\n    raise SystemExit('expected service process is absent')\nsettings = Settings(db_connect_timeout_s=2)\nengine = make_engine(settings)\ntry:\n    with engine.connect() as connection:\n        connection.exec_driver_sql('SELECT 1').scalar_one()\nfinally:\n    engine.dispose()\nExecutorCtlRunner(settings.executor_ctl_socket, settings.work_root, work_group=settings.executor_group_id, call_timeout=timedelta(seconds=2)).status(UUID('00000000-0000-4000-8000-000000000000'))",
+          "import sys\nfrom pathlib import Path\nif not any(Path(arg).name == sys.argv[1] for arg in Path('/proc/1/cmdline').read_text().split('\\0')):\n    raise SystemExit('expected service process is absent')",
           "gs-maintenance"
         ]
       },
@@ -449,7 +450,7 @@
           "CMD",
           "python",
           "-c",
-          "import sys\nfrom pathlib import Path\nfrom datetime import timedelta\nfrom uuid import UUID\nfrom goblinshift.platform.settings import Settings\nfrom goblinshift.platform.db import make_engine\nfrom goblinshift.runs.worker.executor_ctl_runner import ExecutorCtlRunner\nif not any(Path(arg).name == sys.argv[1] for arg in Path('/proc/1/cmdline').read_text().split('\\0')):\n    raise SystemExit('expected service process is absent')\nsettings = Settings(db_connect_timeout_s=2)\nengine = make_engine(settings)\ntry:\n    with engine.connect() as connection:\n        connection.exec_driver_sql('SELECT 1').scalar_one()\nfinally:\n    engine.dispose()\nExecutorCtlRunner(settings.executor_ctl_socket, settings.work_root, work_group=settings.executor_group_id, call_timeout=timedelta(seconds=2)).status(UUID('00000000-0000-4000-8000-000000000000'))",
+          "import sys\nfrom pathlib import Path\nif not any(Path(arg).name == sys.argv[1] for arg in Path('/proc/1/cmdline').read_text().split('\\0')):\n    raise SystemExit('expected service process is absent')",
           "gs-worker"
         ]
       },

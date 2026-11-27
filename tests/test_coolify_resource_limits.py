@@ -191,3 +191,49 @@ def test_o_compose_interpreta_os_tetos_como_declarados(path: Path) -> None:
         assert int(applied["memory"]) == memory_mib(limits) * MIB, name
         assert float(applied["cpus"]) == float(limits["cpus"]), name
         assert int(applied["pids"]) == limits["pids"], name
+
+
+# Saúde e carência (#442, 34c e 34d; D4).
+APP_JSON = ROOT / "deploy" / "coolify" / "app.json"
+DOCKERFILE = ROOT / "docker" / "app.Dockerfile"
+TELEMETRY = ROOT / "src" / "goblinshift" / "platform" / "telemetry.py"
+
+
+def _app_services() -> dict[str, Any]:
+    services: dict[str, Any] = json.loads(APP_JSON.read_text())["services"]
+    return services
+
+
+def _seconds(value: str) -> float:
+    match = re.fullmatch(r"(\d+(?:\.\d+)?)s", value)
+    assert match, value
+    return float(match[1])
+
+
+@pytest.mark.parametrize("service", ["worker", "maintenance"])
+def test_healthcheck_do_worker_e_da_manutencao_nao_depende_de_servico_externo(service: str) -> None:
+    """Banco ou executor-ctl fora derrubariam o contêiner saudável, e o restart não os conserta.
+
+    A dependência fica no `depends_on` e nos alertas; a saúde é só o processo do serviço vivo.
+    """
+    command = " ".join(_app_services()[service]["healthcheck"]["test"])
+
+    assert "/proc/1/cmdline" in command
+    for external in ("make_engine", "ExecutorCtlRunner", "connect"):
+        assert external not in command, external
+
+
+def test_api_tem_carencia_maior_que_o_shutdown_do_uvicorn_mais_o_flush() -> None:
+    graceful = re.search(r'"--timeout-graceful-shutdown", "(\d+)"', DOCKERFILE.read_text())
+    flush = re.search(r"^TRACING_SHUTDOWN_TIMEOUT_S = ([\d.]+)$", TELEMETRY.read_text(), re.M)
+    assert graceful
+    assert flush
+    needed = float(graceful[1]) + float(flush[1])
+
+    compose = yaml.safe_load((ROOT / "compose.yaml").read_text())
+    for grace in (
+        _app_services()["api"]["stop_grace_period"],
+        compose["services"]["api"]["stop_grace_period"],
+    ):
+        assert grace == "15s"
+        assert _seconds(grace) > needed

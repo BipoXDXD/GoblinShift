@@ -165,6 +165,9 @@ services:
       interval: 10s
       timeout: 3s
       retries: 5
+    # Acima dos 8 s do --timeout-graceful-shutdown do uvicorn mais 1,5 s do flush do tracing
+    # (TRACING_SHUTDOWN_TIMEOUT_S): o padrão de 10 s mataria o flush com SIGKILL.
+    stop_grace_period: 15s
     restart: unless-stopped
 
   # Worker e manutenção (3.4). O Runner e o que ele exige do container ficam em cada ambiente:
