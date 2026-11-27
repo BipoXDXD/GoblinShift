@@ -389,6 +389,21 @@ def test_quinto_claim_e_recusado(conn: Connection) -> None:
         criar_tentativa(conn, run_id, 5)
 
 
+def test_tentativa_cedida_sem_inicio_do_executor_e_recusada(conn: Connection) -> None:
+    alice = criar_conta(conn)
+    run_id = criar_run(conn, alice)
+
+    with barrado_por(conn, "attempt_yielded_after_start_check"):
+        criar_tentativa(conn, run_id, 1, yielded_at=AGORA)
+
+
+def test_tentativa_cedida_depois_do_inicio_do_executor_e_aceita(conn: Connection) -> None:
+    alice = criar_conta(conn)
+    run_id = criar_run(conn, alice)
+
+    criar_tentativa(conn, run_id, 1, executor_started_at=AGORA, yielded_at=AGORA)
+
+
 # --- 5. CHECKs --------------------------------------------------------------------------------
 
 

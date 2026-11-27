@@ -15,11 +15,13 @@ vê-la. A parada deixa duas linhas:
 - `parada pedida` (log estruturado, campo `signal`), quando o laço sai, depois da tentativa em
   curso; se o SIGKILL chega antes, só a primeira aparece.
 
-O prazo de parada do deploy (`stop_grace_period`, 30 s) é
-menor que o teto de uma tentativa (10 min), então uma tentativa longa não termina a tempo: a
-plataforma mata o processo (SIGKILL) e quem recupera é o lease vencido: a manutenção encontra
-o executor pelo nome, confirma o término e reagenda. O trabalho recomeça do zero, e a Run pode
-falhar se esgotar as tentativas ou o prazo.
+O prazo de parada do deploy (`stop_grace_period`, 30 s) é menor que o teto de uma tentativa
+(10 min). Se o sinal chega quando o restante da tentativa ainda passa dessa carência, o worker
+cede a tentativa: para o executor, devolve a execução para `retry_wait` sem gastar tentativa física
+(`attempt.yielded_at`) e sai. Quando falta pouco para o teto, deixa terminar; se ainda assim o
+SIGKILL chegar antes, quem recupera é o lease vencido: a manutenção encontra o executor pelo nome,
+confirma o término e reagenda. O trabalho recomeça do zero, e nesse caso a tentativa conta como
+física (a Run pode falhar se esgotar as tentativas ou o prazo).
 
 Falha transitória do banco fora da supervisão (`record_start`, renovação no empacotamento,
 desfecho) deixa a tentativa órfã, com a área de trabalho ocupada até a manutenção encerrá-la. O
@@ -133,6 +135,7 @@ def serve(settings: Settings, runner: Runner, shutdown: ShutdownFlag) -> None:
                     on_finished=finished.report,
                     tracer=tracer,
                     user_hasher=hasher,
+                    yield_requested=shutdown.is_set,
                 )
                 logger.info("worker pronto", extra={"fields": {"runner": settings.runner}})
                 while not shutdown.is_set():

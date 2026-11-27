@@ -23,6 +23,7 @@ from goblinshift.runs.lifecycle import (
     Event,
     ExecutorStarted,
     ExecutorStopped,
+    ExecutorYielded,
     LeaseExpired,
     Phase,
     PhaseReached,
@@ -37,6 +38,7 @@ from goblinshift.runs.lifecycle import (
     StartAttempt,
     Status,
     TransientFailure,
+    YieldAttempt,
     decide_transition,
 )
 
@@ -95,6 +97,8 @@ class RunLifecycle(RuleBasedStateMachine):
             match effect:
                 case StartAttempt():
                     self.started_attempts += 1
+                case YieldAttempt():
+                    self.physical_generations.remove(effect.generation)
                 case EndAttempt():
                     self.ended_attempts += 1
                 case PublishOutputs():
@@ -177,6 +181,10 @@ class RunLifecycle(RuleBasedStateMachine):
     @rule(offset=generation_offsets)
     def confirm_executor_stopped(self, offset: int) -> None:
         self.decide(ExecutorStopped(self.current(offset)))
+
+    @rule(offset=generation_offsets, jitter=jitters)
+    def yield_executor(self, offset: int, jitter: timedelta) -> None:
+        self.decide(ExecutorYielded(self.current(offset), self.now, jitter))
 
     def teardown(self) -> None:
         # Guia a geração para sequências longas, onde moram retentativa, prazo e parada.
