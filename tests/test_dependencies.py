@@ -10,6 +10,7 @@ versão exata no comentário, que é o que o Dependabot compara.
 """
 
 import re
+import subprocess
 import tomllib
 from pathlib import Path
 from typing import Any
@@ -143,3 +144,22 @@ def test_action_fixada_por_sha_traz_a_versao_exata_no_comentario() -> None:
     ]
 
     assert sem_versao_exata == []
+
+
+def test_dependabot_cobre_os_dockerfiles() -> None:
+    docker = [item for item in _dependabot_updates() if item["package-ecosystem"] == "docker"]
+    assert [item["directory"] for item in docker] == ["/docker"]
+    assert docker[0].get("open-pull-requests-limit") == 1
+
+    # Só o que o git rastreia: cópias locais fora do repositório (.claude/) não contam.
+    rastreados = subprocess.run(
+        ["git", "ls-files", "*Dockerfile*"],  # noqa: S607 (git do PATH, como nos outros testes)
+        cwd=ROOT,
+        capture_output=True,
+        text=True,
+        check=True,
+    ).stdout.split()
+    assert rastreados
+    fora_de_docker = [nome for nome in rastreados if Path(nome).parent != Path("docker")]
+
+    assert fora_de_docker == []
