@@ -205,7 +205,9 @@ jobs:
       - name: Monitor de uptime (deploy/uptime)
         working-directory: deploy/uptime
         run: node --test uptime.test.mjs
-      - run: npm ci
+      # Sem scripts de instalação, como docker/web.Dockerfile; pacote liberado no allowScripts do
+      # web/package.json pede `npm rebuild <pacote>` explícito (tests/test_ci_npm_scripts.py).
+      - run: npm ci --ignore-scripts
       - name: Contrato OpenAPI → tipos gerados em dia
         # O pytest (job Verificações) garante que openapi/openapi.json acompanha a API; aqui, que
         # os tipos TypeScript acompanham o openapi.json versionado.
@@ -252,7 +254,7 @@ jobs:
           node-version-file: web/.nvmrc
           cache: npm
           cache-dependency-path: web/package-lock.json
-      - run: npm ci
+      - run: npm ci --ignore-scripts
       - name: Versão do Playwright (chave do cache do navegador)
         id: playwright
         run: echo "version=$(npm ls @playwright/test --json | jq -r '.dependencies["@playwright/test"].version')" >> "$GITHUB_OUTPUT"
@@ -420,7 +422,7 @@ jobs:
           node-version-file: web/.nvmrc
           cache: npm
           cache-dependency-path: web/package-lock.json
-      - run: npm ci
+      - run: npm ci --ignore-scripts
         working-directory: web
       - name: Versão do Playwright (chave do cache do navegador)
         id: playwright
@@ -670,7 +672,7 @@ jobs:
           node-version-file: web/.nvmrc
           cache: npm
           cache-dependency-path: web/package-lock.json
-      - run: npm ci
+      - run: npm ci --ignore-scripts
         working-directory: web
       - name: Chromium, Firefox e dependências
         timeout-minutes: 10
