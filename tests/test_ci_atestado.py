@@ -97,3 +97,8 @@ def test_publicacao_verifica_o_atestado_antes_de_gravar_no_ghcr() -> None:
     assert '--signer-workflow "$GITHUB_REPOSITORY/.github/workflows/ci.yml"' in comando
     assert "--source-ref refs/heads/main" in comando
     assert "for role in app executor web" in comando
+    # O sujeito é o blob do índice com o digest do recibo, e o atestado é o do commit liberado.
+    assert "jq -er --arg role \"$role\" '.images[$role].digest'" in comando
+    assert 'gh attestation verify "$layout/blobs/sha256/${digest#sha256:}"' in comando
+    assert '--source-digest "$RELEASE_COMMIT"' in comando
+    assert job.get("env", {}).get("RELEASE_COMMIT") == "${{ needs.gates.outputs.commit }}"

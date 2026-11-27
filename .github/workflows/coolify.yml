@@ -129,7 +129,8 @@ jobs:
           done
       - name: Verificar a proveniência dos três índices
         # O blob do índice no layout OCI tem o digest do sujeito atestado pelo ci.yml no push da
-        # main; sem atestado válido desse workflow e dessa ref, nada é gravado no GHCR (#442, 68c).
+        # main, do commit liberado; sem atestado válido desse workflow, dessa ref e desse commit,
+        # nada é gravado no GHCR (#442, 68c).
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
@@ -140,7 +141,8 @@ jobs:
             gh attestation verify "$layout/blobs/sha256/${digest#sha256:}" \
               --repo "$GITHUB_REPOSITORY" \
               --signer-workflow "$GITHUB_REPOSITORY/.github/workflows/ci.yml" \
-              --source-ref refs/heads/main
+              --source-ref refs/heads/main \
+              --source-digest "$RELEASE_COMMIT"
           done
       - uses: actions/setup-go@d8cbb8045d7f43706b9177cceb36c1f91a6644d5 # v7.1.0
         with:

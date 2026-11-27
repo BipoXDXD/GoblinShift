@@ -480,7 +480,8 @@ jobs:
     name: Imagem
     runs-on: ubuntu-24.04
     timeout-minutes: 30
-    # OIDC e escrita de atestado só neste job; o atestado sai só no push (#442, 68c; D10).
+    # OIDC e escrita de atestado no nível do job, não do workflow; o atestado sai só no push
+    # (#442, 68c; D10).
     permissions:
       contents: read
       id-token: write
@@ -544,7 +545,8 @@ jobs:
     name: Imagem do executor
     runs-on: ubuntu-24.04
     timeout-minutes: 60
-    # OIDC e escrita de atestado só neste job; o atestado sai só no push (#442, 68c; D10).
+    # OIDC e escrita de atestado no nível do job, não do workflow; o atestado sai só no push
+    # (#442, 68c; D10).
     permissions:
       contents: read
       id-token: write
@@ -602,7 +604,8 @@ jobs:
     name: Imagem do Nginx com a SPA
     runs-on: ubuntu-24.04
     timeout-minutes: 30
-    # OIDC e escrita de atestado só neste job; o atestado sai só no push (#442, 68c; D10).
+    # OIDC e escrita de atestado no nível do job, não do workflow; o atestado sai só no push
+    # (#442, 68c; D10).
     permissions:
       contents: read
       id-token: write
