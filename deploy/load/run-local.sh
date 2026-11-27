@@ -12,7 +12,7 @@
 set -euo pipefail
 
 readonly DEFAULT_TARGET="http://nginx"
-readonly K6_IMAGE="grafana/k6:2.3.0"
+readonly K6_IMAGE="grafana/k6:2.3.0@sha256:2dd4756ec6e14e62778916e1eb850108e4b499304c02df56760fa0bdb0fba0b8"
 readonly ACCOUNT_COUNT=20
 readonly KEY_DAYS=1
 readonly KEY_SCOPES="files:read,files:write,runs:read,runs:write"

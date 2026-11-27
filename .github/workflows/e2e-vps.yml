@@ -54,7 +54,7 @@ jobs:
           # Sem cache: o de uma branch restauraria node_modules alheio antes do Playwright com a
           # chave no env. O setup-node v5+ liga o cache sozinho pelo packageManager do package.json.
           package-manager-cache: false
-      - run: npm ci
+      - run: npm ci --ignore-scripts
         working-directory: web
       - name: Chromium, Firefox e dependências do sistema
         # O `--with-deps` do Playwright roda o apt sem teto; as dependências vêm do script com teto

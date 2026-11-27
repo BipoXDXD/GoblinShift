@@ -132,11 +132,13 @@ def test_workflow_roda_o_zizmor_pelo_script_travado() -> None:
     assert not any("setup-uv" in p.get("uses", "") for p in steps)
 
 
-def test_zizmor_roda_quando_muda_o_que_ele_audita_ou_o_que_o_instala() -> None:
+def test_zizmor_roda_em_todo_pull_request_e_push_na_main() -> None:
+    # Com filtro de caminho o check fica pendente nos PRs que não mexem em `.github/` e não pode
+    # ser obrigatório na proteção da branch (#442, item 31c). O nome do job é o nome do check.
     gatilhos = _zizmor_workflow()[True]  # `on:` vira True no YAML 1.1
-    esperado = [".github/**", "scripts/ci-zizmor.sh"]
-    assert gatilhos["pull_request"]["paths"] == esperado
-    assert gatilhos["push"]["paths"] == esperado
+    assert "paths" not in (gatilhos["pull_request"] or {})
+    assert gatilhos["push"] == {"branches": ["main"]}
+    assert _zizmor_job()["name"] == "Segurança dos workflows (zizmor)"
 
 
 def test_requirements_do_zizmor_fixam_versao_e_hash() -> None:

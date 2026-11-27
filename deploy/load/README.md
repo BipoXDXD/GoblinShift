@@ -58,7 +58,7 @@ Para isolar da pilha de desenvolvimento, use outro projeto e outras portas:
 `GS_HTTP_PORT=8088 GS_OPENOBSERVE_PORT=5088 docker compose -p goblinshift-carga up -d --wait` e
 `GS_LOAD_PROJECT=goblinshift-carga deploy/load/run-local.sh`.
 
-O k6 roda pela imagem `grafana/k6:2.3.0`, sem instalação local. As contas criadas ficam no banco local
+O k6 roda pela imagem `grafana/k6:2.3.0` (fixada por digest em `run-local.sh`), sem instalação local. As contas criadas ficam no banco local
 (elas não têm como ser apagadas pelo `gs-admin`). Um `docker compose down -v` limpa tudo.
 
 ## Resultados
