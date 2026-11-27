@@ -32,6 +32,6 @@ Dentro do executor sob gVisor, gravando arquivos de 512 MiB com `fsync` em `/wor
 
 ## Como verificar
 
-- `deploy/provision.sh` declara `[exec-work]=6G`, cria a imagem com `fallocate`, formata com `mkfs.ext4` e monta por loop (`/etc/fstab`); na VPS, `findmnt /srv/goblinshift/exec-work` mostra ext4 e `df -h` mostra 6 GiB.
+- `deploy/filesystems.sh` (chamado pelo `deploy/provision.sh`) declara `[exec-work]=6G`, cria a imagem com `fallocate`, formata com `mkfs.ext4` e monta por loop (`/etc/fstab`) com `nosuid,nodev,noexec`; na VPS, `findmnt /srv/goblinshift/exec-work` mostra ext4 com essas opções e `df -h` mostra 6 GiB.
 - O teste de aceitação do ambiente ([3.8](../GoblinShiftPlan.md#s3-8)) escreve além de 6 GiB dentro do executor e confirma `ENOSPC`. Passa a valer na fatia 1 (protótipo do sandbox) e continua exigido na fatia 4.
 - Na fatia 4, um teste do `executor-ctl` confirma que `start` com a área não vazia é recusado.

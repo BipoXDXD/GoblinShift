@@ -7,7 +7,7 @@ import pikepdf
 import pytest
 
 from goblinshift.processing.output_dir import FileSystemOutputDir
-from goblinshift.processing.pdf_press import Limits, Operation, PageSelection, Params
+from goblinshift.processing.pdf_press import RECIPE_ID, Limits, Operation, PageSelection, Params
 from goblinshift.processing.pdf_press.recipe import PdfPressV1
 from goblinshift.processing.recipe import (
     FailureCode,
@@ -17,6 +17,7 @@ from goblinshift.processing.recipe import (
     RecipeFailure,
     ReportWarning,
 )
+from goblinshift.runs.comparison import PdfComparison, comparison_from_report
 from tests.pdf_press import samples
 from tests.pdf_press.conftest import Workspace
 
@@ -53,6 +54,16 @@ def test_merge_concatena_as_entradas_na_ordem(work: Workspace) -> None:
     assert report.details == {"operation": "merge", "documents": 1, "output_pages": 3}
     assert report.warnings == ()
     assert work.progress.done == [0, 1]
+
+
+def test_contagens_do_item_viram_comparacao(work: Workspace) -> None:
+    """Chave renomeada na receita zeraria a comparação em silêncio."""
+    work.add("a.pdf", samples.document("a", pages=3), UPLOAD_A)
+
+    item = work.run(select((UPLOAD_A, 2))).items[0]
+
+    assert isinstance(item, ItemOk)
+    assert comparison_from_report(RECIPE_ID, item.counts, item.details) == PdfComparison(3, 1)
 
 
 def test_split_separa_cada_entrada_em_grupos(work: Workspace) -> None:

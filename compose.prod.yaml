@@ -21,7 +21,7 @@ x-executor-env: &executor-env
 # Sem `create_host_path`: se o executor-ctl ou o filesystem da área não estiverem instalados, o
 # container não sobe, em vez de o Docker criar diretórios vazios no lugar deles.
 x-executor-client: &executor-client
-  group_add: ["61001"]
+  group_add: ["61001", "61002"]
   volumes:
     - type: bind
       source: /run/goblinshift

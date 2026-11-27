@@ -32,12 +32,6 @@ exec "$@"
 """
 FAKE_APT = r"""#!/usr/bin/env bash
 echo "apt-get $*" >> "$FAKE_LOG"
-uris=$(awk '$1 == "URIs:" {print $2; exit}' "$CI_APT_ETC/sources.list.d/ubuntu.sources")
-if [[ $uris != mirror+file:/etc/apt/* ]]; then
-  exit 100
-fi
-lista="$CI_APT_ETC/${uris#mirror+file:/etc/apt/}"
-espelho=$(grep -o '//[^/]*/ubuntu' "$lista" | head -n 1)
 archives=$(printf '%s\n' "$@" | sed -n 's/^Dir::Cache::archives=//p')
 case " $* " in
   *" --no-download "*.deb*)
@@ -50,7 +44,60 @@ case " $* " in
   *)
     exit 0 ;;
 esac
-printf '%s %s\n' "$fase" "$(paste -sd '|' "$lista")" >> "$FAKE_FONTES"
+
+sourcelist=$(printf '%s\n' "$@" | sed -n 's/^Dir::Etc::sourcelist=//p' | tail -n 1)
+sourceparts=$(printf '%s\n' "$@" | sed -n 's/^Dir::Etc::sourceparts=//p' | tail -n 1)
+[[ -z $sourcelist ]] && sourcelist="$CI_APT_ETC/sources.list"
+[[ -z $sourceparts ]] && sourceparts="$CI_APT_ETC/sources.list.d"
+
+fontes_lidas=()
+if [[ $sourcelist != - && $sourcelist != /dev/null && -e $sourcelist ]]; then
+  # Em versões mais antigas do apt, Dir::Etc::sourcelist não aceita DEB822 (.sources).
+  [[ $sourcelist == *.sources ]] && exit 100
+  fontes_lidas+=("$sourcelist")
+fi
+if [[ $sourceparts != - && -d $sourceparts ]]; then
+  shopt -s nullglob
+  for arquivo in "$sourceparts"/*.list "$sourceparts"/*.sources; do
+    fontes_lidas+=("$arquivo")
+  done
+  shopt -u nullglob
+fi
+((${#fontes_lidas[@]} == 0)) && exit 100
+
+if [[ -n ${FAKE_FONTE_QUEBRADA:-} ]] && grep -qF "$FAKE_FONTE_QUEBRADA" "${fontes_lidas[@]}"; then
+  echo "E: Failed to fetch $FAKE_FONTE_QUEBRADA 403 Forbidden" >&2
+  exit 100
+fi
+
+ubuntu_sources=""
+for arquivo in "${fontes_lidas[@]}"; do
+  if [[ $(basename "$arquivo") == "ubuntu.sources" ]]; then
+    ubuntu_sources="$arquivo"
+    break
+  fi
+done
+
+if [[ -n $ubuntu_sources ]]; then
+  uris=$(awk '$1 == "URIs:" {print $2; exit}' "$ubuntu_sources")
+  if [[ $uris == mirror+file:/etc/apt/* ]]; then
+    lista="$CI_APT_ETC/${uris#mirror+file:/etc/apt/}"
+    espelho=$(grep -o '//[^/]*/ubuntu' "$lista" | head -n 1)
+    printf '%s %s\n' "$fase" "$(paste -sd '|' "$lista")" >> "$FAKE_FONTES"
+  elif [[ -n $uris ]]; then
+    espelho=$(printf '%s\n' "$uris" | grep -o '//[^/]*/ubuntu' | head -n 1)
+    printf '%s %s\n' "$fase" "$uris" >> "$FAKE_FONTES"
+  else
+    exit 100
+  fi
+elif [[ -f ${fontes_lidas[0]} ]]; then
+  espelho=$(grep -o '//[^/]*/ubuntu' "${fontes_lidas[0]}" | head -n 1)
+  [[ -z $espelho ]] && exit 100
+  printf '%s %s\n' "$fase" "$(paste -sd '|' "${fontes_lidas[0]}")" >> "$FAKE_FONTES"
+else
+  exit 100
+fi
+
 lentos=${FAKE_LENTOS:-}
 if [[ $fase == download ]]; then
   lentos="$lentos ${FAKE_DOWNLOAD_LENTOS:-}"
@@ -303,3 +350,42 @@ def test_diretorio_fica_so_com_os_debs_para_o_cache(ambiente: dict[str, Path]) -
 
     assert result.returncode == 0, result.stderr
     assert sorted(p.name for p in ambiente["debs"].iterdir()) == ["ffmpeg_7.deb"]
+
+
+def test_ignora_fontes_de_terceiros_quebradas_no_ubuntu_24_04(
+    ambiente: dict[str, Path],
+) -> None:
+    sources_list = ambiente["etc"] / "sources.list"
+    sources_list.write_text("# Ubuntu sources have moved to ubuntu.sources\n")
+    ms_list = ambiente["etc"] / "sources.list.d" / "microsoft-prod.list"
+    ms_list.write_text("deb https://packages.microsoft.com/ubuntu/24.04/prod noble main\n")
+    ms_sources = ambiente["etc"] / "sources.list.d" / "microsoft-prod.sources"
+    ms_sources.write_text(
+        "Types: deb\nURIs: https://packages.microsoft.com/ubuntu/24.04/prod\nSuites: noble\n"
+    )
+
+    result = instalar(ambiente, "ffmpeg", FAKE_FONTE_QUEBRADA="packages.microsoft.com")
+
+    assert result.returncode == 0, result.stdout + result.stderr
+    updates = [c for c in chamadas(ambiente) if c.startswith("apt-get") and " update" in c]
+    assert len(updates) == 1
+    assert "Dir::Etc::sourceparts=" in updates[0]
+    assert "Dir::Etc::sourcelist=-" in updates[0]
+    assert ms_list.exists()
+    assert ms_sources.exists()
+
+
+def test_layout_tradicional_com_sources_list_ignora_sources_list_d(
+    ambiente: dict[str, Path],
+) -> None:
+    (ambiente["etc"] / "sources.list.d" / "ubuntu.sources").unlink()
+    sources_list = ambiente["etc"] / "sources.list"
+    sources_list.write_text("deb https://azure.archive.ubuntu.com/ubuntu noble main\n")
+    ms_list = ambiente["etc"] / "sources.list.d" / "microsoft-prod.list"
+    ms_list.write_text("deb https://packages.microsoft.com/ubuntu/24.04/prod noble main\n")
+
+    result = instalar(ambiente, "ffmpeg", FAKE_FONTE_QUEBRADA="packages.microsoft.com")
+
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert sources_list.read_text() == "deb https://archive.ubuntu.com/ubuntu noble main\n"
+    assert ms_list.exists()

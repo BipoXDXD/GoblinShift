@@ -21,6 +21,7 @@ from goblinshift.platform.settings import (
     MissingSecretError,
     Settings,
     WebConfigError,
+    describe_config_error,
 )
 
 SECRET = "s" * 32
@@ -33,6 +34,12 @@ PASSWORD_CANARY = "CANARY-senha-do-banco-na-variavel"  # noqa: S105 (valor de te
 PASSWORD_IN_FILE = "senha-do-arquivo"  # noqa: S105 (valor de teste)
 DEV_PASSWORD = "goblinshift"  # noqa: S105 (padrão da pilha local, não é segredo)
 ADMIN_COMMAND = [sys.executable, "-m", "goblinshift.entrypoints.admin_cli"]
+WORKER_COMMAND = [sys.executable, "-m", "goblinshift.entrypoints.worker"]
+MAINTENANCE_COMMAND = [sys.executable, "-m", "goblinshift.entrypoints.maintenance"]
+MIGRATE_COMMAND = [sys.executable, "-m", "alembic", "upgrade", "head"]
+# Segredo abaixo do mínimo, com marca própria: se aparecer na saída, o valor vazou.
+SHORT_CANARY = "CANARY-curto"
+SECOND_CANARY = "CANARY-hash-curto"
 API_COMMAND = [
     sys.executable, "-m", "uvicorn", "goblinshift.entrypoints.api.app:create_app",
     "--factory", "--host", "127.0.0.1", "--port", "0",
@@ -189,15 +196,11 @@ def test_boot_real_sem_segredo_sai_com_erro_que_nomeia_a_variavel(tmp_path: Path
     "command",
     [
         pytest.param(API_COMMAND, id="api"),
-        pytest.param([sys.executable, "-m", "alembic", "upgrade", "head"], id="migrate"),
-        pytest.param([sys.executable, "-m", "goblinshift.entrypoints.worker"], id="worker"),
+        pytest.param(MIGRATE_COMMAND, id="migrate"),
+        pytest.param(WORKER_COMMAND, id="worker"),
+        pytest.param(MAINTENANCE_COMMAND, id="maintenance"),
         pytest.param(
-            [sys.executable, "-m", "goblinshift.entrypoints.maintenance"], id="maintenance"
-        ),
-        pytest.param(
-            [sys.executable, "-m", "goblinshift.entrypoints.admin_cli", "create-user",
-             "--display-name", "Sem arquivo"],
-            id="gs-admin",
+            [*ADMIN_COMMAND, "create-user", "--display-name", "Sem arquivo"], id="gs-admin"
         ),
     ],
 )  # fmt: skip
@@ -453,3 +456,70 @@ def test_producao_deixa_o_hsts_para_o_nginx(tmp_path: Path) -> None:
 
 def test_limitador_de_ausentes_tem_o_mesmo_default_do_modulo_de_arquivos() -> None:
     assert Settings().missing_sweep_max_absent_ratio == DEFAULT_MAX_ABSENT_RATIO
+
+
+def test_describe_config_error_lista_campo_e_tipo_sem_valor() -> None:
+    with pytest.raises(ValidationError) as caught:
+        Settings.model_validate({"cursor_secret": SHORT_CANARY, "worker_lease_s": "nan"})
+
+    described = describe_config_error(caught.value)
+
+    assert sorted(described) == ["cursor_secret:too_short", "worker_lease_s:finite_number"]
+    assert SHORT_CANARY not in repr(described)
+
+
+@pytest.mark.parametrize(
+    "command",
+    [
+        pytest.param(API_COMMAND, id="api"),
+        pytest.param(WORKER_COMMAND, id="worker"),
+        pytest.param(MAINTENANCE_COMMAND, id="maintenance"),
+    ],
+)
+def test_segredo_curto_sai_com_2_sem_o_valor(tmp_path: Path, command: list[str]) -> None:
+    """O código de saída diz "configuração", e a linha nomeia o campo sem trazer o valor."""
+    env = {**_production_env(_production(tmp_path)), "GS_CURSOR_SECRET": SHORT_CANARY}
+
+    result = _run_process(command, env)
+
+    output = result.stdout + result.stderr
+    assert result.returncode == 2
+    assert SHORT_CANARY not in output
+    assert "cursor_secret:too_short" in output
+
+
+@pytest.mark.parametrize(
+    "command",
+    [
+        pytest.param(MIGRATE_COMMAND, id="migrate"),
+        pytest.param([*ADMIN_COMMAND, "create-user", "--display-name", "Curto"], id="gs-admin"),
+    ],
+)
+def test_segredo_curto_nao_aparece_nos_outros_processos(tmp_path: Path, command: list[str]) -> None:
+    env = {**_production_env(_production(tmp_path)), "GS_CURSOR_SECRET": SHORT_CANARY}
+
+    result = _run_process(command, env)
+
+    assert result.returncode != 0
+    assert SHORT_CANARY not in result.stdout + result.stderr
+
+
+@pytest.mark.parametrize("lease", ["nan", "inf"])
+def test_varios_campos_invalidos_saem_juntos(tmp_path: Path, lease: str) -> None:
+    """Dois segredos curtos e a duração não finita: a linha lista os três, sem nenhum valor."""
+    env = {
+        **_production_env(_production(tmp_path)),
+        "GS_CURSOR_SECRET": SHORT_CANARY,
+        "GS_USER_HASH_SECRET": SECOND_CANARY,
+        "GS_WORKER_LEASE_S": lease,
+    }
+
+    result = _run_process(WORKER_COMMAND, env)
+
+    output = result.stdout + result.stderr
+    assert result.returncode == 2
+    assert SHORT_CANARY not in output
+    assert SECOND_CANARY not in output
+    assert "cursor_secret:too_short" in output
+    assert "user_hash_secret:too_short" in output
+    assert "worker_lease_s:finite_number" in output

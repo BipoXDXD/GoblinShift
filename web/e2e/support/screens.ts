@@ -210,6 +210,7 @@ export const SCREENS: readonly Screen[] = [
             ],
             more_columns: 2,
           },
+          comparison: null,
         },
         {
           position: 1,
@@ -222,6 +223,7 @@ export const SCREENS: readonly Screen[] = [
           counts: {},
           duplicate_of: null,
           formula_cells: null,
+          comparison: null,
         },
         {
           position: 2,
@@ -234,6 +236,7 @@ export const SCREENS: readonly Screen[] = [
           counts: { records_read: 10, written: 10 },
           duplicate_of: null,
           formula_cells: null,
+          comparison: null,
         },
       ],
     },

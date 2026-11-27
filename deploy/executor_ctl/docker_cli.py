@@ -11,6 +11,8 @@ import subprocess
 from dataclasses import dataclass
 from typing import Literal
 
+from .profile import ATTEMPT_LABEL
+
 State = Literal["absent", "created", "running", "exited"]
 
 # Prazo das chamadas curtas (inspect, run, rm); stop soma a carência a este valor.
@@ -22,6 +24,8 @@ _UNSET_TIME_PREFIX = "0001-01-01"
 _MISSING_MARKERS = ("no such container", "no such object")
 # Só o que nomeia a imagem; qualquer outro erro do `image inspect` é daemon indisponível.
 _IMAGE_MISSING_MARKER = "no such image"
+# O `Id` completo do container; é o alvo do stop e do rm depois do inspect.
+_CONTAINER_ID = re.compile(r"[0-9a-f]{64}")
 _RFC3339 = re.compile(r"\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(\.\d{1,9})?(Z|[+-]\d{2}:\d{2})")
 _DOCKER_STATES: dict[str, State] = {
     "created": "created",
@@ -47,12 +51,23 @@ class ContainerRunningError(RuntimeError):
 
 
 @dataclass(frozen=True)
+class ContainerIdentity:
+    """Quem é o container com o nome da tentativa; o serviço só age sobre o que criou."""
+
+    container_id: str  # `Id` do inspect (64 hex)
+    attempt_label: str | None  # Config.Labels[ATTEMPT_LABEL]; sem a label (ou Labels nulo), None
+    image: str  # Config.Image: a referência exata passada ao `docker run`
+
+
+@dataclass(frozen=True)
 class ContainerStatus:
     state: State
     exit_code: int | None
     oom_killed: bool
     started_at: str | None
     finished_at: str | None
+    # None só em `absent`; fica fora do JSON do contrato.
+    identity: ContainerIdentity | None = None
 
     @classmethod
     def absent(cls) -> "ContainerStatus":
@@ -136,7 +151,7 @@ class DockerCli:
 
 
 def parse_inspect(output: str) -> ContainerStatus:
-    """Lê o `State` do `docker inspect`; formato inesperado é erro, não "ausente"."""
+    """Lê `State`, `Id` e `Config` do `docker inspect`; formato inesperado é erro, não "ausente"."""
     try:
         [info] = json.loads(output)
         state = info["State"]
@@ -145,6 +160,7 @@ def parse_inspect(output: str) -> ContainerStatus:
         oom_killed = state["OOMKilled"]
         started_at = _optional_time(state["StartedAt"])
         finished_at = _optional_time(state["FinishedAt"])
+        identity = _identity(info["Id"], info["Config"])
     except (ValueError, TypeError, KeyError) as error:
         raise DockerUnavailableError("docker inspect devolveu um formato inesperado") from error
     if docker_status not in _DOCKER_STATES:
@@ -158,7 +174,24 @@ def parse_inspect(output: str) -> ContainerStatus:
         oom_killed=oom_killed,
         started_at=started_at,
         finished_at=finished_at,
+        identity=identity,
     )
+
+
+def _identity(container_id: object, config: object) -> ContainerIdentity:
+    if not isinstance(container_id, str) or not _CONTAINER_ID.fullmatch(container_id):
+        raise ValueError("Id do container fora do formato do Docker")
+    if not isinstance(config, dict):
+        raise TypeError("Config do container não é objeto")
+    # Labels nulo é container sem label nenhuma: conta como alheio, não como formato inesperado.
+    labels = config.get("Labels") or {}
+    if not isinstance(labels, dict):
+        raise TypeError("Config.Labels não é objeto")
+    attempt_label = labels.get(ATTEMPT_LABEL)
+    image = config["Image"]
+    if not (attempt_label is None or isinstance(attempt_label, str)) or not isinstance(image, str):
+        raise TypeError("label ou imagem do container não é texto")
+    return ContainerIdentity(container_id, attempt_label, image)
 
 
 def _optional_time(value: object) -> str | None:

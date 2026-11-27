@@ -1,9 +1,9 @@
 """Retenção do histórico de execuções para o processo `maintenance` (docs/GoblinShiftPlan.md, 1.7).
 
 - Parâmetros (`run.parameters`), código de rejeição por item (`run_input.error_code`) e detalhe
-  por item (`run_input.details`: avisos e contagens) são anulados 30 dias depois do término; a
-  Run continua, com estado, contagens e datas. O desfecho por item (`ok`/`rejected`) fica, porque
-  só diz quantas entradas foram processadas.
+  por item (`run_input.details`: avisos, contagens e comparação, ADR 059) são anulados 30 dias
+  depois do término; a Run continua, com estado, contagens e datas. O desfecho por item
+  (`ok`/`rejected`) fica, porque só diz quantas entradas foram processadas.
 - Os nomes das saídas (`run_output.logical_name` e `artifact.file_name`) também saem aos 30 dias,
   numa etapa própria e só quando o artefato já foi excluído (vence em 48 h): o download lê o nome
   de artefato vivo. Quem lê um nome anulado usa `files.artifacts.generic_file_name`.

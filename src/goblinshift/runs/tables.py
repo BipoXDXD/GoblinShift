@@ -55,6 +55,8 @@ run = Table(
     Column("created_at", DateTime(timezone=True), nullable=False, server_default=func.now()),
     Column("started_at", DateTime(timezone=True)),
     Column("finished_at", DateTime(timezone=True)),
+    # Gravada por quem emitiu o `run.finished`; nula numa Run terminal, a manutenção reemite.
+    Column("finished_reported_at", DateTime(timezone=True)),
     UniqueConstraint("owner_id", "id"),
     # FK composta com o dono: o banco impede apontar para preset de outra conta. Só `preset_id`
     # vira nulo na exclusão; `owner_id` continua (PostgreSQL 15+).
@@ -102,6 +104,12 @@ run = Table(
         postgresql_where=text("parameters IS NOT NULL AND finished_at IS NOT NULL"),
     ),
     Index("run_finished_at_idx", "finished_at", postgresql_where=text("finished_at IS NOT NULL")),
+    # Varredura do término não reportado (`run.finished` ao menos uma vez).
+    Index(
+        "run_finish_unreported_idx",
+        "finished_at",
+        postgresql_where=text("finished_at IS NOT NULL AND finished_reported_at IS NULL"),
+    ),
 )
 
 run_input = Table(
@@ -113,8 +121,9 @@ run_input = Table(
     Column("upload_id", Uuid, nullable=False),
     Column("outcome", Text),
     Column("error_code", Text),
-    # Avisos (códigos), contagens e duplicata do item, já conferidos pela coleta; sem texto do
-    # arquivo. Anulado com os demais detalhes por item na retenção de 30 dias (1.7).
+    # Avisos (códigos), contagens, duplicata e comparação (ADR 059) do item, já conferidos pela
+    # coleta; sem texto do arquivo. Anulado com os demais detalhes por item na retenção de 30 dias
+    # (1.7).
     Column("details", JSONB),
     PrimaryKeyConstraint("run_id", "position"),
     UniqueConstraint("run_id", "upload_id"),
