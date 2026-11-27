@@ -2,6 +2,7 @@
 
 import ast
 import json
+import logging
 import os
 import subprocess
 import sys
@@ -204,6 +205,78 @@ def test_remove_recusa_executor_vivo_e_apaga_a_area_depois_de_parado(tmp_path: P
 
     assert list(tmp_path.iterdir()) == []
     assert runner.status(attempt_id).phase is ExecutorPhase.ABSENT
+
+
+@pytest.mark.skipif(os.geteuid() == 0, reason="root remove diretórios 0o500")
+def test_remove_loga_sobras_sem_vazar_caminho(
+    tmp_path: Path, caplog: pytest.LogCaptureFixture
+) -> None:
+    runner = fake_runner(tmp_path, "exit", "0")
+    attempt_id = uuid.uuid7()
+    work_dir = runner.create_work_dir(attempt_id)
+    stuck = work_dir / "out" / "preso-CANARY"
+    stuck.mkdir()
+    leftover_a = stuck / "a"
+    leftover_b = stuck / "b"
+    leftover_a.write_text("x", encoding="utf-8")
+    leftover_b.write_text("y", encoding="utf-8")
+    stuck.chmod(0o500)
+    try:
+        with caplog.at_level(logging.WARNING, logger="goblinshift.runs.worker.runner"):
+            runner.remove(attempt_id)
+        records = [r for r in caplog.records if r.getMessage() == "arquivo da área não removido"]
+        assert len(records) == 1
+        fields = records[0].fields  # type: ignore[attr-defined]
+        assert fields["attempt_id"] == str(attempt_id)
+        assert fields["failures"] >= 2
+        assert fields["errnos"]
+        assert fields["error_type"] == "PermissionError"
+        assert "path" not in fields
+        assert "operation" not in fields
+        assert "CANARY" not in str(fields)
+        assert "CANARY" not in records[0].getMessage()
+        assert leftover_a.exists()
+        assert leftover_b.exists()
+    finally:
+        stuck.chmod(0o700)
+
+
+def test_remove_em_area_inexistente_nao_loga_aviso(
+    tmp_path: Path, caplog: pytest.LogCaptureFixture
+) -> None:
+    runner = fake_runner(tmp_path, "exit", "0")
+    with caplog.at_level(logging.WARNING, logger="goblinshift.runs.worker.runner"):
+        runner.remove(uuid.uuid7())
+    assert not [r for r in caplog.records if r.getMessage() == "arquivo da área não removido"]
+
+
+@pytest.mark.skipif(os.geteuid() == 0, reason="root remove diretórios 0o500")
+def test_create_work_layout_loga_sobras_com_attempt_id_do_diretorio(
+    tmp_path: Path, caplog: pytest.LogCaptureFixture
+) -> None:
+    attempt_id = uuid.uuid7()
+    work_dir = tmp_path / str(attempt_id)
+    stuck = work_dir / "preso-CANARY"
+    stuck.mkdir(parents=True)
+    (stuck / "f").write_text("x", encoding="utf-8")
+    stuck.chmod(0o500)
+    try:
+        with (
+            caplog.at_level(logging.WARNING, logger="goblinshift.runs.worker.runner"),
+            pytest.raises(FileExistsError),
+        ):
+            runner_module.create_work_layout(work_dir, group=None)
+        records = [r for r in caplog.records if r.getMessage() == "arquivo da área não removido"]
+        assert len(records) == 1
+        fields = records[0].fields  # type: ignore[attr-defined]
+        assert fields["attempt_id"] == str(attempt_id)
+        assert fields["failures"] >= 1
+        assert fields["error_type"] == "PermissionError"
+        assert "path" not in fields
+        assert "operation" not in fields
+        assert "CANARY" not in str(fields)
+    finally:
+        stuck.chmod(0o700)
 
 
 def test_lancador_nao_importa_o_sqlalchemy() -> None:
