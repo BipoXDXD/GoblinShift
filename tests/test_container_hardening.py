@@ -79,6 +79,23 @@ ROOT_SERVICE_CAPS = {
 # O Coolify não publica a sentinela: ela só roda pelo deploy/storage-mark.sh, com o Compose.
 COMPOSE_ONLY_SERVICES = frozenset({"storage-mark"})
 
+# Raiz só leitura (#442, 33a; D1), com os `tmpfs` medidos subindo cada imagem com `--read-only`
+# e lendo o erro de escrita. O Nginx precisa do pid (`/run`), do `conf.d` que o entrypoint gera
+# dos templates e das pastas temporárias do proxy (`/var/cache/nginx`). A aplicação e o Collector
+# não escreveram fora dos volumes; o `/tmp` fica para o `tempfile` de caminho não exercitado.
+# Postgres e OpenObserve escrevem no próprio volume e ficam de fora.
+# Caminho dentro do contêiner, montado como tmpfs; não é o /tmp do host.
+CONTAINER_TMP = "/tmp"  # noqa: S108
+READ_ONLY_ROOT: dict[str, frozenset[str]] = {
+    "api": frozenset({CONTAINER_TMP}),
+    "worker": frozenset({CONTAINER_TMP}),
+    "maintenance": frozenset({CONTAINER_TMP}),
+    "migrate": frozenset({CONTAINER_TMP}),
+    "otel-collector": frozenset({CONTAINER_TMP}),
+    "nginx": frozenset({"/run", "/etc/nginx/conf.d", "/var/cache/nginx"}),
+}
+_UNITS = {"k": 1024, "m": 1024**2, "g": 1024**3}
+
 COMPOSE_DESTINATIONS = {
     "local": ("compose.yaml", "compose.override.yaml"),
     "aceitacao-gvisor": ("compose.yaml", "compose.e2e-gvisor.yaml"),
@@ -165,3 +182,44 @@ def test_proxy_do_gateway_fica_so_com_net_bind_service() -> None:
     assert DOCKER_DEFAULT_CAPS - _caps(proxy.get("cap_drop")) == {"NET_BIND_SERVICE"}
     assert not proxy.get("cap_add")
     assert NO_NEW_PRIVILEGES in proxy.get("security_opt", [])
+
+
+def _tmpfs(config: dict[str, Any]) -> dict[str, dict[str, str]]:
+    """`tmpfs` do serviço: caminho → opções (`size=64m,mode=1777` vira {"size": "64m", ...})."""
+    entries = config.get("tmpfs") or []
+    if isinstance(entries, str):
+        entries = [entries]
+    mounts = {}
+    for entry in entries:
+        path, _, options = entry.partition(":")
+        mounts[path] = dict(option.partition("=")[::2] for option in options.split(",") if option)
+    return mounts
+
+
+def _bytes(value: str) -> int:
+    number, unit = value[:-1], value[-1].lower()
+    return int(number) * _UNITS[unit] if unit in _UNITS else int(value)
+
+
+@pytest.mark.parametrize("destination", [*COMPOSE_DESTINATIONS, "coolify"])
+@pytest.mark.parametrize("service", READ_ONLY_ROOT)
+def test_servico_de_raiz_so_leitura_declara_os_tmpfs_medidos(
+    destinations: dict[str, dict[str, Any]], destination: str, service: str
+) -> None:
+    config = destinations[destination][service]
+    mounts = _tmpfs(config)
+
+    assert config.get("read_only") is True
+    assert set(mounts) == READ_ONLY_ROOT[service]
+    assert all(options.get("size") for options in mounts.values()), mounts
+
+
+@pytest.mark.parametrize("service", READ_ONLY_ROOT)
+def test_tmpfs_cabe_no_teto_de_memoria(
+    destinations: dict[str, dict[str, Any]], service: str
+) -> None:
+    """O `tmpfs` conta na memória do contêiner: cheio, não pode passar do teto do Coolify."""
+    config = destinations["coolify"][service]
+    total = sum(_bytes(options["size"]) for options in _tmpfs(config).values())
+
+    assert total < _bytes(config["deploy"]["resources"]["limits"]["memory"]) // 2

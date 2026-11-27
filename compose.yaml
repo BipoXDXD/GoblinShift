@@ -43,6 +43,14 @@ x-least-privilege: &least-privilege
   cap_drop: [ALL]
   security_opt: [no-new-privileges:true]
 
+# Raiz só leitura (#442, 33a; D1) nos serviços contínuos e no migrate. Medido subindo cada imagem
+# com --read-only (tests/test_container_hardening.py, READ_ONLY_ROOT): a aplicação e o Collector
+# não escrevem fora dos volumes; o /tmp pequeno fica para o `tempfile` de algum caminho não
+# exercitado. O tmpfs conta na memória do contêiner, por isso tem `size`.
+x-read-only-root: &read-only-root
+  read_only: true
+  tmpfs: ["/tmp:size=64m,mode=1777"]
+
 # Storage privado (docs/GoblinShiftPlan.md, 3.6): local num volume; na VPS, o filesystem de
 # tamanho fixo /srv/goblinshift/storage.
 x-storage: &storage
@@ -84,7 +92,7 @@ services:
     logging: *logging
 
   migrate:
-    <<: [*app, *least-privilege]
+    <<: [*app, *least-privilege, *read-only-root]
     command: ["alembic", "upgrade", "head"]
     depends_on:
       postgres:
@@ -145,7 +153,7 @@ services:
     restart: "no"
 
   api:
-    <<: [*app, *least-privilege]
+    <<: [*app, *least-privilege, *read-only-root]
     environment:
       <<: *app-env
       GS_STORAGE_ROOT: /var/lib/goblinshift/storage/objects
@@ -168,7 +176,7 @@ services:
   # o local (subprocesso, só desenvolvimento) em compose.override.yaml; o executor-ctl
   # (container gVisor por tentativa, criado pelo serviço do host) em compose.prod.yaml.
   worker:
-    <<: [*app, *least-privilege]
+    <<: [*app, *least-privilege, *read-only-root]
     command: ["gs-worker"]
     environment: &worker-env
       <<: *app-env
@@ -188,7 +196,7 @@ services:
     restart: unless-stopped
 
   maintenance:
-    <<: [*app, *least-privilege]
+    <<: [*app, *least-privilege, *read-only-root]
     command: ["gs-maintenance"]
     environment:
       <<: *worker-env
@@ -231,6 +239,15 @@ services:
       - SETPCAP
       - SYS_CHROOT
     security_opt: [no-new-privileges:true]
+    # Raiz só leitura com o que a imagem escreve, medido com --read-only: o pid em /run, o conf.d
+    # que o entrypoint gera dos templates e as pastas temporárias do proxy. O proxy da API não
+    # grava resposta em arquivo (proxy_max_temp_file_size 0), e o corpo acima de 64k só entra no
+    # envio de conteúdo, que vai sem buffer: 16m sobram.
+    read_only: true
+    tmpfs:
+      - /run:size=1m
+      - /etc/nginx/conf.d:size=1m
+      - /var/cache/nginx:size=16m
     depends_on:
       api:
         condition: service_healthy
@@ -239,7 +256,7 @@ services:
     logging: *logging
 
   otel-collector:
-    <<: *least-privilege
+    <<: [*least-privilege, *read-only-root]
     image: otel/opentelemetry-collector-contrib:0.162.0@sha256:39923a8e431bd1f57be82411999d389fcfe40857492e4365456d97a4c1f74be6
     command: ["--config=/etc/otelcol/config.yaml"]
     environment:
