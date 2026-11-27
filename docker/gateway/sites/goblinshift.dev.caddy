@@ -1,5 +1,7 @@
 goblinshift.dev {
  tls /data/origin-ca/goblinshift.dev.pem /data/origin-ca/goblinshift.dev.key
+ # Sem anunciar o servidor; a remoção é adiada para a resposta e vale também a do proxy.
+ header -Server
  # Só uma conexão das faixas da Cloudflare informa o cliente, e com um único endereço IPv4 ou
  # IPv6. A regex vai sobre o placeholder, que junta cabeçalhos repetidos com vírgula: o
  # header_regexp aceitaria o pedido se só uma das linhas casasse.
@@ -23,5 +25,9 @@ goblinshift.dev {
 }
 www.goblinshift.dev {
  tls /data/origin-ca/goblinshift.dev.pem /data/origin-ca/goblinshift.dev.key
+ # O mesmo HSTS do Nginx (default.conf.template), sem preload (D8 = b): o www também fica preso
+ # ao HTTPS depois da primeira visita.
+ header Strict-Transport-Security "max-age=63072000; includeSubDomains"
+ header -Server
  redir https://goblinshift.dev{uri} 308
 }

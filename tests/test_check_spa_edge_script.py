@@ -21,7 +21,7 @@ SCRIPT_TIMEOUT_S = 60
 CSP = (
     "default-src 'self'; script-src 'self' 'wasm-unsafe-eval'; connect-src 'self' blob:; "
     "img-src 'self' blob: data:; style-src 'self'; object-src 'none'; base-uri 'none'; "
-    "frame-ancestors 'none'; form-action 'self'"
+    "frame-ancestors 'none'; form-action 'self'; frame-src 'none'"
 )
 SPA_HEADERS = {
     "Content-Security-Policy": CSP,
