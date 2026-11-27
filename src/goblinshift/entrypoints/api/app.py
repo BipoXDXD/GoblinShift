@@ -55,7 +55,7 @@ from goblinshift.files.storage import FileStorage
 from goblinshift.identity import CURRENT_TERMS_VERSION
 from goblinshift.platform.db import make_engine, make_session_factory
 from goblinshift.platform.schema import read_code_revisions
-from goblinshift.platform.settings import Settings
+from goblinshift.platform.settings import Settings, load_settings_or_exit
 from goblinshift.platform.telemetry import UserHasher, configure_logging, configure_tracing
 from goblinshift.runs.finished import RunFinishedReporter
 from goblinshift.runs.quotas import QuotaLimits
@@ -90,14 +90,16 @@ def create_app(
 ) -> FastAPI:
     """`span_exporter` substitui o exportador OTLP nos testes do evento amplo, e
     `readiness_clock`, o relógio da validade do resultado do `/readyz`."""
-    settings = settings or Settings()
+    # Antes das settings: a configuração inválida sai como linha JSON, não como traceback cru.
+    configure_logging()
+    if settings is None:
+        settings = load_settings_or_exit(logger)
     # Lidos já na subida: em produção, sem os segredos ou sem o executor-ctl e a imagem do
     # executor, a API não sobe (em vez de falhar no primeiro pedido).
     settings.cursor_signing_key()
     user_hasher = UserHasher(settings.user_hash_key())
     executor_image = settings.executor_image_for_runs()
     web_identity = settings.web_identity()
-    configure_logging()
     engine = make_engine(settings.model_copy(update={"db_pool_timeout_s": API_DB_POOL_TIMEOUT_S}))
     code_heads, known_revisions = read_code_revisions(str(settings.alembic_ini))
 

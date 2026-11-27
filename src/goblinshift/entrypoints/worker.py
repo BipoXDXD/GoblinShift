@@ -48,7 +48,13 @@ import goblinshift.entrypoints.shutdown as process_shutdown
 from goblinshift.entrypoints.shutdown import SHUTDOWN_POLL_S, ShutdownFlag
 from goblinshift.files.storage import FileStorage
 from goblinshift.platform.db import make_engine, make_session_factory
-from goblinshift.platform.settings import ExecutorConfigError, MissingSecretError, Settings
+from goblinshift.platform.settings import (
+    EXIT_CONFIGURATION,
+    ExecutorConfigError,
+    MissingSecretError,
+    Settings,
+    load_settings_or_exit,
+)
 from goblinshift.platform.telemetry import (
     UserHasher,
     configure_logging,
@@ -71,7 +77,6 @@ logger = logging.getLogger("goblinshift.worker")
 
 EXIT_OK = 0
 EXIT_FAILURE = 1
-EXIT_CONFIGURATION = 2
 
 # Linha fixa do handler de sinal, sem dado nenhum (ver o docstring do módulo).
 STOP_NOTICE = b"gs-worker: sinal de parada recebido\n"
@@ -79,7 +84,7 @@ STOP_NOTICE = b"gs-worker: sinal de parada recebido\n"
 
 def main() -> int:
     configure_logging()
-    settings = Settings()
+    settings = load_settings_or_exit(logger)
     try:
         runner = build_runner(settings)
         settings.user_hash_key()
