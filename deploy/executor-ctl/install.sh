@@ -54,7 +54,7 @@ import sys
 from pathlib import Path
 
 sys.path.insert(0, str(Path(sys.argv[1]).parent))
-from executor_ctl.__main__ import REQUIRED_AREA_OPTIONS
+from executor_ctl.__main__ import REQUIRED_AREA_OPTIONS, io_device_problem
 from executor_ctl.config import ConfigError, load_config
 from executor_ctl.images import ImageNotAllowedError, _read_allowlist
 from executor_ctl.mounts import mount_options, read_self_mountinfo
@@ -79,6 +79,19 @@ if config.require_mount and not (
         f"{area} precisa estar montada com nosuid,nodev,noexec antes de instalar: a linha "
         "dela no /etc/fstab leva essas opções (deploy/filesystems.sh grava assim numa linha "
         f"nova e só avisa numa antiga, que se edita à mão); depois, mount -o remount {area}",
+        file=sys.stderr,
+    )
+    sys.exit(1)
+
+# O mesmo critério do ctl na subida. Sem nó utilizável, o serviço novo reiniciaria em laço;
+# o pacote antigo continua no ar. O caminho do bloco não é configuração.
+problem = io_device_problem(config)
+if problem is not None:
+    print(
+        "io_limits não cabe neste host (" + problem + "). O caminho do bloco não entra na "
+        "configuração: o ctl resolve o nó real de /dev/block/<major>:<minor> na subida, e a "
+        "unit monta /dev/block só para leitura porque PrivateDevices esconde o link. Grave "
+        'os quatro tetos medidos, ou "io_limits": false para desligar de propósito.',
         file=sys.stderr,
     )
     sys.exit(1)
@@ -242,6 +255,9 @@ ReadWritePaths=${WORK_AREA}
 ProtectHome=yes
 PrivateTmp=yes
 PrivateDevices=yes
+# O teto de I/O lê o link do udev /dev/block/M:m. PrivateDevices o esconde; sem este bind o
+# ctl não sobe com io_limits ligado. O "-" não falha a unit se o diretório não existir.
+BindReadOnlyPaths=-/dev/block
 ProtectKernelTunables=yes
 ProtectKernelModules=yes
 ProtectKernelLogs=yes

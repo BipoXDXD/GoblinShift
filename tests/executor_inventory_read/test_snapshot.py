@@ -110,6 +110,9 @@ def test_config_hash_is_the_raw_buffer_used_by_parser(
         "work_area": "/work/test",
         "runtime": "runsc",
         "images_file": config.IMAGES_FILE,
+        # false mantém io_limits vazio: o teste compara com Config() sem teto. A omissão
+        # aplicaria o teto sugerido e a igualdade abaixo falharia por outro motivo.
+        "io_limits": False,
     }
     raw = ("  " + json.dumps(content) + "\n").encode()
     path.write_bytes(raw)

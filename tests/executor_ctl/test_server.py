@@ -5,6 +5,7 @@ import importlib
 import itertools
 import json
 import os
+import queue
 import select
 import signal
 import socket as socketlib
@@ -1014,6 +1015,35 @@ def _first_line(stream: IO[str]) -> str:
     return stream.readline()
 
 
+def _ready_line(stream: IO[str]) -> str:
+    """A linha `pronto`. O teto de I/O pode avisar antes dela.
+
+    `select` num pipe em modo texto não vê a linha que o `TextIOWrapper` já puxou: o aviso e o
+    `pronto` saem juntos, e a segunda espera travaria até o teto.
+    """
+    lines: queue.Queue[str] = queue.Queue()
+
+    def pump() -> None:
+        while True:
+            line = stream.readline()
+            lines.put(line)
+            if line == "" or "pronto" in line:
+                return
+
+    threading.Thread(target=pump, daemon=True).start()
+    seen: list[str] = []
+    deadline = time.monotonic() + _PROCESS_GUARD_S
+    while time.monotonic() < deadline:
+        try:
+            line = lines.get(timeout=deadline - time.monotonic())
+        except queue.Empty:
+            break
+        seen.append(line)
+        if "pronto" in line:
+            return line
+    raise AssertionError(f"o serviço não ficou pronto em {_PROCESS_GUARD_S} s: {seen!r}")
+
+
 def test_sigterm_so_no_processo_principal_durante_stop_ainda_responde_200(
     tmp_path: Path, socket_dir: Path
 ) -> None:
@@ -1049,7 +1079,7 @@ def test_sigterm_so_no_processo_principal_durante_stop_ainda_responde_200(
     answers: list[Any] = []
     try:
         assert process.stdout is not None
-        assert "pronto" in _first_line(process.stdout)
+        assert "pronto" in _ready_line(process.stdout)
         client = threading.Thread(
             target=lambda: answers.append(
                 call(

@@ -39,46 +39,54 @@ Exemplo de configuração administrativa a preparar e revisar pelo operador:
   "socket_group": "gs-ctl",
   "work_area": "/srv/goblinshift/exec-work",
   "runtime": "runsc",
-  "images_file": "/var/lib/coolify-release/goblinshift/executor-images.json"
+  "images_file": "/var/lib/coolify-release/goblinshift/executor-images.json",
+  "io_limits": {"read_bps": 104857600, "write_bps": 52428800, "read_iops": 2000, "write_iops": 1000}
 }
 ```
 
-### Teto de I/O de disco (opcional, D13)
+### Teto de I/O de disco (D13)
 
-A área de trabalho fica no mesmo disco do banco. A chave opcional `io_limits`
-limita o quanto um executor lê e escreve nele; **sem a chave não há teto**, e o
-`docker run` sai exatamente como antes. Com ela, as quatro chaves são
-obrigatórias e cada valor é um inteiro positivo (bytes/s e operações/s):
+A área de trabalho fica no mesmo disco do banco. A cota de 6 GiB limita o
+espaço, não a vazão: sem teto, um executor enche a fila do disco e atrasa o
+banco. `io_limits` limita o quanto um executor lê e escreve nesse disco.
 
-```json
-"io_limits": {"read_bps": 104857600, "write_bps": 52428800, "read_iops": 2000, "write_iops": 1000}
-```
+**Sem a chave, vale o teto sugerido** do exemplo acima (100 MiB/s de leitura,
+50 MiB/s de escrita, 2000 e 1000 operações/s). Não é a vazão medida da VPS: é o
+piso seguro para um arquivo antigo não subir ilimitado. `"io_limits": false` é
+o único opt-out, e o journal registra `executor sem teto de I/O` em todo
+arranque. Com o objeto, as quatro chaves são obrigatórias e cada valor é um
+inteiro positivo (bytes/s e operações/s). `null` não desliga.
 
-O dispositivo sai do `st_dev` de `work_area` (o loop device do filesystem de
-tamanho fixo da área, ADR 005), seguindo o link do udev `/dev/block/<major>:<minor>`
-até o nó real (`/dev/loopN`): o Docker separa dispositivo e valor no primeiro
-`:` de `--device-read-bps`, e o link com `:` faria todo start falhar. O ctl
-resolve o nó na subida e **não sobe** (host não pronto) se o resultado não for
-um caminho em `/dev/` sem `:`; depois, resolve de novo a cada start, sob o lock
-da área, porque uma remontagem pode trocar o loopN. As quatro flags são
-`--device-read-bps`, `--device-write-bps`, `--device-read-iops` e
-`--device-write-iops`.
+O dispositivo **não entra na configuração** nem no Compose. Sai do `st_dev` de
+`work_area` (o loop device do filesystem de tamanho fixo da área, ADR 005),
+seguindo o link do udev `/dev/block/<major>:<minor>` até o nó real
+(`/dev/loopN`): o Docker separa dispositivo e valor no primeiro `:` de
+`--device-read-bps`, e o link com `:` faria todo start falhar. O ctl resolve o
+nó na subida e **não sobe** (host não pronto) se o resultado não for um caminho
+em `/dev/` sem `:`; o instalador recusa antes de trocar o pacote, pelo mesmo
+motivo. Depois, resolve de novo a cada start, sob o lock da área, porque uma
+remontagem pode trocar o loopN. A unit traz `PrivateDevices=yes`, que esconde
+`/dev/block`; por isso também traz `BindReadOnlyPaths=-/dev/block` (o `-` não
+falha a unit se o diretório não existir). O ctl não abre o dispositivo: só lê
+o link e passa o caminho ao daemon. As quatro flags são `--device-read-bps`,
+`--device-write-bps`, `--device-read-iops` e `--device-write-iops`.
 
 **Como medir (operador, no host):** pela sonda de disco da aceitação, que roda
-com as mesmas opções do executor, inclusive o teto. Sem a chave, rode a
-aceitação e leia a evidência da sonda `ENOSPC aos 6 GiB` (GiB escritos e
-segundos): isso é a vazão normal de escrita da área. Ligue `io_limits` com
-valores abaixo dela (sugestão: metade), reinstale (Tarefa 26) e rode a
-aceitação de novo: a mesma sonda mostra a vazão já com o teto. Cuidado: a sonda
-escreve 6 GiB e tem prazo de 900 s, então um `write_bps` abaixo de ~7 MB/s
-(6 GiB / 900 s ≈ 7,2 MB/s) a reprova por prazo, não por defeito. A carga do
-Image Forge (`image_forge_load.py`) também roda com o teto e mostra se ele
+com as mesmas opções do executor, inclusive o teto. Para ver a vazão sem teto,
+grave `"io_limits": false` na mesma janela da reinstalação (o parser antigo
+recusa a chave), rode a aceitação e leia a evidência da sonda `ENOSPC aos 6
+GiB` (GiB escritos e segundos). Troque `false` por valores abaixo dessa vazão
+(sugestão: metade) e rode de novo: a mesma sonda mostra a vazão já com o teto.
+Cuidado: a sonda escreve 6 GiB e tem prazo de 900 s, então um `write_bps`
+abaixo de ~7 MB/s (6 GiB / 900 s ≈ 7,2 MB/s) a reprova por prazo, não por
+defeito. O teto sugerido (50 MiB/s de escrita) fica acima desse piso. A carga
+do Image Forge (`image_forge_load.py`) também roda com o teto e mostra se ele
 cabe no teto de 10 min de uma tentativa.
 
 O efeito do teto com gVisor (`runsc`) sobre loop device só se prova no host: o
 throttling é do cgroup do container (onde ficam o sentry e o gofer), e a escrita
 com cache de página chega ao disco pelo writeback. Se a sonda com o teto não
-mostrar vazão menor, registrar isso e voltar sem a chave.
+mostrar vazão menor, registrar isso e gravar `"io_limits": false`.
 
 O instalador executa preflight somente leitura, usando `load_config` completo e
 o leitor da política do checkout, antes de `getent`, `groupadd`, `usermod`,
@@ -110,14 +118,23 @@ Esta versão separa o socket no grupo `gs-ctl` (D11), exige a área com
    com `findmnt -no OPTIONS /srv/goblinshift/exec-work`. O ctl novo recusa subir
    sem as três opções, e o instalador recusa trocar o pacote antes disso.
 3. **`"socket_group": "gs-ctl"`** no JSON da configuração administrativa.
-4. **Reinstalar o ctl** (`sudo bash deploy/executor-ctl/install.sh`).
+4. **`io_limits`**, na mesma janela do passo 5 se for para entrar no arquivo.
+   Sem a chave, o ctl novo aplica o teto sugerido (seção acima). O parser
+   antigo recusa a chave, então não reinicie o ctl velho depois de gravá-la.
+   `"io_limits": false` desliga de propósito. O instalador recusa trocar o
+   pacote se o teto está ligado e o nó de `/dev/block` não serve: o serviço
+   novo não subiria. O caminho do bloco continua fora do JSON.
+5. **Reinstalar o ctl** (`sudo bash deploy/executor-ctl/install.sh`).
 
-Os passos 3 e 4 vão na mesma janela drenada: o parser do ctl velho recusa a
-chave nova, e um restart dele entre os dois passos o deixaria fora do ar. A unit
-nova traz `KillMode=mixed` (o SIGTERM vai só ao processo principal, que termina
-as requisições em voo), `TimeoutStopSec=210` (acima do pior caso, o stop de
-175 s) e o marcador `.restart-pending` no prefixo, que faz a execução seguinte
-do instalador reiniciar o serviço se a anterior falhou no meio.
+Os passos 3 a 5 vão na mesma janela drenada: o parser do ctl velho recusa a
+chave nova (`socket_group` ou `io_limits`), e um restart dele entre gravar o
+JSON e reinstalar o deixaria fora do ar. A unit nova traz `KillMode=mixed` (o
+SIGTERM vai só ao processo principal, que termina as requisições em voo),
+`TimeoutStopSec=210` (acima do pior caso, o stop de 175 s),
+`BindReadOnlyPaths=-/dev/block` (o teto de I/O lê o link do udev, que
+`PrivateDevices` esconderia) e o marcador `.restart-pending` no prefixo, que
+faz a execução seguinte do instalador reiniciar o serviço se a anterior falhou
+no meio.
 
 ## Container alheio com o nome da tentativa (409 `foreign_container`)
 

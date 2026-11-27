@@ -1,5 +1,6 @@
 """Run only temporary installer copies; synthetic filesystem, no sudo or services."""
 
+import configparser
 import json
 import os
 import shutil
@@ -74,6 +75,29 @@ def test_area_sem_nosuid_nodev_noexec_recusa_antes_de_mutar(tmp_path: Path, case
     assert "deploy/filesystems.sh" in result.stderr, result.stderr
 
 
+def test_io_limits_sem_area_recusa_antes_de_mutar(tmp_path: Path) -> None:
+    result, effects = run_installer_copy(tmp_path, "io_limits_area_missing")
+
+    assert result.returncode != 0
+    assert not effects.exists(), effects.read_text() if effects.exists() else ""
+    assert "io_limits" in result.stderr, result.stderr
+
+
+def test_io_limits_false_nao_exige_dispositivo(tmp_path: Path) -> None:
+    result, effects = run_installer_copy(tmp_path, "io_opt_out_sem_area")
+
+    assert result.returncode == 91, result.stderr
+    assert effects.read_text().strip() == "groupadd"
+
+
+@pytest.mark.skipif(not Path("/dev/block").is_dir(), reason="sem o link do udev /dev/block")
+def test_io_limits_no_diretorio_real_segue_o_preflight(tmp_path: Path) -> None:
+    result, effects = run_installer_copy(tmp_path, "io_limits_real_area")
+
+    assert result.returncode == 91, result.stderr
+    assert effects.read_text().strip() == "groupadd"
+
+
 def test_area_sem_montagem_exigida_nao_confere_opcoes(tmp_path: Path) -> None:
     result, effects = run_installer_copy(tmp_path, "area_not_required")
     assert result.returncode == 91, result.stderr
@@ -119,6 +143,9 @@ def run_installer_copy(
         "work_area": "/srv/goblinshift/exec-work",
         "runtime": "runsc",
         "images_file": POLICY,
+        # A cópia sintética não tem o loop da área. false é o opt-out; os casos que ligam
+        # o teto cobrem a recusa e o nó real à parte.
+        "io_limits": False,
     }
     config.write_text(json.dumps(content))
     policy.write_text(json.dumps({"allowed": [IMAGE]}))
@@ -143,6 +170,54 @@ def run_installer_copy(
         config.write_text(json.dumps(content)[:-1] + ', "runtime": "runc"}')
     elif case == "area_not_required":
         config.write_text(json.dumps({**content, "require_mount": False}))
+    elif case == "io_limits_area_missing":
+        # require_mount desligado: a recusa tem de ser o nó, não a montagem.
+        config.write_text(
+            json.dumps(
+                {
+                    **content,
+                    "require_mount": False,
+                    "work_area": "/srv/goblinshift/exec-work-ausente",
+                    "io_limits": {
+                        "read_bps": 104857600,
+                        "write_bps": 52428800,
+                        "read_iops": 2000,
+                        "write_iops": 1000,
+                    },
+                }
+            )
+        )
+    elif case == "io_opt_out_sem_area":
+        config.write_text(
+            json.dumps(
+                {
+                    **content,
+                    "require_mount": False,
+                    "io_limits": False,
+                    "work_area": "/srv/goblinshift/exec-work-ausente",
+                }
+            )
+        )
+    elif case == "io_limits_real_area":
+        # Omissão vira o teto sugerido no parser; aqui o objeto está explícito para o preflight
+        # ter de resolver o nó de verdade e ainda assim seguir.
+        area = tmp_path / "exec-work"
+        area.mkdir()
+        config.write_text(
+            json.dumps(
+                {
+                    **content,
+                    "require_mount": False,
+                    "work_area": str(area),
+                    "io_limits": {
+                        "read_bps": 104857600,
+                        "write_bps": 52428800,
+                        "read_iops": 2000,
+                        "write_iops": 1000,
+                    },
+                }
+            )
+        )
     elif case == "policy_not_private":
         policy.chmod(0o644)
     elif case == "policy_missing":
@@ -310,6 +385,20 @@ def test_falha_nao_deixa_staging(tmp_path: Path) -> None:
 
         assert result.returncode != 0
         assert list(copy.prefix.glob(".executor_ctl.*")) == []
+
+
+def test_unit_le_dev_block_com_private_devices(tmp_path: Path) -> None:
+    # PrivateDevices esconde o link do udev. Sem o bind, io_limits ligado não sobe.
+    with installer_copy(tmp_path) as copy:
+        result = copy.run()
+        assert result.returncode == 0, result.stderr
+        unit = configparser.ConfigParser(interpolation=None, strict=False)
+        unit.optionxform = str  # type: ignore[assignment,method-assign]
+        unit.read_string(copy.unit.read_text())
+
+    service = unit["Service"]
+    assert service["PrivateDevices"] == "yes"
+    assert service["BindReadOnlyPaths"] == "-/dev/block"
 
 
 @pytest.mark.skipif(sys.platform != "linux", reason="systemd-analyze só existe no Linux")
