@@ -103,31 +103,42 @@ def _workflow_images() -> list[tuple[str, str, str]]:
     return [ref for ref in _workflow_image_references() if "${{" not in ref[2]]
 
 
+def _image_assignment(no: ast.stmt) -> tuple[str, str] | None:
+    """`(nome, valor)` de uma atribuição de módulo `*IMAGE = "<literal>"`, ou None."""
+    if isinstance(no, ast.Assign) and len(no.targets) == 1:
+        alvo: ast.expr = no.targets[0]
+    elif isinstance(no, ast.AnnAssign):
+        alvo = no.target
+    else:
+        return None
+    valor = no.value
+    if (
+        isinstance(alvo, ast.Name)
+        and alvo.id.endswith("IMAGE")
+        and isinstance(valor, ast.Constant)
+        and isinstance(valor.value, str)
+    ):
+        return alvo.id, valor.value
+    return None
+
+
 def _named_image_constants() -> list[tuple[str, str, str]]:
     """Atribuições de módulo `*IMAGE = "<literal>"` nos testes e `*IMAGE=` nos scripts.
 
     Só literal: valor montado (`"...@sha256:" + "a" * 64`, f-string) é digest falso de teste de
     unidade e fica de fora, como os literais soltos dos testes de recusa.
     """
-    constantes = []
+    constantes: list[tuple[str, str, str]] = []
     for arquivo in sorted((ROOT / "tests").rglob("*.py")):
+        relativo = str(arquivo.relative_to(ROOT))
         for no in ast.parse(arquivo.read_text(encoding="utf-8")).body:
-            alvo = no.target if isinstance(no, ast.AnnAssign) else None
-            if isinstance(no, ast.Assign) and len(no.targets) == 1:
-                alvo = no.targets[0]
-            valor = no.value if isinstance(no, ast.Assign | ast.AnnAssign) else None
-            if (
-                isinstance(alvo, ast.Name)
-                and alvo.id.endswith("IMAGE")
-                and isinstance(valor, ast.Constant)
-                and isinstance(valor.value, str)
-            ):
-                constantes.append((str(arquivo.relative_to(ROOT)), alvo.id, valor.value))
+            if (atribuicao := _image_assignment(no)) is not None:
+                constantes.append((relativo, *atribuicao))
     for pasta in ("scripts", "deploy"):
         for arquivo in sorted((ROOT / pasta).rglob("*.sh")):
             for casamento in SHELL_IMAGE.finditer(arquivo.read_text(encoding="utf-8")):
-                valor = casamento["valor"].strip("\"'")
-                constantes.append((str(arquivo.relative_to(ROOT)), casamento["nome"], valor))
+                imagem = casamento["valor"].strip("\"'")
+                constantes.append((str(arquivo.relative_to(ROOT)), casamento["nome"], imagem))
     return constantes
 
 
