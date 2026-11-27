@@ -37,9 +37,25 @@ def test_redirect_do_www_emite_hsts() -> None:
     assert www.index(hsts) < next(i for i, d in enumerate(www) if d.startswith("redir "))
 
 
+def _diretivas_do_topo(arquivo: Path) -> dict[str, list[str]]:
+    """Diretivas no primeiro nível de cada site, sem as de blocos aninhados (`route`, `handle`)."""
+    sites = {}
+    for match in re.finditer(r"^(\S[^{\n]*?) \{\n(.*?)^\}", arquivo.read_text(), re.M | re.S):
+        linhas = [
+            linha
+            for linha in match[2].splitlines()
+            if linha.strip() and not linha.strip().startswith("#")
+        ]
+        recuo = len(linhas[0]) - len(linhas[0].lstrip())
+        sites[match[1]] = [
+            linha.strip() for linha in linhas if len(linha) - len(linha.lstrip()) == recuo
+        ]
+    return sites
+
+
 @pytest.mark.parametrize("arquivo", [GATEWAY_SITE, EDGE_SITE], ids=lambda p: p.name)
 def test_caddy_remove_o_cabecalho_server(arquivo: Path) -> None:
-    sites = _sites(arquivo)
+    sites = _diretivas_do_topo(arquivo)
     assert sites
 
     assert {

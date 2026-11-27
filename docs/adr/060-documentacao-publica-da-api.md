@@ -6,8 +6,11 @@
 ## Contexto
 
 O Nginx encaminha `/docs`, `/docs/assets/` e `/openapi.json` à API, além das rotas de `/api/`.
-Essas três locations, e também o `/livez`, não tinham `limit_req`. Um cliente em laço com leitura
-lenta ocupava as 30 conexões do uvicorn (`--limit-concurrency 30`), e todos passavam a receber 503.
+Essas três locations, e também o `/livez`, não tinham `limit_req`. Um cliente em laço, sem
+limite no Nginx, enchia as vagas da API (`ConcurrencyLimitMiddleware` corta em 28, e o uvicorn
+recusa acima de `--limit-concurrency 72`), e os outros clientes passavam a receber 503. O
+`proxy_buffering` ligado nessas rotas faz o Nginx esvaziar a API rápido, então a ameaça é o
+volume de pedidos, não a leitura lenta.
 
 ## Decisão
 

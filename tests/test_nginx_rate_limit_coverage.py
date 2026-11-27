@@ -1,8 +1,8 @@
 """Toda location que encaminha à API tem limite de taxa (#442, 31b; D7).
 
-Sem limite, um cliente em laço com leitura lenta ocupa as 30 conexões do uvicorn
-(`--limit-concurrency 30`, docker/app.Dockerfile) e todos passam a receber 503. Teste estático,
-sem Docker: o 429 no Nginx real fica em tests/test_nginx_auth_limit.py.
+Sem limite, um cliente em laço enche as vagas da API (`ConcurrencyLimitMiddleware` e o
+`--limit-concurrency` do uvicorn, docker/app.Dockerfile) e os outros passam a receber 503. Teste
+estático, sem Docker: o 429 no Nginx real fica em tests/test_nginx_edge_limits.py.
 """
 
 import pytest

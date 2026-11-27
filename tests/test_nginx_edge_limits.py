@@ -134,6 +134,16 @@ def test_429_da_api_e_problem_json_com_retry_after(stack: NginxLogs) -> None:
     assert set(problem) == {"type", "title", "status", "detail", "instance", "code", "request_id"}
 
 
+def test_openapi_acima_da_rajada_responde_429_problem_json(stack: NginxLogs) -> None:
+    # Documentação pública (ADR 060) na mesma zona da API. O `types { }` das locations de erro
+    # impede que a extensão `.json` do caminho troque o tipo do 429.
+    hits = _burst(stack, "/openapi.json", 80, "198.51.100.65")
+
+    limited = next(hit for hit in hits if hit.status == HTTP_TOO_MANY_REQUESTS)
+    assert limited.content_type == "application/problem+json"
+    assert json.loads(limited.body)["code"] == "RATE_LIMITED"
+
+
 def test_limite_da_api_vale_por_cliente(stack: NginxLogs) -> None:
     flooding, neighbor = _two_bursts(
         stack, "/api/v1/me", ("198.51.100.62", 100), ("198.51.100.63", API_ALLOWED_AT_ONCE)

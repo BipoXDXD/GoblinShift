@@ -56,9 +56,9 @@ def _sites(path: Path) -> dict[str, list[str]]:
     return sites
 
 
-# Além do proxy, só as diretivas de retry de conexão (lb_try_*), o fecho do bloco aninhado e a
-# remoção do cabeçalho Server (tests/test_caddy_headers.py).
-RETRY_DIRECTIVE = re.compile(r"^(lb_try_duration \d+s|lb_try_interval \d+ms|\}|header -Server)$")
+# Além do proxy, só as diretivas de retry de conexão (lb_try_*) e o fecho do bloco aninhado. A
+# remoção do cabeçalho Server sai antes da comparação (tests/test_caddy_headers.py).
+RETRY_DIRECTIVE = re.compile(r"^(lb_try_duration \d+s|lb_try_interval \d+ms|\})$")
 
 
 def test_site_do_goblinshift_vai_so_para_o_ip_reservado() -> None:

@@ -218,16 +218,6 @@ def test_limite_de_auth_nao_afeta_a_api(stack: NginxLogs) -> None:
     assert _statuses(stack, stack.edge, "/api/v1/me", 1, header) == [HTTP_NO_CONTENT]
 
 
-def test_openapi_acima_da_rajada_responde_429_problem_json(stack: NginxLogs) -> None:
-    # Zona api: 20 por segundo com rajada de 40; 60 pedidos seguidos passam da rajada.
-    responses = stack.fetch_many(stack.edge, "/openapi.json", 60, "X-Forwarded-For: 198.51.100.30")
-
-    limited = [response for response in responses if response.status == HTTP_TOO_MANY_REQUESTS]
-    assert limited
-    assert limited[0].header_values("Content-Type") == ["application/problem+json"]
-    assert json.loads(limited[0].body)["code"] == "RATE_LIMITED"
-
-
 # --- configuração, sem Docker -----------------------------------------------------------------
 
 

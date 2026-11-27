@@ -173,12 +173,19 @@ def test_lista_so_vale_nos_sites_atras_da_cloudflare() -> None:
         assert "CF-Connecting-IP" not in text, path
 
 
+# Cabeçalhos de resposta que só o site do GoblinShift emite (tests/test_caddy_headers.py).
+CABECALHOS_DO_GOBLINSHIFT = (
+    "header -Server",
+    'header Strict-Transport-Security "max-age=63072000; includeSubDomains"',
+)
+
+
 def _sem_cabecalhos_de_resposta(site: str) -> str:
-    """Tira as linhas `header` e o comentário logo acima de cada uma."""
+    """Tira as linhas de `CABECALHOS_DO_GOBLINSHIFT` e o comentário logo acima de cada uma."""
     linhas = site.splitlines(keepends=True)
     fica = [True] * len(linhas)
     for i, linha in enumerate(linhas):
-        if linha.startswith(" header "):
+        if linha.strip() in CABECALHOS_DO_GOBLINSHIFT:
             fica[i] = False
             j = i - 1
             while j >= 0 and linhas[j].startswith(" #"):
