@@ -20,6 +20,9 @@ EXECUTOR_IMAGE_PATTERN = r"^[a-z0-9]+(?:[._/:-][a-z0-9]+)*@sha256:[0-9a-f]{64}$"
 LOCAL_EXECUTOR_IMAGE = "local-dev"
 # Grupo `gs-exec` do host, que o executor (UID 61000) e o worker compartilham.
 EXECUTOR_GROUP_ID = 61001
+# Teto signed int32 aceito por `statement_timeout`, `lock_timeout` e
+# `idle_in_transaction_session_timeout`.
+PG_MAX_TIMEOUT_MS = 2_147_483_647
 # Só para desenvolvimento e testes; em produção a ausência do segredo impede a API de subir.
 _DEV_CURSOR_KEY = "goblinshift-dev-only-cursor-key-not-a-secret"
 _DEV_USER_HASH_KEY = "goblinshift-dev-only-user-hash-key-not-a-secret"
@@ -69,8 +72,8 @@ class WebIdentityConfig:
 
 
 class Settings(BaseSettings):
-    # Erro de validação nomeia campo e tipo, nunca a entrada (pode ser segredo); `nan` e `inf`
-    # nunca são faixa válida (#442, 54 a e b).
+    # `hide_input_in_errors=True` omite a entrada em `str`/`repr` (e `describe_config_error`
+    # usa `include_input=False` em `errors()`); `nan`/`inf` nunca são válidos (#442, 54 a e b).
     model_config = SettingsConfigDict(
         env_prefix="GS_",
         extra="ignore",
@@ -83,7 +86,7 @@ class Settings(BaseSettings):
     service_version: str = "dev"
 
     db_host: str = "localhost"
-    db_port: int = 5432
+    db_port: int = Field(default=5432, gt=0, le=65535)
     db_name: str = "goblinshift"
     db_user: str = "goblinshift"
     # Em produção a senha vem só de um arquivo de segredo do Compose (GS_DB_PASSWORD_FILE),
@@ -92,9 +95,9 @@ class Settings(BaseSettings):
     db_password_file: Path | None = None
 
     # Timeouts de 3.2: defesa contra consultas presas e transações esquecidas.
-    db_statement_timeout_ms: int = Field(default=5_000, gt=0)
-    db_lock_timeout_ms: int = Field(default=2_000, gt=0)
-    db_idle_in_transaction_timeout_ms: int = Field(default=30_000, gt=0)
+    db_statement_timeout_ms: int = Field(default=5_000, gt=0, le=PG_MAX_TIMEOUT_MS)
+    db_lock_timeout_ms: int = Field(default=2_000, gt=0, le=PG_MAX_TIMEOUT_MS)
+    db_idle_in_transaction_timeout_ms: int = Field(default=30_000, gt=0, le=PG_MAX_TIMEOUT_MS)
     db_connect_timeout_s: int = Field(default=5, gt=0)
     db_pool_size: int = Field(default=10, gt=0)
     db_pool_max_overflow: int = Field(default=5, ge=0)
@@ -118,7 +121,7 @@ class Settings(BaseSettings):
     # (deploy/coolify/release/receiver.py).
     executor_image: str | None = Field(default=None, pattern=EXECUTOR_IMAGE_PATTERN)
     executor_ctl_socket: Path = Path("/run/goblinshift/executor-ctl.sock")
-    executor_group_id: int = EXECUTOR_GROUP_ID
+    executor_group_id: int = Field(default=EXECUTOR_GROUP_ID, gt=0)
     # Raiz das áreas de trabalho das tentativas; com o `executor_ctl`, o filesystem de tamanho
     # fixo do host, montado no worker e na manutenção.
     work_root: Path = Path(".work")
@@ -134,7 +137,7 @@ class Settings(BaseSettings):
     quota_runs_per_24h: int = Field(default=30, gt=0)
     quota_input_bytes_per_24h: int = Field(default=2 * 1024**3, gt=0)
     # Lotes da manutenção toleram consultas mais longas que a API (3.2).
-    maintenance_statement_timeout_ms: int = Field(default=30_000, gt=0)
+    maintenance_statement_timeout_ms: int = Field(default=30_000, gt=0, le=PG_MAX_TIMEOUT_MS)
 
     # Chave HMAC dos cursores da listagem (1.6). Trocá-la invalida os cursores emitidos, o que
     # só custa ao cliente recomeçar a paginação.
