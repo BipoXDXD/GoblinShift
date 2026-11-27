@@ -85,6 +85,13 @@ DEFAULT_BATCH_SIZE = 50
 UNREADABLE_LOG_SAMPLE = 5
 # Alerta de causa (3.7): Run em `stopping` há mais que isto sem confirmar a parada.
 STUCK_STOPPING_AFTER = timedelta(minutes=10)
+# `run.finished` ao menos uma vez (D5 do #442): a Run terminal sem a marca de reportada é reemitida
+# passada a carência, que deixa quem a concluiu emitir primeiro; mais velha que o horizonte, não
+# volta, para uma falha que se repete não reemitir a mesma Run para sempre.
+UNREPORTED_FINISH_GRACE = timedelta(minutes=5)
+UNREPORTED_FINISH_HORIZON = timedelta(hours=24)
+# Contagem do evento do ciclo: Runs cujo `run.finished` a varredura reemitiu.
+FINISHES_REPORTED = "finishes_reported"
 # Contagem do evento do ciclo: passos que levantaram exceção. O ciclo segue para os outros, e a
 # volta conta como falha (`entrypoints/maintenance.run_cycles`, causa `gs-causa-ciclos-falhando`).
 STEPS_FAILED = "steps_failed"
@@ -308,6 +315,7 @@ class Maintenance:
             _Step("expire_queue", lambda: {"queue_expired": self.expire_queue()}),
             _Step("apply_deadlines", lambda: {"deadlines": self.apply_deadlines()}),
             _Step("release_orphan_holds", self.release_orphan_holds),
+            _Step("report_unreported_finishes", self.report_unreported_finishes),
             _Step("discard_stale_candidates", self.discard_stale_candidates),
             _Step(
                 "sweep_work_areas",
@@ -549,6 +557,22 @@ class Maintenance:
                 partial(release_run_holds, run_id=row.id, generation=row.generation),
             )
         return len(terminal)
+
+    def report_unreported_finishes(self) -> dict[str, int]:
+        """Reemite o `run.finished` das Runs terminais que quem as concluiu não reportou.
+
+        Só as terminadas entre a carência e o horizonte, as mais antigas primeiro, até um lote. O
+        reporter grava a marca depois de emitir e engole a própria falha: a Run sem marca volta no
+        ciclo seguinte. Sem `on_finished` (manutenção sem telemetria), não há o que emitir.
+        """
+        on_finished = self._on_finished
+        if on_finished is None:
+            return {FINISHES_REPORTED: 0}
+        batch = self._config.batch_size
+        ids = self._at_db_now(lambda s, now: _unreported_finishes(s, now, batch))
+        for run_id in ids:
+            on_finished(run_id)
+        return {FINISHES_REPORTED: len(ids)}
 
     def discard_stale_candidates(self) -> dict[str, int]:
         """Candidatos de tentativas encerradas que não viraram artefato (gerações vencidas)."""
@@ -839,7 +863,7 @@ class Maintenance:
                 "storage_global_max_bytes": storage.storage_max_bytes,
             }
 
-    def _at_db_now(self, step: Callable[[Session, datetime], int]) -> int:
+    def _at_db_now[T](self, step: Callable[[Session, datetime], T]) -> T:
         with self._factory() as session, session.begin():
             return step(session, db_now(session))
 
@@ -910,6 +934,22 @@ class Maintenance:
             release_pending=stopped.release_pending,
             discarded_keys=first.discarded_keys + stopped.discarded_keys,
         )
+
+
+def _unreported_finishes(session: Session, now: datetime, limit: int) -> list[uuid.UUID]:
+    return list(
+        session.execute(
+            select(run.c.id)
+            .where(
+                run.c.finished_at.is_not(None),
+                run.c.finished_reported_at.is_(None),
+                run.c.finished_at <= now - UNREPORTED_FINISH_GRACE,
+                run.c.finished_at >= now - UNREPORTED_FINISH_HORIZON,
+            )
+            .order_by(run.c.finished_at, run.c.id)
+            .limit(limit)
+        ).scalars()
+    )
 
 
 def _lease_expired() -> ColumnElement[bool]:

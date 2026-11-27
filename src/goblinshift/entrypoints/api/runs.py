@@ -11,7 +11,7 @@ from uuid import UUID
 
 from fastapi import APIRouter, Depends, Query, Request, Response
 from fastapi.exceptions import RequestValidationError
-from opentelemetry import propagate
+from opentelemetry.trace.propagation.tracecontext import TraceContextTextMapPropagator
 from pydantic import AwareDatetime, BaseModel, BeforeValidator, ConfigDict, Field
 from sqlalchemy.orm import Session
 
@@ -121,6 +121,9 @@ POLL_RETRY_AFTER_SECONDS = 2
 # Uma execução ocupa o executor por minutos (1.7); tentar antes disso só gasta a cota.
 QUEUE_FULL_RETRY_AFTER_SECONDS = 60
 MAX_CURSOR_CHARS = 1024
+# Explícito, não o global: a API esvazia o propagador global para não aceitar o contexto de trace
+# do cliente (configure_tracing), mas a Run grava o `traceparent` da aceitação para o worker.
+_PROPAGATOR = TraceContextTextMapPropagator()
 _ERROR_MESSAGES: dict[str, str] = {
     ErrorCode.NO_VALID_OUTPUTS: "Nenhuma entrada produziu saída válida.",
     ErrorCode.OUTPUT_LIMIT_EXCEEDED: "As saídas passaram do limite da execução.",
@@ -805,7 +808,7 @@ def _run_response(view: RunView) -> RunResponse:
 def _current_traceparent() -> str | None:
     """`traceparent` do span da requisição, para ligar o trabalho do worker à aceitação (3.7)."""
     carrier: dict[str, str] = {}
-    propagate.inject(carrier)
+    _PROPAGATOR.inject(carrier)
     return carrier.get("traceparent")
 
 
