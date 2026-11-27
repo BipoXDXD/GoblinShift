@@ -431,6 +431,43 @@ def test_retencao_para_no_prazo_e_continua_no_ciclo_seguinte(
     assert audit_events_left(factory) == 0
 
 
+def test_falha_num_lote_do_meio_conta_as_remocoes_ja_confirmadas(
+    factory: sessionmaker[Session],
+    monkeypatch: pytest.MonkeyPatch,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    now = datetime(2026, 10, 14, 12, 0, tzinfo=UTC)
+    insert_audit_events(factory, *[now - timedelta(days=91)] * 5)
+    real_delete = identity_purge.delete_old_audit_events
+    calls = itertools.count(1)
+
+    def failing_on_second(session: Session, at: datetime, limit: int) -> int:
+        if next(calls) == 2:
+            raise statement_timeout()
+        return real_delete(session, at, limit)
+
+    monkeypatch.setattr(identity_purge, "delete_old_audit_events", failing_on_second)
+    jobs = AccountJobs(factory, clock=lambda: now, config=AccountJobsConfig(batch_size=2))
+
+    with caplog.at_level(logging.ERROR):
+        counts = jobs.run_cycle()
+
+    assert (counts["audit_events_removed"], counts["account_steps_failed"]) == (2, 1)
+    assert audit_events_left(factory) == 3
+    [failure] = [r for r in caplog.records if r.getMessage() == "passo da manutenção falhou"]
+    assert failure.fields == {  # type: ignore[attr-defined]
+        "step": "audit_events_removed",
+        "error_type": "OperationalError",
+        "sqlstate": QUERY_CANCELED,
+    }
+
+
+@pytest.mark.parametrize("field", ["batch_size", "accounts_per_cycle"])
+def test_configuracao_do_ciclo_de_contas_recusa_zero(field: str) -> None:
+    with pytest.raises(ValueError, match=field):
+        AccountJobsConfig(**{field: 0})
+
+
 def test_atraso_de_mais_de_um_dia_gera_o_alerta(
     factory: sessionmaker[Session], caplog: pytest.LogCaptureFixture
 ) -> None:

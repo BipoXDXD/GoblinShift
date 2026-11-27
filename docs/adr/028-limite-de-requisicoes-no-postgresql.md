@@ -54,4 +54,6 @@ A contagem passou para antes do CSRF. `authenticate` identifica a credencial sem
 
 - A mutação com CSRF inválido conta como `COMMAND` (ou `RUN_CREATE`). Depois do limite, a resposta é `429 RATE_LIMITED`, não mais `403 CSRF_FAILED`.
 - Um site hostil consegue gastar o limite de comandos da conta durante um minuto. O custo é o mesmo de quem tem a credencial, e o limite existe para proteger a VPS. A recusa não estende a sessão e não chega aos serviços.
+- Assimetria no evento amplo: o `429` que vem pela sessão é atribuído à conta (`record_principal`), porque o balde é dela; o `403 CSRF_FAILED` não, porque o pedido forjado só leva o cookie da vítima e não prova que veio dela. A recusa do CSRF fica na auditoria.
+- Risco aceito: um site irmão same-site consegue esgotar o balde `COMMAND` da vítima com POSTs forjados, já que a recusa do CSRF conta no limite. A vítima fica sem mutações até o fim da janela de um minuto. O risco é baixo enquanto não houver subdomínios de terceiros sob o mesmo site registrável; se passar a haver, revisar esta decisão.
 - Verificação: `tests/api/test_csrf.py::test_mutacao_com_csrf_invalido_conta_no_limite_de_comandos` (o 61º POST sem CSRF válido recebe 429) e `::test_post_same_site_recusado_nao_estende_a_sessao`.

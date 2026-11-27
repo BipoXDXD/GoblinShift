@@ -190,6 +190,21 @@ class AccountJobsConfig:
     # Itens por lote em cada etapa da purga e em cada retenção (1.8: lotes de 500).
     batch_size: int = 500
 
+    def __post_init__(self) -> None:
+        # Zero não anda a fila: a purga e as retenções nunca terminariam.
+        for field in ("accounts_per_cycle", "batch_size"):
+            if getattr(self, field) < 1:
+                raise ValueError(f"{field} precisa ser pelo menos 1")
+
+
+class _PartialStepError(Exception):
+    """Passo que falhou depois de confirmar parte do trabalho; leva as contagens do parcial."""
+
+    def __init__(self, counts: dict[str, int], cause: Exception) -> None:
+        super().__init__(type(cause).__name__)
+        self.counts = counts
+        self.cause = cause
+
 
 class AccountJobs:
     """Purga das contas com `DELETE /me`, retenção da identidade e limpeza das janelas do limite
@@ -234,6 +249,11 @@ class AccountJobs:
         for name, step in self._cycle_steps():
             try:
                 counts.update(step())
+            except _PartialStepError as partial:
+                # Os lotes já confirmados entram no evento; a falha conta como a de qualquer passo.
+                counts.update(partial.counts)
+                log_step_failure(name, partial.cause)
+                failed += 1
             except Exception as error:
                 if is_connection_error(error):
                     raise
@@ -314,13 +334,20 @@ class AccountJobs:
 
         O prazo é conferido depois de cada lote, então o ciclo sempre apaga pelo menos um. Quando
         ele passa, o laço para sem exceção e conta o parcial; o ciclo seguinte continua do banco.
+        Um lote que falha depois de outros confirmados sobe em `_PartialStepError`, com a soma
+        até ali; perda de conexão e falha no primeiro lote sobem como estão.
         """
         deadline = self._monotonic() + AUDIT_RETENTION_TIME_BUDGET.total_seconds()
         removed = 0
         while True:
-            deleted = self._in_transaction(
-                lambda s: identity_purge.delete_old_audit_events(s, now, batch)
-            )
+            try:
+                deleted = self._in_transaction(
+                    lambda s: identity_purge.delete_old_audit_events(s, now, batch)
+                )
+            except Exception as error:
+                if removed == 0 or is_connection_error(error):
+                    raise
+                raise _PartialStepError({"audit_events_removed": removed}, error) from error
             removed += deleted
             if deleted < batch or self._monotonic() >= deadline:
                 return removed
