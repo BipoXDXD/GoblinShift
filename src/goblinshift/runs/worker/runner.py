@@ -87,6 +87,8 @@ class ExecutorStatus:
     timed_out: bool = False
     # O kernel matou o executor por falta de memória (limite do container).
     oom_killed: bool = False
+    # O worker cedeu a tentativa no SIGTERM antes do prazo: volta à fila sem gastar tentativa.
+    yielded: bool = False
 
     @property
     def is_running(self) -> bool:

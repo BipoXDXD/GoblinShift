@@ -147,9 +147,11 @@ attempt = Table(
     Column("container_name", Text, nullable=False, unique=True),
     Column("lease_expires_at", DateTime(timezone=True), nullable=False),
     Column("started_at", DateTime(timezone=True), nullable=False, server_default=func.now()),
-    # Só conta como tentativa física (no máximo 2) a que chegou a pôr o executor para trabalhar;
-    # um claim cujo lease venceu antes disso reagenda sem gastá-la (3.4).
+    # Só conta como tentativa física (no máximo 2) a que chegou a pôr o executor para trabalhar
+    # e não foi cedida por parada graciosa do worker (`yielded_at IS NULL`); um claim cujo lease
+    # venceu antes disso ou cuja tentativa foi cedida reagenda sem gastá-la (3.4, #442).
     Column("executor_started_at", DateTime(timezone=True)),
+    Column("yielded_at", DateTime(timezone=True)),
     Column("ended_at", DateTime(timezone=True)),
     Column("error_code", Text),
     UniqueConstraint("run_id", "number"),
@@ -164,6 +166,10 @@ attempt = Table(
     Index("attempt_lease_idx", "lease_expires_at", postgresql_where=text("ended_at IS NULL")),
     # Uma linha por claim; o quinto claim vira INFRA_POISON em vez de nova tentativa (3.4).
     CheckConstraint("number BETWEEN 1 AND 4", name="number"),
+    CheckConstraint(
+        "yielded_at IS NULL OR executor_started_at IS NOT NULL",
+        name="yielded_after_start",
+    ),
 )
 
 run_output = Table(

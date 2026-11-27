@@ -6,23 +6,46 @@ interrompido do laço). Agora o handler só marca a `ShutdownFlag`; o laço regi
 vez ao sair, e a espera por NOTIFY dorme em fatias para ver a flag mesmo com polling longo.
 """
 
+import json
 import logging
 import os
 import signal
 import subprocess
 import sys
 import time
+import uuid
 from collections.abc import Callable, Iterator
+from datetime import timedelta
 from pathlib import Path
 from types import TracebackType
 from typing import Self
 from unittest.mock import Mock
 
 import pytest
+from sqlalchemy.orm import Session, sessionmaker
 
 from goblinshift.entrypoints import worker
 from goblinshift.entrypoints.shutdown import SHUTDOWN_POLL_S, ShutdownFlag
+from goblinshift.files.storage import FileStorage
+from goblinshift.platform.db import unit_of_work
 from goblinshift.platform.settings import Settings
+from goblinshift.runs.lifecycle import MIN_RETRY_JITTER, ErrorCode
+from goblinshift.runs.queries import get_run
+from goblinshift.runs.store import container_name, load_run_any_owner
+from goblinshift.runs.worker.coordinator import (
+    SHUTDOWN_GRACE,
+    Coordinator,
+    CoordinatorConfig,
+)
+from goblinshift.runs.worker.runner import ExecutorPhase, ExecutorStatus
+from tests.runs.worker_support import (
+    LEASE,
+    attempts,
+    claim,
+    create_user,
+    queue_run,
+    run_row,
+)
 
 STOP_MESSAGE = "parada pedida"
 # Prazo do `docker stop` sem `stop_grace_period`: o worker ocioso sai bem antes dele.
@@ -337,3 +360,124 @@ def test_sinal_real_para_o_worker_ocioso_no_prazo(tmp_path: Path, signum: signal
     assert output_text.count(STOP_NOTICE) == 1, output_text
     assert "worker encerrado" in output_text
     assert "Traceback" not in output_text
+
+
+# Cessão da tentativa longa no SIGTERM ----------------------------------------------------------
+
+
+class _YieldingTestRunner:
+    """Runner falso para testar a cessão: fica RUNNING até o `stop`, ou sai no 3º `status`."""
+
+    def __init__(self, work_root: Path, shutdown: ShutdownFlag, *, stop_on_signal: bool) -> None:
+        self._work_root = work_root
+        self._shutdown = shutdown
+        self._stop_on_signal = stop_on_signal
+        self.status_calls = 0
+        self.stop_calls: list[timedelta] = []
+        self._stopped = False
+        self._deadline = time.monotonic() + STOP_DEADLINE_S
+
+    def work_dir(self, attempt_id: uuid.UUID) -> Path:
+        return self._work_root / container_name(attempt_id)
+
+    def create_work_dir(self, attempt_id: uuid.UUID) -> Path:
+        root = self.work_dir(attempt_id)
+        (root / "inputs").mkdir(parents=True, exist_ok=True)
+        (root / "out").mkdir(parents=True, exist_ok=True)
+        return root
+
+    def list_work(self) -> list[uuid.UUID]:
+        return []
+
+    def start(self, attempt_id: uuid.UUID, image: str) -> ExecutorStatus:
+        del attempt_id, image
+        return ExecutorStatus(ExecutorPhase.RUNNING)
+
+    def status(self, attempt_id: uuid.UUID) -> ExecutorStatus:
+        assert time.monotonic() < self._deadline, "supervisão não terminou a tempo"
+        self.status_calls += 1
+        if self.status_calls == 1:
+            self._shutdown.request(signal.SIGTERM)
+        if self._stopped:
+            return ExecutorStatus(ExecutorPhase.EXITED, exit_code=143)
+        if not self._stop_on_signal and self.status_calls >= 3:
+            # Simula o executor terminando logo antes da carência: falha determinística para
+            # concluir sem depender de empacotamento completo de CSV.
+            (self.work_dir(attempt_id) / "failure.json").write_text(
+                json.dumps({"code": ErrorCode.OUTPUT_LIMIT_EXCEEDED}), encoding="utf-8"
+            )
+            return ExecutorStatus(ExecutorPhase.EXITED, exit_code=3)
+        return ExecutorStatus(ExecutorPhase.RUNNING)
+
+    def stop(self, attempt_id: uuid.UUID, grace: timedelta) -> ExecutorStatus:
+        del attempt_id
+        self.stop_calls.append(grace)
+        self._stopped = True
+        return ExecutorStatus(ExecutorPhase.EXITED, exit_code=143)
+
+    def remove(self, attempt_id: uuid.UUID) -> None:
+        del attempt_id
+
+
+@pytest.mark.integration
+@pytest.mark.parametrize(
+    ("attempt_timeout", "yields"),
+    [(SHUTDOWN_GRACE, False), (timedelta(minutes=10), True)],
+    ids=["curta-nao-cede", "longa-cede"],
+)
+def test_parada_durante_tentativa_longa_cede_sem_gastar_tentativa(
+    factory: sessionmaker[Session],
+    storage: FileStorage,
+    work_root: Path,
+    attempt_timeout: timedelta,
+    yields: bool,
+) -> None:
+    owner = create_user(factory)
+    run_id = queue_run(factory, storage, owner)
+    claimed = claim(factory, storage)
+    shutdown = ShutdownFlag()
+    runner = _YieldingTestRunner(work_root, shutdown, stop_on_signal=yields)
+    config = CoordinatorConfig(
+        lease=LEASE,
+        status_poll=timedelta(seconds=0.02),
+        stop_grace=timedelta(seconds=2),
+        attempt_timeout=attempt_timeout,
+        jitter=lambda: MIN_RETRY_JITTER,
+    )
+    worker_coord = Coordinator(
+        factory,
+        storage,
+        runner,
+        config,
+        yield_requested=shutdown.is_set,
+    )
+
+    applied = worker_coord.run(claimed)
+
+    assert applied is not None
+    row = run_row(factory, run_id)
+    [only_attempt] = attempts(factory, run_id)
+    with unit_of_work(factory) as session:
+        loaded = load_run_any_owner(session, run_id)
+        view = get_run(session, owner, run_id)
+    assert loaded is not None
+    assert view is not None
+    if yields:
+        assert len(runner.stop_calls) == 1
+        assert (row["status"], row["phase"]) == ("running", "retry_wait")
+        assert loaded.state.physical_attempts == 0
+        assert view.attempt == 0
+        assert only_attempt["executor_started_at"] is not None
+        assert only_attempt["yielded_at"] is not None
+        assert only_attempt["ended_at"] is not None
+        assert only_attempt["error_code"] is None
+    else:
+        assert runner.stop_calls == []
+        # 3 consultas na supervisão até o executor sair, mais 1 em `remove_work`.
+        assert runner.status_calls == 4
+        assert (row["status"], row["error_code"]) == ("failed", ErrorCode.OUTPUT_LIMIT_EXCEEDED)
+        assert loaded.state.physical_attempts == 1
+        assert view.attempt == 1
+        assert only_attempt["executor_started_at"] is not None
+        assert only_attempt["yielded_at"] is None
+        assert only_attempt["ended_at"] is not None
