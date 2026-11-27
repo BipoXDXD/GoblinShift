@@ -180,8 +180,10 @@ services:
         condition: service_completed_successfully
       storage-init:
         condition: service_completed_successfully
-    # O SIGTERM não interrompe a tentativa em curso. Este prazo é menor que o teto dela (10 min):
-    # a que não terminar a tempo leva SIGKILL e volta pelo lease vencido.
+    # No SIGTERM, uma tentativa longa (restante > carência) é cedida: o worker para o executor
+    # e devolve a Run para retry_wait sem gastar tentativa física. No pior caso do `stop`
+    # (Docker lento, até ~167 s), este prazo vence e o SIGKILL chega no meio; é inofensivo,
+    # porque `stop` e `remove` são idempotentes e a manutenção termina o serviço.
     stop_grace_period: 30s
     restart: unless-stopped
 

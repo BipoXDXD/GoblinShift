@@ -43,6 +43,7 @@ from goblinshift.runs.lifecycle import (
     StartAttempt,
     Status,
     Transition,
+    YieldAttempt,
 )
 from goblinshift.runs.tables import attempt, run, run_output
 
@@ -259,7 +260,11 @@ def _read_attempt_facts(session: Session, run_id: uuid.UUID) -> Row[Any]:
     live = attempt.alias("live")
     physical = (
         select(func.count())
-        .where(attempt.c.run_id == run.c.id, attempt.c.executor_started_at.is_not(None))
+        .where(
+            attempt.c.run_id == run.c.id,
+            attempt.c.executor_started_at.is_not(None),
+            attempt.c.yielded_at.is_(None),
+        )
         .scalar_subquery()
     )
     return session.execute(
@@ -326,6 +331,8 @@ def apply_transition(
         match effect:
             case StartAttempt():
                 started_attempt_id = _insert_attempt(session, loaded.run_id, effect, lease)
+            case YieldAttempt():
+                _yield_attempt(session, loaded.run_id, effect.generation)
             case EndAttempt():
                 _end_attempt(session, loaded.run_id, effect.generation, attempt_error)
             case RequestStop():
@@ -521,6 +528,21 @@ def _insert_attempt(
         )
     )
     return attempt_id
+
+
+def _yield_attempt(session: Session, run_id: uuid.UUID, generation: int) -> None:
+    yielded = session.execute(
+        update(attempt)
+        .where(
+            attempt.c.run_id == run_id,
+            attempt.c.generation == generation,
+            attempt.c.ended_at.is_(None),
+        )
+        .values(yielded_at=func.now())
+        .returning(attempt.c.id)
+    ).scalar_one_or_none()
+    if yielded is None:
+        raise LostFencing(f"tentativa da geração {generation} já tinha terminado")
 
 
 def _end_attempt(
