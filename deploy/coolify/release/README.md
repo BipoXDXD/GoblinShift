@@ -43,6 +43,9 @@ O check de promoção espera os demais jobs e verifica as três tags locais. O r
 digests validados aos IDs dos artefatos do run e à tentativa. Após o CI da `main`, somente o job
 `publish-images` tem permissão `packages: write`. Ele baixa os três layouts pelos IDs do recibo
 validado, confere os índices e compara as três tags `sha-*` existentes antes da primeira escrita.
+Antes disso, `gh attestation verify` confere, pelo blob de cada índice, o atestado de procedência
+que os jobs de imagem do `ci.yml` emitem no push da `main` (depois do scan): sem atestado desse
+workflow e dessa ref, nada é gravado no GHCR.
 A publicação reutiliza as tags com digest idêntico, cria as ausentes e move `:main` por digest.
 Se um novo CI gerar digests incompatíveis após publicação parcial, o despacho manual aceita
 `commit`, `ci_run` e `ci_attempt` para retomar com o recibo da tentativa original bem-sucedida.
