@@ -8,15 +8,20 @@ um falso que registra os comandos, porque o script inteiro só roda na VPS.
 import json
 import os
 import signal
+import stat
 import subprocess
 import sys
+import types
+import uuid
 from pathlib import Path
+from typing import Any
 
 import pytest
 from acceptance import run
 from acceptance.run import Outcome
 
 from executor_ctl import profile
+from executor_ctl.profile import IoLimits
 
 pytestmark = pytest.mark.host_python
 
@@ -490,3 +495,84 @@ def test_inspect_le_o_runtime_do_hostconfig_do_docker_inspect(
         running=False, exit_code=0, oom_killed=False, error="", host_config=info["HostConfig"]
     )
     assert state.host_config["Runtime"] == runtime
+
+
+# GIDs de produção: gs-exec (área e `--user` do executor) e gs-ctl (só o socket; D11).
+EXECUTOR_GROUP_GID = 61001
+SOCKET_GROUP_GID = 61002
+
+
+def _host_config(socket: object) -> Any:
+    return types.SimpleNamespace(group="gs-exec", socket_group="gs-ctl", socket=socket)
+
+
+def test_host_resolve_o_grupo_do_executor_e_o_do_socket(monkeypatch: pytest.MonkeyPatch) -> None:
+    groups = {"gs-exec": EXECUTOR_GROUP_GID, "gs-ctl": SOCKET_GROUP_GID}
+    monkeypatch.setattr("grp.getgrnam", lambda name: types.SimpleNamespace(gr_gid=groups[name]))
+
+    host = run.Host.from_config(_host_config(Path("/run/goblinshift/executor-ctl.sock")))
+
+    assert (host.group_id, host.socket_group_id) == (EXECUTOR_GROUP_GID, SOCKET_GROUP_GID)
+
+
+class _SocketWithOwner:
+    """Um caminho cujo lstat diz root:<gid> 0660 num socket, sem precisar de root no teste."""
+
+    def __init__(self, gid: int) -> None:
+        self._gid = gid
+
+    def lstat(self) -> os.stat_result:
+        return os.stat_result((stat.S_IFSOCK | 0o660, 0, 0, 1, 0, self._gid, 0, 0, 0, 0))
+
+    def __str__(self) -> str:
+        return "/run/goblinshift/executor-ctl.sock"
+
+
+@pytest.mark.parametrize(
+    ("socket_gid", "accepted"), [(SOCKET_GROUP_GID, True), (EXECUTOR_GROUP_GID, False)]
+)
+def test_aceitacao_exige_o_socket_no_grupo_gs_ctl(
+    monkeypatch: pytest.MonkeyPatch, socket_gid: int, accepted: bool
+) -> None:
+    absent = types.SimpleNamespace(status=200, body={"state": "absent"})
+    monkeypatch.setattr(run, "call", lambda *_args, **_kwargs: absent)
+    host = run.Host(
+        _host_config(_SocketWithOwner(socket_gid)),
+        group_id=EXECUTOR_GROUP_GID,
+        socket_group_id=SOCKET_GROUP_GID,
+    )
+
+    outcome = run.check_control_socket(host)
+
+    assert outcome.passed is accepted, outcome.evidence
+    assert f"gs-ctl = {SOCKET_GROUP_GID}" in outcome.evidence
+
+
+IO_LIMITS = IoLimits(read_bps=104857600, write_bps=52428800, read_iops=2000, write_iops=1000)
+
+
+def _host_with_io_limits(area: Path, io_limits: IoLimits | None) -> Any:
+    config = types.SimpleNamespace(work_area=area, runtime="runsc", io_limits=io_limits)
+    return types.SimpleNamespace(config=config, group_id=61001)
+
+
+def test_sondas_rodam_com_o_teto_de_io_da_configuracao(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # D13: o operador mede com a sonda de disco; ela precisa rodar sob o mesmo teto do executor.
+    monkeypatch.setattr(profile, "block_device", lambda _st_dev: "/dev/loop3")
+    attempt = uuid.UUID("0193a3f0-7b2c-7def-8a01-23456789abcd")
+
+    options = run.executor_options(_host_with_io_limits(tmp_path, IO_LIMITS), attempt, tmp_path)
+
+    assert "--device-write-bps=/dev/loop3:52428800" in options
+    assert "--device-read-iops=/dev/loop3:2000" in options
+
+
+def test_sondas_sem_io_limits_rodam_sem_flag_de_dispositivo(tmp_path: Path) -> None:
+    attempt = uuid.UUID("0193a3f0-7b2c-7def-8a01-23456789abcd")
+
+    options = run.executor_options(_host_with_io_limits(tmp_path, None), attempt, tmp_path)
+
+    assert options
+    assert not [option for option in options if option.startswith("--device")]

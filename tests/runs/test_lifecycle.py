@@ -18,6 +18,7 @@ from goblinshift.runs.lifecycle import (
     Event,
     ExecutorStarted,
     ExecutorStopped,
+    ExecutorYielded,
     InconsistentRunStateError,
     LeaseExpired,
     Phase,
@@ -35,8 +36,10 @@ from goblinshift.runs.lifecycle import (
     Status,
     TransientFailure,
     Transition,
+    YieldAttempt,
     decide_transition,
 )
+from goblinshift.runs.worker.coordinator import SHUTDOWN_GRACE, should_yield
 
 ACCEPTED_AT = datetime(2026, 10, 13, 12, 0, tzinfo=UTC)
 QUEUE_EXPIRES_AT = ACCEPTED_AT + timedelta(hours=2)
@@ -620,7 +623,60 @@ ALL_EVENTS: list[Event] = [
     DeterministicFailure(1, ErrorCode.OUTPUT_LIMIT_EXCEEDED),
     TransientFailure(1, DURING, JITTER),
     ExecutorStopped(1),
+    ExecutorYielded(1, DURING, JITTER),
 ]
+
+
+# Tentativa cedida no SIGTERM: volta para retry_wait sem gastar tentativa física.
+
+
+def test_tentativa_cedida_volta_para_a_fila_sem_contar_como_fisica() -> None:
+    run = running(attempts=1, started=True)
+    result = accepted(run, ExecutorYielded(run.generation, DURING, JITTER))
+
+    assert (result.run.status, result.run.phase, result.run.physical_attempts) == (
+        Status.RUNNING,
+        Phase.RETRY_WAIT,
+        0,
+    )
+    assert result.run.executor_started is False
+    assert result.run.eligible_at == DURING + JITTER
+    assert result.effects == (YieldAttempt(run.generation), EndAttempt(run.generation))
+
+
+def test_segunda_tentativa_fisica_cedida_tambem_volta_para_retry_wait() -> None:
+    run = running(attempts=2, started=True)
+    result = accepted(run, ExecutorYielded(run.generation, DURING, JITTER))
+
+    assert (result.run.phase, result.run.physical_attempts) == (Phase.RETRY_WAIT, 1)
+    assert result.effects == (YieldAttempt(run.generation), EndAttempt(run.generation))
+
+
+def test_tentativa_cedida_depois_do_prazo_termina_como_falha_transitoria() -> None:
+    run = running(attempts=1, started=True)
+    result = accepted(run, ExecutorYielded(run.generation, AFTER_DEADLINE, JITTER))
+
+    assert (result.run.status, result.run.stop_reason) == (
+        Status.STOPPING,
+        ErrorCode.DEADLINE_EXCEEDED,
+    )
+    assert result.effects == (RequestStop(run.generation),)
+
+
+def test_tentativa_cedida_de_geracao_vencida_ou_fora_de_trabalho_e_recusada() -> None:
+    assert (
+        refusal(running(claims=2), ExecutorYielded(1, DURING, JITTER))
+        is RefusalReason.STALE_GENERATION
+    )
+    assert (
+        refusal(retry_waiting(), ExecutorYielded(1, DURING, JITTER))
+        is RefusalReason.INVALID_FOR_STATUS
+    )
+
+
+def test_should_yield_respeita_fronteira_da_carencia() -> None:
+    assert should_yield(SHUTDOWN_GRACE, SHUTDOWN_GRACE) is False
+    assert should_yield(SHUTDOWN_GRACE + ONE_MICROSECOND, SHUTDOWN_GRACE) is True
 
 
 @pytest.mark.parametrize("run", TERMINAL_RUNS, ids=lambda run: str(run.status))

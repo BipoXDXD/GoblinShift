@@ -231,8 +231,8 @@ def test_lease_vencido_durante_o_start_fica_com_a_manutencao_e_o_worker_abandona
     area: Path,
     start_ctl: Callable[..., FakeExecutorCtl],
 ) -> None:
-    # Com o start esperando até o teto do ctl, o lease (não renovado durante o start) pode vencer
-    # antes da resposta: a manutenção decide a tentativa, e o worker, ao voltar, não a reclama.
+    # O lease vence durante o start (forçado aqui; na vida real, renovação perdida): a manutenção
+    # decide a tentativa, a renovação em paralelo recebe `LostFencing` e o worker não a reclama.
     ctl = start_ctl((sys.executable, FAKE_EXECUTOR, "sleep", "30"))
     run_id = queue_run(factory, storage, create_user(factory), executor_image=IMAGE)
     claimed = claim(factory, storage)

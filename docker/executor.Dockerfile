@@ -70,10 +70,11 @@ ENV PYTHONPATH=/opt/goblinshift \
     PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1
 
-# Sobe o apt e a zlib até a base oficial trazer as correções da CVE-2026-109518 (apt 3.0.4) e das
-# CVE-2026-76844 e CVE-2026-85091 (zlib1g deb13u1), que barram a release no Trivy.
+# Sobe apt, zlib e libzstd até a base oficial trazer as correções da CVE-2026-109518 (apt 3.0.4),
+# das CVE-2026-76844 e CVE-2026-85091 (zlib1g deb13u1) e da CVE-2026-124851 (libzstd1 deb13u1),
+# que barram a release no Trivy.
 RUN apt-get update -qq \
- && apt-get install -yq --no-install-recommends --only-upgrade apt libapt-pkg7.0 zlib1g \
+ && apt-get install -yq --no-install-recommends --only-upgrade apt libapt-pkg7.0 zlib1g libzstd1 \
  && rm -rf /var/lib/apt/lists/*
 # O pip não é usado em tempo de execução; sai para não sobrar um instalador dentro do sandbox.
 # 61001 é o GID do grupo gs-exec do host, dono da área de trabalho montada em /work.

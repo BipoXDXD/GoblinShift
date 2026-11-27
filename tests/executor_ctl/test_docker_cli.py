@@ -8,6 +8,7 @@ from typing import Any
 import pytest
 
 from executor_ctl.docker_cli import (
+    ContainerIdentity,
     ContainerRunningError,
     ContainerStatus,
     DockerCli,
@@ -20,9 +21,16 @@ pytestmark = pytest.mark.host_python
 NEVER = "0001-01-01T00:00:00Z"
 STARTED = "2026-10-14T04:10:16.315791338Z"
 FINISHED = "2026-10-14T04:10:46.1Z"
+CONTAINER_ID = "9f86d081884c7d659a2feaa0c55ad015a3bf4f1b2b0b822cd15d6c15b0f00a08"
+ATTEMPT = "0193a3f0-7b2c-7def-8a01-23456789abcd"
+IMAGE = "ghcr.io/bipoxdxd/goblinshift-executor@sha256:" + "a" * 64
+IDENTITY = ContainerIdentity(container_id=CONTAINER_ID, attempt_label=ATTEMPT, image=IMAGE)
+OWN_LABELS = {"goblinshift.attempt": ATTEMPT, "org.opencontainers.image.title": "executor"}
 
 
-def inspect_output(**state: Any) -> str:
+def inspect_info(
+    *, labels: dict[str, Any] | None = None, image: Any = IMAGE, **state: Any
+) -> dict[str, Any]:
     base = {
         "Status": "running",
         "Running": True,
@@ -31,12 +39,28 @@ def inspect_output(**state: Any) -> str:
         "StartedAt": STARTED,
         "FinishedAt": NEVER,
     }
-    return json.dumps([{"Name": "/gs-exec-x", "State": {**base, **state}}])
+    return {
+        "Id": CONTAINER_ID,
+        "Name": "/gs-exec-x",
+        "State": {**base, **state},
+        "Config": {"Image": image, "Labels": OWN_LABELS if labels is None else labels},
+    }
+
+
+def inspect_output(
+    *, labels: dict[str, Any] | None = None, image: Any = IMAGE, **state: Any
+) -> str:
+    return json.dumps([inspect_info(labels=labels, image=image, **state)])
 
 
 def test_container_rodando_nao_tem_codigo_de_saida_nem_fim() -> None:
     assert parse_inspect(inspect_output()) == ContainerStatus(
-        state="running", exit_code=None, oom_killed=False, started_at=STARTED, finished_at=None
+        state="running",
+        exit_code=None,
+        oom_killed=False,
+        started_at=STARTED,
+        finished_at=None,
+        identity=IDENTITY,
     )
 
 
@@ -46,7 +70,12 @@ def test_container_terminado_traz_codigo_oom_e_horarios() -> None:
     )
 
     assert parse_inspect(output) == ContainerStatus(
-        state="exited", exit_code=137, oom_killed=True, started_at=STARTED, finished_at=FINISHED
+        state="exited",
+        exit_code=137,
+        oom_killed=True,
+        started_at=STARTED,
+        finished_at=FINISHED,
+        identity=IDENTITY,
     )
 
 
@@ -54,7 +83,12 @@ def test_container_criado_e_nunca_iniciado_nao_tem_horarios() -> None:
     output = inspect_output(Status="created", Running=False, StartedAt=NEVER)
 
     assert parse_inspect(output) == ContainerStatus(
-        state="created", exit_code=None, oom_killed=False, started_at=None, finished_at=None
+        state="created",
+        exit_code=None,
+        oom_killed=False,
+        started_at=None,
+        finished_at=None,
+        identity=IDENTITY,
     )
 
 
@@ -68,7 +102,12 @@ def test_morto_ou_em_remocao_conta_como_terminado(docker_status: str) -> None:
     output = inspect_output(Status=docker_status, Running=False, ExitCode=1)
 
     assert parse_inspect(output) == ContainerStatus(
-        state="exited", exit_code=1, oom_killed=False, started_at=STARTED, finished_at=None
+        state="exited",
+        exit_code=1,
+        oom_killed=False,
+        started_at=STARTED,
+        finished_at=None,
+        identity=IDENTITY,
     )
 
 
@@ -78,6 +117,78 @@ def test_status_absent_vira_json_do_contrato() -> None:
         "exit_code": None,
         "oom_killed": False,
         "started_at": None,
+        "finished_at": None,
+    }
+
+
+def test_inspect_le_id_label_e_imagem() -> None:
+    status = parse_inspect(
+        inspect_output(labels={"goblinshift.attempt": "outra"}, image="x@sha256:b")
+    )
+
+    assert status.identity == ContainerIdentity(
+        container_id=CONTAINER_ID, attempt_label="outra", image="x@sha256:b"
+    )
+
+
+def without(key: str, section: str | None = None) -> str:
+    info = inspect_info()
+    del (info if section is None else info[section])[key]
+    return json.dumps([info])
+
+
+@pytest.mark.parametrize(
+    "output",
+    [
+        without("Config"),
+        without("Id"),
+        without("Image", "Config"),
+        json.dumps([{**inspect_info(), "Id": "gs-exec-x"}]),
+        json.dumps([{**inspect_info(), "Id": CONTAINER_ID.upper()}]),
+        json.dumps([{**inspect_info(), "Config": "texto"}]),
+        inspect_output(image=None),
+        inspect_output(labels={"goblinshift.attempt": 1}),
+        json.dumps([{**inspect_info(), "Config": {"Image": IMAGE, "Labels": ["x"]}}]),
+    ],
+    ids=[
+        "sem_config",
+        "sem_id",
+        "sem_imagem",
+        "id_que_e_nome",
+        "id_maiusculo",
+        "config_texto",
+        "imagem_nula",
+        "label_numerica",
+        "labels_lista",
+    ],
+)
+def test_inspect_sem_config_e_formato_inesperado(output: str) -> None:
+    with pytest.raises(DockerUnavailableError):
+        parse_inspect(output)
+
+
+def test_labels_nulas_viram_label_ausente() -> None:
+    output = json.dumps([{**inspect_info(), "Config": {"Image": IMAGE, "Labels": None}}])
+
+    identity = parse_inspect(output).identity
+
+    assert identity is not None
+    assert identity.attempt_label is None
+
+
+def test_container_sem_a_label_da_tentativa_tem_label_ausente() -> None:
+    identity = parse_inspect(inspect_output(labels={"outro.projeto": ATTEMPT})).identity
+
+    assert identity is not None
+    assert identity.attempt_label is None
+
+
+def test_identidade_fica_fora_do_json_do_contrato() -> None:
+    assert parse_inspect(inspect_output()).to_json() == {
+        "state": "running",
+        "exit_code": None,
+        "oom_killed": False,
+        "started_at": STARTED,
         "finished_at": None,
     }
 

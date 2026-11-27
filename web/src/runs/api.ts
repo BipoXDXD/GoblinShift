@@ -97,6 +97,52 @@ const formulaCellsSchema = z
   .nullable()
   .catch(null);
 
+const imageFormatSchema = z.enum(["jpeg", "png", "mpo"]);
+
+/**
+ * Antes e depois de cada entrada, só com números e valores de listas fechadas. Um `kind` ou
+ * valor que a interface não conhece vira `null`: a tela mostra a entrada sem a comparação.
+ */
+const comparisonSchema = z
+  .discriminatedUnion("kind", [
+    z.object({
+      kind: z.literal("table"),
+      records_before: z.number().int(),
+      records_after: z.number().int(),
+    }),
+    z.object({
+      kind: z.literal("pdf"),
+      pages_before: z.number().int(),
+      pages_after: z.number().int(),
+    }),
+    z.object({
+      kind: z.literal("image"),
+      width_before: z.number().int(),
+      height_before: z.number().int(),
+      width_after: z.number().int(),
+      height_after: z.number().int(),
+      format_before: imageFormatSchema,
+      format_after: imageFormatSchema,
+      bytes_before: z.number().int(),
+      /** Nulo quando o worker não mediu a saída. */
+      bytes_after: z.number().int().nullable(),
+    }),
+    z.object({
+      kind: z.literal("media"),
+      width_before: z.number().int(),
+      height_before: z.number().int(),
+      /** Dimensões da miniatura; nulas sem miniatura. */
+      width_after: z.number().int().nullable(),
+      height_after: z.number().int().nullable(),
+      audio_before: z
+        .enum(["aac", "pcm_s16le", "pcm_s16be", "pcm_s24le", "pcm_s24be", "opus", "vorbis"])
+        .nullable(),
+      audio_after: z.enum(["wav", "flac"]).nullable(),
+    }),
+  ])
+  .nullable()
+  .catch(null);
+
 const runItemSchema = z.object({
   /** Ordem de entrada a partir de 0, como na spec; a tela mostra a partir de 1. */
   position: z.number().int(),
@@ -112,6 +158,7 @@ const runItemSchema = z.object({
   /** Posição (a partir de 0) da primeira entrada igual. */
   duplicate_of: z.number().int().nullable(),
   formula_cells: formulaCellsSchema,
+  comparison: comparisonSchema,
 });
 
 const runSummarySchema = z.object({

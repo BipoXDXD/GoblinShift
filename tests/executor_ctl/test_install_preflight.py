@@ -5,14 +5,18 @@ import os
 import shutil
 import subprocess
 import sys
+import tempfile
 from pathlib import Path
 
 import pytest
+
+from .installer_copy import installer_copy
 
 pytestmark = pytest.mark.host_python
 
 ROOT = Path(__file__).resolve().parents[2]
 POLICY = "/var/lib/coolify-release/goblinshift/executor-images.json"
+SERVICE = "goblinshift-executor-ctl.service"
 IMAGE = "ghcr.io/bipoxdxd/goblinshift-executor@sha256:" + "b" * 64
 
 
@@ -26,6 +30,8 @@ IMAGE = "ghcr.io/bipoxdxd/goblinshift-executor@sha256:" + "b" * 64
         "config_legacy",
         "config_duplicate",
         "config_runc",
+        "config_without_socket_group",
+        "config_same_socket_group",
         "policy_not_private",
         "policy_missing",
         "policy_malformed",
@@ -52,7 +58,38 @@ def test_installer_valid_preflight_reaches_first_mutation_only(tmp_path: Path) -
     assert effects.read_text().strip() == "groupadd"
 
 
-def run_installer_copy(tmp_path: Path, case: str) -> tuple[subprocess.CompletedProcess[str], Path]:
+def test_installer_sem_usuario_do_app_recusa_antes_de_mutar(tmp_path: Path) -> None:
+    result, effects = run_installer_copy(tmp_path, "valid", app_user_exists=False)
+    assert result.returncode != 0
+    assert not effects.exists(), effects.read_text() if effects.exists() else ""
+    assert "goblinshift" in result.stderr, result.stderr
+
+
+@pytest.mark.parametrize("case", ["area_not_mounted", "area_without_noexec"])
+def test_area_sem_nosuid_nodev_noexec_recusa_antes_de_mutar(tmp_path: Path, case: str) -> None:
+    # O ctl novo não sobe sem as opções (__main__.py): trocar o pacote derrubaria o serviço.
+    result, effects = run_installer_copy(tmp_path, case)
+    assert result.returncode != 0
+    assert not effects.exists(), effects.read_text() if effects.exists() else ""
+    assert "deploy/filesystems.sh" in result.stderr, result.stderr
+
+
+def test_area_sem_montagem_exigida_nao_confere_opcoes(tmp_path: Path) -> None:
+    result, effects = run_installer_copy(tmp_path, "area_not_required")
+    assert result.returncode == 91, result.stderr
+    assert effects.read_text().strip() == "groupadd"
+
+
+def test_opt_gravavel_por_outro_usuario_recusa_antes_dos_grupos(tmp_path: Path) -> None:
+    result, effects = run_installer_copy(tmp_path, "opt_writable")
+    assert result.returncode != 0
+    assert not effects.exists(), effects.read_text() if effects.exists() else ""
+    assert "recusado:" in result.stderr and "/opt/goblinshift" in result.stderr, result.stderr
+
+
+def run_installer_copy(
+    tmp_path: Path, case: str, *, app_user_exists: bool = True
+) -> tuple[subprocess.CompletedProcess[str], Path]:
     checkout = tmp_path / "checkout"
     scripts = checkout / "deploy/executor-ctl"
     scripts.mkdir(parents=True)
@@ -66,8 +103,11 @@ def run_installer_copy(tmp_path: Path, case: str) -> tuple[subprocess.CompletedP
         (ROOT / "deploy/executor-ctl/install.sh")
         .read_text()
         .replace("[[ $EUID -eq 0 ]]", "[[ 0 -eq 0 ]]")
+        .replace("/opt/goblinshift", f"{tmp_path / 'root'}/opt/goblinshift")
     )
     virtual = tmp_path / "root"
+    # Já criado: o root_dir não chama `install -d`, e a primeira mutação continua sendo o grupo.
+    (virtual / "opt/goblinshift/executor-ctl").mkdir(parents=True)
     config = virtual / "etc/goblinshift/executor-ctl.json"
     policy = virtual / POLICY.lstrip("/")
     config.parent.mkdir(parents=True)
@@ -75,6 +115,7 @@ def run_installer_copy(tmp_path: Path, case: str) -> tuple[subprocess.CompletedP
     content = {
         "socket": "/run/goblinshift/executor-ctl.sock",
         "group": "gs-exec",
+        "socket_group": "gs-ctl",
         "work_area": "/srv/goblinshift/exec-work",
         "runtime": "runsc",
         "images_file": POLICY,
@@ -94,8 +135,14 @@ def run_installer_copy(tmp_path: Path, case: str) -> tuple[subprocess.CompletedP
         )
     elif case == "config_runc":
         config.write_text(json.dumps({**content, "runtime": "runc"}))
+    elif case == "config_without_socket_group":
+        config.write_text(json.dumps({k: v for k, v in content.items() if k != "socket_group"}))
+    elif case == "config_same_socket_group":
+        config.write_text(json.dumps({**content, "socket_group": "gs-exec"}))
     elif case == "config_duplicate":
         config.write_text(json.dumps(content)[:-1] + ', "runtime": "runc"}')
+    elif case == "area_not_required":
+        config.write_text(json.dumps({**content, "require_mount": False}))
     elif case == "policy_not_private":
         policy.chmod(0o644)
     elif case == "policy_missing":
@@ -110,6 +157,15 @@ def run_installer_copy(tmp_path: Path, case: str) -> tuple[subprocess.CompletedP
         renamed = policy.parent.with_name("real")
         policy.parent.rename(renamed)
         policy.parent.symlink_to(renamed)
+
+    # Visão do host que o preflight lê no lugar de /proc/self/mountinfo.
+    options = (
+        "rw,nosuid,nodev,relatime" if case == "area_without_noexec" else "rw,nosuid,nodev,noexec"
+    )
+    mountinfo = tmp_path / "mountinfo"
+    mountinfo.write_text(
+        f"36 25 7:1 / {content['work_area']} {options} shared:1 - ext4 /dev/loop1 rw\n"
+    )
 
     binaries = tmp_path / "bin"
     binaries.mkdir()
@@ -128,9 +184,25 @@ def run_installer_copy(tmp_path: Path, case: str) -> tuple[subprocess.CompletedP
         stub = binaries / name
         stub.write_text(f'#!/bin/sh\necho {name} >> "$MUTATIONS"\nexit 91\n')
         stub.chmod(0o755)
+    # `stat -c` é do GNU. O require_root_dir vê cada diretório como do root, 755; no caso
+    # opt_writable, /opt/goblinshift fica com escrita para outros.
+    fake_stat = binaries / "stat"
+    fake_stat.write_text(
+        """#!/bin/sh
+case "$3" in
+  */opt/goblinshift) [ "$CASE" = opt_writable ] && echo '0 777' || echo '0 755' ;;
+  *) echo '0 755' ;;
+esac
+"""
+    )
+    fake_stat.chmod(0o755)
     getent = binaries / "getent"
     getent.write_text("#!/bin/sh\nexit 1\n")
     getent.chmod(0o755)
+    # `id goblinshift`: o instalador recusa antes de mutar quando o usuário do app não existe.
+    user = binaries / "id"
+    user.write_text(f"#!/bin/sh\nexit {0 if app_user_exists else 1}\n")
+    user.chmod(0o755)
     # The Python executable boundary maps '/' to a private fixture root and simulates UID0.
     # Real descriptor-relative opens, nofollow flags, parsing and installer order still execute.
     python = binaries / "python3"
@@ -141,7 +213,10 @@ from types import SimpleNamespace
 sys.dont_write_bytecode = "-B" in sys.argv
 source, config = sys.argv[-2:]
 sys.path.insert(0, os.path.dirname(source))
-from executor_ctl import images
+from pathlib import Path
+from executor_ctl import images, mounts
+mounts.MOUNTINFO_PATH = Path(os.environ["MOUNTINFO"])
+os.path.ismount = lambda path: os.environ["CASE"] not in ("area_not_mounted", "area_not_required")
 opened = {}
 real_open = os.open
 
@@ -175,6 +250,7 @@ exec(compile(sys.stdin.read(), "<installer-preflight>", "exec"))
         "MUTATIONS": str(effects),
         "VIRTUAL_ROOT": str(virtual),
         "CASE": case,
+        "MOUNTINFO": str(mountinfo),
     }
     before = fixture_snapshot(virtual)
     before_checkout = fixture_snapshot(checkout)
@@ -200,3 +276,54 @@ def fixture_snapshot(root: Path) -> dict[str, tuple[int, bytes | str | None]]:
         )
         result[str(path.relative_to(root))] = (path.lstat().st_mode, payload)
     return result
+
+
+def test_falha_no_daemon_reload_deixa_o_restart_para_a_proxima(tmp_path: Path) -> None:
+    with installer_copy(tmp_path, fail_first_daemon_reload=True) as copy:
+        marker = copy.prefix / ".restart-pending"
+
+        first = copy.run()
+        assert first.returncode != 0
+        assert marker.exists(), first.stderr
+        assert not any(call.startswith("restart") for call in copy.systemctl_calls())
+
+        second = copy.run()
+        assert second.returncode == 0, second.stderr
+        assert f"restart {SERVICE}" in copy.systemctl_calls()
+        assert not marker.exists()
+
+
+def test_sem_mudanca_nem_marcador_nao_reinicia(tmp_path: Path) -> None:
+    with installer_copy(tmp_path) as copy:
+        assert copy.run().returncode == 0
+        calls_before = len(copy.systemctl_calls())
+
+        again = copy.run()
+
+        assert again.returncode == 0, again.stderr
+        assert not any(c.startswith("restart") for c in copy.systemctl_calls()[calls_before:])
+
+
+def test_falha_nao_deixa_staging(tmp_path: Path) -> None:
+    with installer_copy(tmp_path, failing=("chmod",)) as copy:
+        result = copy.run()
+
+        assert result.returncode != 0
+        assert list(copy.prefix.glob(".executor_ctl.*")) == []
+
+
+@pytest.mark.skipif(sys.platform != "linux", reason="systemd-analyze só existe no Linux")
+def test_unit_gerada_passa_no_systemd_analyze(tmp_path: Path) -> None:
+    with installer_copy(tmp_path) as copy:
+        assert copy.run().returncode == 0
+        with tempfile.TemporaryDirectory() as directory:
+            unit = Path(directory) / SERVICE
+            shutil.copyfile(copy.unit, unit)
+            result = subprocess.run(
+                ["systemd-analyze", "verify", str(unit)],
+                text=True,
+                capture_output=True,
+                timeout=30,
+                check=False,
+            )
+    assert result.returncode == 0, result.stderr

@@ -5463,6 +5463,29 @@
         ],
         "title": "ArtifactRole"
       },
+      "AudioCodec": {
+        "type": "string",
+        "enum": [
+          "aac",
+          "pcm_s16le",
+          "pcm_s16be",
+          "pcm_s24le",
+          "pcm_s24be",
+          "opus",
+          "vorbis"
+        ],
+        "title": "AudioCodec",
+        "description": "Codecs de áudio de origem aceitos pelo Media Mill (`media_mill.probe`)."
+      },
+      "AudioFormat": {
+        "type": "string",
+        "enum": [
+          "wav",
+          "flac"
+        ],
+        "title": "AudioFormat",
+        "description": "Formato do áudio extraído pelo Media Mill."
+      },
       "Availability": {
         "type": "string",
         "enum": [
@@ -5716,6 +5739,81 @@
         ],
         "title": "FormulaColumnResponse"
       },
+      "ImageComparisonResponse": {
+        "properties": {
+          "kind": {
+            "type": "string",
+            "const": "image",
+            "title": "Kind"
+          },
+          "width_before": {
+            "type": "integer",
+            "minimum": 1.0,
+            "title": "Width Before"
+          },
+          "height_before": {
+            "type": "integer",
+            "minimum": 1.0,
+            "title": "Height Before"
+          },
+          "width_after": {
+            "type": "integer",
+            "minimum": 1.0,
+            "title": "Width After"
+          },
+          "height_after": {
+            "type": "integer",
+            "minimum": 1.0,
+            "title": "Height After"
+          },
+          "format_before": {
+            "$ref": "#/components/schemas/ImageFormat"
+          },
+          "format_after": {
+            "$ref": "#/components/schemas/ImageFormat"
+          },
+          "bytes_before": {
+            "type": "integer",
+            "minimum": 0.0,
+            "title": "Bytes Before"
+          },
+          "bytes_after": {
+            "anyOf": [
+              {
+                "type": "integer",
+                "minimum": 0.0
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Bytes After"
+          }
+        },
+        "type": "object",
+        "required": [
+          "kind",
+          "width_before",
+          "height_before",
+          "width_after",
+          "height_after",
+          "format_before",
+          "format_after",
+          "bytes_before",
+          "bytes_after"
+        ],
+        "title": "ImageComparisonResponse",
+        "description": "Image Forge: dimensões, formato e tamanho em bytes."
+      },
+      "ImageFormat": {
+        "type": "string",
+        "enum": [
+          "jpeg",
+          "png",
+          "mpo"
+        ],
+        "title": "ImageFormat"
+      },
       "ItemNoticeCode": {
         "type": "string",
         "enum": [
@@ -5867,6 +5965,108 @@
           "terms"
         ],
         "title": "MeResponse"
+      },
+      "MediaComparisonResponse": {
+        "properties": {
+          "kind": {
+            "type": "string",
+            "const": "media",
+            "title": "Kind"
+          },
+          "width_before": {
+            "type": "integer",
+            "minimum": 1.0,
+            "title": "Width Before"
+          },
+          "height_before": {
+            "type": "integer",
+            "minimum": 1.0,
+            "title": "Height Before"
+          },
+          "width_after": {
+            "anyOf": [
+              {
+                "type": "integer",
+                "minimum": 1.0
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Width After"
+          },
+          "height_after": {
+            "anyOf": [
+              {
+                "type": "integer",
+                "minimum": 1.0
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Height After"
+          },
+          "audio_before": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/AudioCodec"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "audio_after": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/AudioFormat"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "type": "object",
+        "required": [
+          "kind",
+          "width_before",
+          "height_before",
+          "width_after",
+          "height_after",
+          "audio_before",
+          "audio_after"
+        ],
+        "title": "MediaComparisonResponse",
+        "description": "Media Mill: vídeo → miniatura e áudio de origem → extraído; cada par vem inteiro ou nulo."
+      },
+      "PdfComparisonResponse": {
+        "properties": {
+          "kind": {
+            "type": "string",
+            "const": "pdf",
+            "title": "Kind"
+          },
+          "pages_before": {
+            "type": "integer",
+            "minimum": 0.0,
+            "title": "Pages Before"
+          },
+          "pages_after": {
+            "type": "integer",
+            "minimum": 0.0,
+            "title": "Pages After"
+          }
+        },
+        "type": "object",
+        "required": [
+          "kind",
+          "pages_before",
+          "pages_after"
+        ],
+        "title": "PdfComparisonResponse",
+        "description": "PDF Press: páginas da entrada → da saída."
       },
       "Phase": {
         "type": "string",
@@ -6501,6 +6701,39 @@
                 "type": "null"
               }
             ]
+          },
+          "comparison": {
+            "anyOf": [
+              {
+                "oneOf": [
+                  {
+                    "$ref": "#/components/schemas/TableComparisonResponse"
+                  },
+                  {
+                    "$ref": "#/components/schemas/PdfComparisonResponse"
+                  },
+                  {
+                    "$ref": "#/components/schemas/ImageComparisonResponse"
+                  },
+                  {
+                    "$ref": "#/components/schemas/MediaComparisonResponse"
+                  }
+                ],
+                "discriminator": {
+                  "propertyName": "kind",
+                  "mapping": {
+                    "image": "#/components/schemas/ImageComparisonResponse",
+                    "media": "#/components/schemas/MediaComparisonResponse",
+                    "pdf": "#/components/schemas/PdfComparisonResponse",
+                    "table": "#/components/schemas/TableComparisonResponse"
+                  }
+                }
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Comparison"
           }
         },
         "type": "object",
@@ -6514,7 +6747,8 @@
           "notices",
           "counts",
           "duplicate_of",
-          "formula_cells"
+          "formula_cells",
+          "comparison"
         ],
         "title": "RunItemResponse",
         "description": "Desfecho de uma entrada: códigos do catálogo e contagens, sem valor do conteúdo."
@@ -6756,6 +6990,33 @@
           "failed"
         ],
         "title": "Status"
+      },
+      "TableComparisonResponse": {
+        "properties": {
+          "kind": {
+            "type": "string",
+            "const": "table",
+            "title": "Kind"
+          },
+          "records_before": {
+            "type": "integer",
+            "minimum": 0.0,
+            "title": "Records Before"
+          },
+          "records_after": {
+            "type": "integer",
+            "minimum": 0.0,
+            "title": "Records After"
+          }
+        },
+        "type": "object",
+        "required": [
+          "kind",
+          "records_before",
+          "records_after"
+        ],
+        "title": "TableComparisonResponse",
+        "description": "CSV Janitor: registros lidos → escritos."
       },
       "Terms": {
         "properties": {
