@@ -242,8 +242,8 @@ services:
     # Raiz só leitura com o que a imagem escreve, medido com --read-only: o pid em /run, o conf.d
     # que o entrypoint gera dos templates e as pastas temporárias do proxy. O proxy da API não
     # grava resposta em arquivo (proxy_max_temp_file_size 0); o envio de conteúdo vai sem buffer,
-    # e nas outras rotas só o corpo entre 16k (client_body_buffer_size) e 64k (o teto delas) passa
-    # pelo client_temp: 16m sobram.
+    # e nas outras rotas só o corpo entre 8k (client_body_buffer_size padrão, 2 páginas) e 64k (o
+    # teto delas) passa pelo client_temp: 16m sobram.
     read_only: true
     tmpfs:
       - /run:size=1m

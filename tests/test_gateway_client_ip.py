@@ -368,13 +368,13 @@ def origin_gateway(tmp_path_factory: pytest.TempPathFactory) -> Iterator[OriginG
             check=False,
             timeout=DOCKER_TIMEOUT_SECONDS,
         )
-        docker("network", "rm", network)
         subprocess.run(  # noqa: S603 - nome gerado pelo teste, sem shell
             ["docker", "volume", "rm", "--force", volume],  # noqa: S607
             capture_output=True,
             check=False,
             timeout=DOCKER_TIMEOUT_SECONDS,
         )
+        docker("network", "rm", network)
 
 
 @pytest.mark.gateway
