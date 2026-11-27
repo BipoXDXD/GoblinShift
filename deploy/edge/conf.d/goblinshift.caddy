@@ -4,6 +4,8 @@
 
 # Domínio do GoblinShift: TLS automático e http → https automático pela borda.
 goblinshift.dev {
+	# Sem anunciar o servidor; a remoção é adiada para a resposta e vale também a do proxy.
+	header -Server
 	reverse_proxy 172.31.0.4:80 {
 		# O deploy recria o Nginx (imagem nova a cada versão); enquanto ele volta, a borda tenta
 		# de novo a conexão em vez de responder 502. Falha de conexão é repetida em qualquer
