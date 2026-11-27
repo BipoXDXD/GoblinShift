@@ -18,7 +18,7 @@ import logging
 import time
 from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from functools import partial
 from uuid import UUID
 
@@ -68,6 +68,9 @@ ACCOUNT_STEPS_FAILED = "account_steps_failed"
 ACCOUNTS_PURGE_FAILED = "accounts_purge_failed"
 # Contagens de passo falho que fazem a volta contar em `failed_cycles`.
 _FAILED_STEP_COUNTS = (STEPS_FAILED, ACCOUNT_STEPS_FAILED)
+# Prazo do laço da retenção da auditoria em cada ciclo de contas (#442, 50b): os lotes repetem
+# até a fila de vencidos acabar ou o prazo passar, e o resto fica para o ciclo seguinte.
+AUDIT_RETENTION_TIME_BUDGET = timedelta(seconds=20)
 
 
 def main() -> int:
@@ -192,6 +195,10 @@ class AccountJobs:
     """Purga das contas com `DELETE /me`, retenção da identidade e limpeza das janelas do limite
     de requisições, um lote por etapa e ciclo.
 
+    A retenção da auditoria é a exceção ao lote por ciclo: repete lotes, cada um na sua transação,
+    até `AUDIT_RETENTION_TIME_BUDGET`, porque a entrada pode passar de um lote a cada 30 s. Evento
+    com mais de 91 dias conta em `audit_events_overdue` e gera o alerta `audit_retention_behind`.
+
     A purga de cada conta segue a ordem das FKs: `runs` (Runs terminais), `files` (pede a exclusão
     dos objetos e, quando a retenção normal já os removeu do disco, apaga as linhas) e por fim
     `identity` (chaves, sessões, capacidade e a conta). Cada lote é uma transação; uma etapa que
@@ -212,10 +219,13 @@ class AccountJobs:
         factory: sessionmaker[Session],
         clock: _Clock = lambda: datetime.now(UTC),
         config: AccountJobsConfig = AccountJobsConfig(),  # noqa: B008 - dataclass imutável
+        monotonic: Callable[[], float] = time.monotonic,
     ) -> None:
         self._factory = factory
         self._clock = clock
         self._config = config
+        # Mede o prazo da retenção da auditoria; os testes o trocam por um relógio falso.
+        self._monotonic = monotonic
 
     def run_cycle(self) -> dict[str, int]:
         started = time.monotonic()
@@ -239,13 +249,20 @@ class AccountJobs:
                 "exclusão de conta atrasada",
                 extra={"fields": {"alert": "account_deletion_overdue", "accounts": overdue}},
             )
+        audit_overdue = counts.get("audit_events_overdue", 0)
+        if audit_overdue:
+            # Alerta de causa: a retenção de 90 dias da auditoria (1.7) atrasou mais de um dia.
+            logger.warning(
+                "retenção da auditoria atrasada",
+                extra={"fields": {"alert": "audit_retention_behind", "events": audit_overdue}},
+            )
         fields: dict[str, object] = {"main": True, **counts}
         fields["duration_ms"] = round((time.monotonic() - started) * 1000)
         logger.info("ciclo de contas", extra={"fields": fields})
         return counts
 
     def _cycle_steps(self) -> tuple[Cycle, ...]:
-        """Os passos, na ordem: purga, retenção da identidade, alerta e limite de requisições.
+        """Os passos, na ordem: purga, retenção da identidade, alertas e limite de requisições.
 
         Cada passo tem o nome da contagem que devolve, e é esse nome que vai ao log da falha.
         """
@@ -266,10 +283,17 @@ class AccountJobs:
                 "api_keys_removed",
                 lambda s: identity_purge.delete_inactive_api_keys(s, now, batch),
             ),
-            counted(
+            # Laço de lotes, cada um na sua transação: não cabe em `_counted_step`.
+            (
                 "audit_events_removed",
-                lambda s: identity_purge.delete_old_audit_events(s, now, batch),
+                lambda: {"audit_events_removed": self._remove_old_audit_events(now, batch)},
             ),
+            counted(
+                "audit_events_overdue",
+                lambda s: identity_purge.count_overdue_audit_events(s, now),
+            ),
+            # Tamanho da auditoria pelas estatísticas do banco, sem varrer a tabela.
+            counted("audit_events_estimated", identity_purge.estimate_audit_events),
             counted(
                 "accounts_deletion_overdue",
                 lambda s: identity_purge.count_overdue_deletions(s, now),
@@ -284,6 +308,22 @@ class AccountJobs:
 
     def _counted_step(self, key: str, work: Callable[[Session], int]) -> Cycle:
         return key, lambda: {key: self._in_transaction(work)}
+
+    def _remove_old_audit_events(self, now: datetime, batch: int) -> int:
+        """Lotes da retenção da auditoria até um vir incompleto ou o prazo passar; a soma.
+
+        O prazo é conferido depois de cada lote, então o ciclo sempre apaga pelo menos um. Quando
+        ele passa, o laço para sem exceção e conta o parcial; o ciclo seguinte continua do banco.
+        """
+        deadline = self._monotonic() + AUDIT_RETENTION_TIME_BUDGET.total_seconds()
+        removed = 0
+        while True:
+            deleted = self._in_transaction(
+                lambda s: identity_purge.delete_old_audit_events(s, now, batch)
+            )
+            removed += deleted
+            if deleted < batch or self._monotonic() >= deadline:
+                return removed
 
     def purge_accounts(self) -> dict[str, int]:
         """Avança a purga das contas em exclusão: quantas terminaram e quantas falharam no ciclo."""
