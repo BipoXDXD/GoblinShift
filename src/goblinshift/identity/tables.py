@@ -75,10 +75,15 @@ api_key = Table(
     Column("expires_at", DateTime(timezone=True), nullable=False),
     Column("revoked_at", DateTime(timezone=True)),
     Column("last_used_at", DateTime(timezone=True)),
+    # `Idempotency-Key` da emissão pela sessão (opcional; #442, 57b): a repetição na mesma conta
+    # responde 409 com o id desta chave. O formato é o de `runs.acceptance`.
+    Column("idem_key", Text),
     Index(None, "owner_id"),
+    Index(None, "owner_id", "idem_key", unique=True, postgresql_where=text("idem_key IS NOT NULL")),
     CheckConstraint("octet_length(secret_hash) = 32", name="secret_hash"),
     CheckConstraint("cardinality(scopes) > 0", name="scopes"),
     CheckConstraint("expires_at > created_at", name="expires_at"),
+    CheckConstraint("idem_key ~ '^[A-Za-z0-9_-]{16,64}$'", name="idem_key"),
 )
 
 # Sessão web opaca e revogável (3.6). O nome evita confusão com a Session do SQLAlchemy.

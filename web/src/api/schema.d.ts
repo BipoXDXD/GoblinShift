@@ -1729,7 +1729,10 @@ export interface operations {
     createApiKey: {
         parameters: {
             query?: never;
-            header?: never;
+            header?: {
+                /** @description Opcional. Repetida na mesma conta, responde 409 com o id da chave que ela já emitiu; o segredo só aparece na primeira resposta. */
+                "Idempotency-Key"?: string;
+            };
             path?: never;
             cookie?: never;
         };

@@ -17,6 +17,7 @@ from goblinshift.identity import (
     InvalidKeyLifetimeError,
     InvalidScopesError,
     IssuedKey,
+    KeyAlreadyIssuedError,
     Scope,
     UnknownAccountError,
     authenticate_api_key,
@@ -257,6 +258,47 @@ def test_emissao_concorrente_espera_a_trava_e_ve_a_quinta_chave(
     with pytest.raises(ActiveKeyLimitError):
         second.result()
     assert active_count(factory, owner) == MAX_ACTIVE_KEYS
+
+
+IDEM = "repeticao-do-cliente-0001"
+
+
+def issue_once(factory: sessionmaker[Session], owner_id: UUID, web: UUID) -> IssuedKey:
+    with unit_of_work(factory) as session:
+        return issue_key_for_session(
+            session, owner_id=owner_id, session_id=web, scopes=READ, days=30, now=NOW, idem_key=IDEM
+        )
+
+
+def test_repeticao_levanta_com_o_id_da_primeira(factory: sessionmaker[Session]) -> None:
+    owner = new_user(factory)
+    web = new_web_session(factory, owner, now=NOW)
+    first = issue_once(factory, owner, web)
+
+    with pytest.raises(KeyAlreadyIssuedError) as raised:
+        issue_once(factory, owner, web)
+
+    assert (raised.value.key_id, raised.value.public_id) == (first.id, first.public_id)
+    assert stored_count(factory, owner) == 1
+
+
+def test_duas_emissoes_simultaneas_com_a_mesma_chave_um_efeito(
+    factory: sessionmaker[Session],
+) -> None:
+    owner = new_user(factory)
+    web = new_web_session(factory, owner, now=NOW)
+
+    with factory() as first, first.begin():
+        issued = issue_key_for_session(
+            first, owner_id=owner, session_id=web, scopes=READ, days=30, now=NOW, idem_key=IDEM
+        )
+        second = in_thread(lambda: issue_once(factory, owner, web))
+        wait_until_someone_waits_for_a_lock(factory, "a segunda emissão")
+
+    with pytest.raises(KeyAlreadyIssuedError) as raised:
+        second.result()
+    assert raised.value.key_id == issued.id
+    assert stored_count(factory, owner) == 1
 
 
 @pytest.mark.parametrize("status_change", ["blocked", "deletion_requested"])

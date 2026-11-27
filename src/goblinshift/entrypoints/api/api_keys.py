@@ -5,13 +5,15 @@ Ver docs/GoblinShiftPlan.md, 1.6 e 3.6.
 
 - `POST`: corpo estrito (`scopes`, `days`); o segredo aparece só nesta resposta, com
   `Cache-Control: no-store`. Com `MAX_ACTIVE_KEYS` ativas, ou `MAX_STORED_KEYS` guardadas
-  contando revogadas e vencidas, → 409, cada um com a sua mensagem.
+  contando revogadas e vencidas, → 409, cada um com a sua mensagem. `Idempotency-Key` opcional
+  (#442, 57b): repetida na mesma conta, → 409 com o id da chave que ela já emitiu, mesmo revogada;
+  o segredo não volta, porque não é guardado.
 - `GET`: metadados, nunca o segredo nem o hash.
 - `DELETE`: chave de outra conta ou inexistente → o mesmo 404; revogar de novo → 204.
 """
 
 from datetime import datetime
-from typing import Annotated
+from typing import Annotated, Any
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, Request, Response
@@ -24,6 +26,11 @@ from goblinshift.entrypoints.api.dependencies import (
     RecentSessionPrincipal,
     SessionPrincipal,
 )
+from goblinshift.entrypoints.api.idempotency import (
+    IDEMPOTENCY_KEY_HEADER,
+    idempotency_key_parameter,
+    key_invalid_problem,
+)
 from goblinshift.entrypoints.api.json_command import command_openapi, json_command
 from goblinshift.entrypoints.api.problems import ApiProblem, ProblemCode, problem_responses
 from goblinshift.identity import (
@@ -35,6 +42,7 @@ from goblinshift.identity import (
     ActiveKeyLimitError,
     AuditEventType,
     AuditOutcome,
+    KeyAlreadyIssuedError,
     KeySummary,
     Scope,
     StoredKeyLimitError,
@@ -45,6 +53,7 @@ from goblinshift.identity import (
     revoke_owned_key,
 )
 from goblinshift.identity.keys import MIN_KEY_DAYS
+from goblinshift.runs.acceptance import IdempotencyKeyInvalidError, parse_idempotency_key
 
 router = APIRouter(tags=["api-keys"])
 
@@ -86,11 +95,22 @@ def list_api_keys(principal: SessionPrincipal, session: DbSession, now: Now) -> 
     return ApiKeyList(data=[_key_response(key) for key in keys])
 
 
+def _create_api_key_openapi() -> dict[str, Any]:
+    idempotency_key = idempotency_key_parameter(
+        required=False,
+        description=(
+            "Opcional. Repetida na mesma conta, responde 409 com o id da chave que ela já emitiu;"
+            " o segredo só aparece na primeira resposta."
+        ),
+    )
+    return {**command_openapi(CreateApiKey), "parameters": [idempotency_key]}
+
+
 @router.post(
     "/api-keys",
     operation_id="createApiKey",
     status_code=201,
-    openapi_extra=command_openapi(CreateApiKey),
+    openapi_extra=_create_api_key_openapi(),
     responses=problem_responses(400, 409, 413, 415),
 )
 def create_api_key(
@@ -103,6 +123,7 @@ def create_api_key(
 ) -> CreatedApiKey:
     if principal.session_id is None:
         raise RuntimeError("Principal de sessão sem session_id")
+    idem_key = _idempotency_key(request)
     scopes = frozenset(command.scopes)
     try:
         with session.begin():
@@ -113,8 +134,15 @@ def create_api_key(
                 scopes=scopes,
                 days=command.days,
                 now=now,
+                idem_key=idem_key,
             )
             _audit(session, AuditEventType.KEY_ISSUED, principal.owner_id, request, now)
+    except KeyAlreadyIssuedError as error:
+        raise ApiProblem(
+            ProblemCode.STATE_CONFLICT,
+            f"Esta Idempotency-Key já emitiu a chave {error.public_id} (id {error.key_id}); o"
+            " segredo só aparece na primeira resposta. Revogue-a se ele se perdeu.",
+        ) from None
     except ActiveKeyLimitError:
         raise ApiProblem(
             ProblemCode.STATE_CONFLICT,
@@ -158,6 +186,17 @@ def revoke_api_key(
     if not found:
         raise ApiProblem(ProblemCode.NOT_FOUND, "Chave não encontrada.")
     return Response(status_code=204)
+
+
+def _idempotency_key(request: Request) -> str | None:
+    # Lida à mão e publicada em `_create_api_key_openapi` (motivo em `idempotency`).
+    raw = request.headers.get(IDEMPOTENCY_KEY_HEADER)
+    if raw is None:
+        return None
+    try:
+        return parse_idempotency_key(raw)
+    except IdempotencyKeyInvalidError:
+        raise key_invalid_problem() from None
 
 
 def _key_response(key: KeySummary) -> ApiKeyResponse:
