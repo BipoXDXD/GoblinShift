@@ -31,13 +31,21 @@ from goblinshift.runs.lifecycle import ErrorCode
 _ACTIVE = "status IN ('queued', 'running', 'stopping')"
 
 
+def _sql_literal(value: str) -> str:
+    """Literal SQL padrão: aspas simples do valor viram `''` (`O'Brien` → `'O''Brien'`)."""
+    return "'" + value.replace("'", "''") + "'"
+
+
 def _sql_in(column: str, values: Iterable[StrEnum]) -> str:
     """`<column> IN ('A', 'B', …)` na ordem do enum, para a CHECK de um catálogo fechado.
 
     A CHECK nasce do enum: um código novo muda o DDL do modelo, e o teste de drift do schema quebra
-    até existir a migração que o acrescenta (as migrações congelam a lista como literal).
+    até existir a migração que o acrescenta (as migrações congelam a lista como literal). Um
+    apóstrofo no valor é escapado; sem isso o literal quebraria. Nos códigos atuais, sem aspas, o
+    texto continua idêntico ao congelado nas migrações 0022 e 0023, e o PostgreSQL normaliza os
+    dois do mesmo jeito em `pg_get_constraintdef`.
     """
-    return f"{column} IN ({', '.join(f"'{value}'" for value in values)})"
+    return f"{column} IN ({', '.join(_sql_literal(value) for value in values)})"
 
 
 run = Table(
