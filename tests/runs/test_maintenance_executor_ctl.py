@@ -9,6 +9,7 @@ import os
 import signal
 import uuid
 from collections.abc import Iterator
+from dataclasses import replace
 from datetime import timedelta
 from pathlib import Path
 
@@ -63,9 +64,15 @@ def runner(ctl: FakeExecutorCtl, area: Path) -> ExecutorCtlRunner:
 
 
 def janitor(
-    factory: sessionmaker[Session], storage: FileStorage, runner: ExecutorCtlRunner
+    factory: sessionmaker[Session],
+    storage: FileStorage,
+    runner: ExecutorCtlRunner,
+    *,
+    batch_size: int | None = None,
 ) -> Maintenance:
     config = MaintenanceConfig(stop_grace=timedelta(seconds=1), jitter=lambda: MIN_RETRY_JITTER)
+    if batch_size is not None:
+        config = replace(config, batch_size=batch_size)
     return Maintenance(factory, storage, runner, config)
 
 
@@ -451,3 +458,99 @@ def test_parada_pedida_na_limpeza_remove_a_area_em_curso_e_mantem_as_seguintes(
     touched = [orphan for orphan in orphans if ctl.operations(orphan)]
     assert [ctl.operations(orphan) for orphan in touched] == [["status", "remove"]]
     assert [runner.work_dir(orphan).exists() for orphan in orphans].count(True) == 2
+
+
+# Cursor na varredura das áreas de trabalho (Task 8) -----------------------------------------
+
+
+def _live_work_area(
+    factory: sessionmaker[Session], storage: FileStorage, runner: ExecutorCtlRunner, subject: str
+) -> uuid.UUID:
+    queue_run(factory, storage, create_user(factory, subject), executor_image=IMAGE)
+    live = claim(factory, storage)
+    runner.create_work_dir(live.attempt_id)
+    return live.attempt_id
+
+
+def test_areas_alem_do_lote_sao_examinadas_nos_ciclos_seguintes(
+    factory: sessionmaker[Session],
+    storage: FileStorage,
+    runner: ExecutorCtlRunner,
+) -> None:
+    u1 = _live_work_area(factory, storage, runner, "ana")
+    u2 = _live_work_area(factory, storage, runner, "bia")
+    u3 = uuid.uuid7()
+    runner.create_work_dir(u3)
+    assert u1 < u2 < u3
+    janitor_ = janitor(factory, storage, runner, batch_size=2)
+
+    assert [janitor_.sweep_work_areas() for _ in range(2)] == [0, 1]
+    assert runner.work_dir(u1).exists()
+    assert runner.work_dir(u2).exists()
+    assert not runner.work_dir(u3).exists()
+
+
+def test_cursor_recomeca_depois_da_ultima_area(
+    factory: sessionmaker[Session],
+    storage: FileStorage,
+    runner: ExecutorCtlRunner,
+) -> None:
+    u0 = uuid.uuid7()
+    u1 = _live_work_area(factory, storage, runner, "ana")
+    u2 = _live_work_area(factory, storage, runner, "bia")
+    u3 = uuid.uuid7()
+    runner.create_work_dir(u3)
+    assert u0 < u1 < u2 < u3
+    janitor_ = janitor(factory, storage, runner, batch_size=2)
+
+    assert [janitor_.sweep_work_areas() for _ in range(2)] == [0, 1]
+    assert not runner.work_dir(u3).exists()
+
+    runner.create_work_dir(u0)
+    assert janitor_.sweep_work_areas() == 1
+    assert not runner.work_dir(u0).exists()
+
+
+def test_should_stop_na_janela_nao_pula_area_nao_examinada(
+    factory: sessionmaker[Session],
+    storage: FileStorage,
+    runner: ExecutorCtlRunner,
+) -> None:
+    u1, u2, u3 = (uuid.uuid7() for _ in range(3))
+    for orphan in (u1, u2, u3):
+        runner.create_work_dir(orphan)
+    assert u1 < u2 < u3
+    janitor_ = janitor(factory, storage, runner, batch_size=2)
+    stops = iter((False, True))
+
+    assert janitor_.sweep_work_areas(should_stop=lambda: next(stops, True)) == 1
+    assert not runner.work_dir(u1).exists()
+    assert runner.work_dir(u2).exists()
+    assert runner.work_dir(u3).exists()
+
+    assert janitor_.sweep_work_areas() == 2
+    assert not runner.work_dir(u2).exists()
+    assert not runner.work_dir(u3).exists()
+
+
+def test_should_stop_antes_do_primeiro_item_preserva_cursor_anterior(
+    factory: sessionmaker[Session],
+    storage: FileStorage,
+    runner: ExecutorCtlRunner,
+) -> None:
+    u1 = _live_work_area(factory, storage, runner, "ana")
+    u2 = _live_work_area(factory, storage, runner, "bia")
+    u3, u4 = (uuid.uuid7() for _ in range(2))
+    for orphan in (u3, u4):
+        runner.create_work_dir(orphan)
+    assert u1 < u2 < u3 < u4
+    janitor_ = janitor(factory, storage, runner, batch_size=2)
+
+    assert janitor_.sweep_work_areas() == 0
+    assert janitor_.sweep_work_areas(should_stop=lambda: True) == 0
+    assert runner.work_dir(u3).exists()
+    assert runner.work_dir(u4).exists()
+
+    assert janitor_.sweep_work_areas() == 2
+    assert not runner.work_dir(u3).exists()
+    assert not runner.work_dir(u4).exists()
