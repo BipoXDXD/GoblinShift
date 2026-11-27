@@ -12,10 +12,12 @@ existentes não são previews e ficam com a coluna nula, o que o CHECK novo exig
 artefatos guarda só 48 h de saídas, então criar índice e constraints na transação, sem
 `CONCURRENTLY`, basta.
 
-O downgrade apaga os previews, que o CHECK antigo não aceita, e marca `delete_requested` os
-objetos que só eles apontavam, para a purga da manutenção removê-los do disco.
+O downgrade apaga os previews e só roda com `GS_ALLOW_LOSSY_DOWNGRADE=1` se houver linhas: o
+CHECK antigo não os aceita. Antes, marca `delete_requested` os objetos que só eles apontavam,
+para a purga da manutenção removê-los do disco.
 """
 
+import os
 from collections.abc import Sequence
 
 import sqlalchemy as sa
@@ -68,6 +70,12 @@ def upgrade() -> None:
 
 
 def downgrade() -> None:
+    if os.environ.get("GS_ALLOW_LOSSY_DOWNGRADE") != "1":
+        op.execute(
+            "DO $$ BEGIN IF EXISTS (SELECT FROM artifact WHERE role = 'preview') "
+            "THEN RAISE EXCEPTION 'o downgrade da 0014 apagaria os previews; "
+            "GS_ALLOW_LOSSY_DOWNGRADE=1 aceita a perda'; END IF; END $$"
+        )
     # Antes de apagar os previews, pede a remoção dos objetos que só eles apontam, como
     # `files.objects.request_deletion_of_unreferenced`: sem isso o arquivo ficaria `committed` e
     # sem referência, fora do alcance da purga e ocupando a cota. O objeto que outro artefato ou

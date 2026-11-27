@@ -168,11 +168,11 @@ def test_tentativa_com_saida_pendente_espera_o_descarte(
     owner = create_user(factory)
     run_id = succeeded_run(factory, storage, work_root, owner)
     with factory() as session:
-        attempt_id = session.execute(
-            select(attempt.c.id).where(attempt.c.run_id == run_id)
-        ).scalar_one()
+        attempt_id, generation = session.execute(
+            select(attempt.c.id, attempt.c.generation).where(attempt.c.run_id == run_id)
+        ).one()
     with unit_of_work(factory) as session:
-        pending = create_candidate_object(session, owner, run_id, attempt_id, 9)
+        pending = create_candidate_object(session, owner, run_id, attempt_id, generation)
 
     assert purge_batch(factory, owner) is False
     assert count(factory, run, owner) == 1

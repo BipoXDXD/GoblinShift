@@ -20,6 +20,7 @@ from goblinshift.files.storage import FileStorage
 from goblinshift.files.tables import object_use, stored_object, transfer_slot, upload
 from goblinshift.files.transfers import acquire_transfer_slot
 from goblinshift.platform.db import unit_of_work
+from tests.files.support import create_attempt
 from tests.identity.support import new_key, new_user
 
 UPLOADS = "/api/v1/uploads"
@@ -104,8 +105,9 @@ def publish(
     Com `preview_of`, publica um preview daquela saída (papel `preview`).
     """
     factory: sessionmaker[Session] = app.state.session_factory
+    run_id, attempt_id = create_attempt(factory, owner)
     with unit_of_work(factory) as session:
-        candidate = create_candidate_object(session, owner, uuid.uuid4(), uuid.uuid4(), 1)
+        candidate = create_candidate_object(session, owner, run_id, attempt_id, 1)
     sha256, size = storage_of(app).create_exclusive(
         candidate.storage_key, [content], max_bytes=len(content)
     )

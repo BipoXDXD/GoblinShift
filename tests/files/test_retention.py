@@ -12,12 +12,19 @@ from datetime import timedelta
 from pathlib import Path
 
 import pytest
-from sqlalchemy import Table, func, insert, select, update
+from sqlalchemy import Table, delete, func, insert, select, update
 from sqlalchemy.orm import Session, sessionmaker
 
 from goblinshift import capacity
 from goblinshift.files import retention
-from goblinshift.files.artifacts import get_artifact, open_for_download, publish_artifact
+from goblinshift.files.artifacts import (
+    commit_candidate,
+    create_candidate_object,
+    get_artifact,
+    open_for_download,
+    publish_artifact,
+)
+from goblinshift.files.candidates import discard_candidates
 from goblinshift.files.errors import UploadGoneError, UploadNotFoundError
 from goblinshift.files.limits import INCOMPLETE_UPLOAD_TTL, MIN_INTENT_RESERVED_BYTES
 from goblinshift.files.objects import hold, release
@@ -27,6 +34,7 @@ from goblinshift.files.retention import (
     expire_unused_uploads,
     next_storage_release_in,
     purge_deleted_objects,
+    reconcile_capacity,
     remove_file_after_commit,
 )
 from goblinshift.files.states import ArtifactRole, Availability, HolderKind, UploadState
@@ -40,8 +48,10 @@ from goblinshift.files.uploads import (
     request_deletion,
 )
 from goblinshift.platform.db import unit_of_work
+from goblinshift.runs.tables import run
 from tests.capacity.support import account_reserved, live_amount
 from tests.files.support import (
+    create_attempt,
     create_intent,
     create_user,
     pass_expiry_after_deletion,
@@ -727,3 +737,55 @@ def test_proxima_liberacao_ja_vencida_e_zero_e_nao_negativa(
     with unit_of_work(factory) as session:
         expires_in(session, upload, view.id, -overdue)
         assert next_storage_release_in(session, owner) == timedelta(0)
+
+
+# --- Objeto que perdeu a tentativa ------------------------------------------------------------
+
+
+def test_reconciliacao_nao_reserva_de_novo_o_objeto_que_perdeu_a_tentativa(
+    factory: sessionmaker[Session], storage: FileStorage
+) -> None:
+    # A purga da Run anula `attempt_id` do candidato publicado (FK `SET NULL`), e o objeto entra
+    # no alcance da reconciliação como se fosse de antes da 0006. A reserva viva dele basta.
+    owner = create_user(factory, "a")
+    run_id, attempt_id = create_attempt(factory, owner)
+    with unit_of_work(factory) as session:
+        candidate = create_candidate_object(session, owner, run_id, attempt_id, 1)
+    sha256, size = storage.create_exclusive(candidate.storage_key, [b"saida"], max_bytes=100)
+    with unit_of_work(factory) as session:
+        commit_candidate(session, owner, candidate.object_id, sha256, size)
+        publish_artifact(session, owner, candidate.object_id, ArtifactRole.OUTPUT, "saida.csv")
+    # Faz o papel da reserva que o worker transfere da Run para o objeto ao publicar.
+    assert reconcile_capacity(factory(), limit=10).objects_adopted == 1
+    with unit_of_work(factory) as session:
+        session.execute(delete(run).where(run.c.id == run_id))
+
+    report = reconcile_capacity(factory(), limit=10)
+
+    assert report.objects_adopted == 0
+    assert live_amount(factory, capacity.HolderKind.OBJECT, candidate.object_id) == 5
+
+
+def test_candidato_descartado_que_perdeu_a_tentativa_tem_reserva_ate_o_expurgo(
+    factory: sessionmaker[Session], storage: FileStorage
+) -> None:
+    # Descartado, ainda no disco, e a purga da Run anulou `attempt_id`: a reconciliação o adota
+    # como qualquer arquivo que ocupa espaço, e o expurgo libera a reserva junto com o arquivo.
+    owner = create_user(factory, "a")
+    run_id, attempt_id = create_attempt(factory, owner)
+    with unit_of_work(factory) as session:
+        candidate = create_candidate_object(session, owner, run_id, attempt_id, 1)
+    sha256, size = storage.create_exclusive(candidate.storage_key, [b"descartada"], max_bytes=100)
+    with unit_of_work(factory) as session:
+        commit_candidate(session, owner, candidate.object_id, sha256, size)
+        discard_candidates(session, attempt_id)
+        session.execute(delete(run).where(run.c.id == run_id))
+
+    adopted = reconcile_capacity(factory(), limit=10).objects_adopted
+    reserved = live_amount(factory, capacity.HolderKind.OBJECT, candidate.object_id)
+    purged = purge_deleted_objects(factory(), storage).objects
+
+    assert (adopted, reserved, purged) == (1, 10, 1)
+    assert live_amount(factory, capacity.HolderKind.OBJECT, candidate.object_id) is None
+    with pytest.raises(ObjectMissingError):
+        storage.open(candidate.storage_key)

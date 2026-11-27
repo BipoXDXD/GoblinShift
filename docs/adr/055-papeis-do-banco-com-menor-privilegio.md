@@ -38,6 +38,7 @@ Opção C, em duas fases. Esta decisão cobre a primeira.
 
 - Uma injeção de SQL na API deixa de dar DDL, `COPY ... PROGRAM`, criação de papel ou reescrita da auditoria. Continua dando DML nas tabelas da aplicação, que é o que a API precisa.
 - `tests/test_db_roles.py` aplica o script duas vezes num PostgreSQL real e confirma o que a aplicação faz com os papéis novos: um ciclo completo de Run (conta, upload, fila, claim, executor e conclusão) como `gs_app`, e os ciclos de manutenção e de contas como `gs_maintenance`, incluindo apagar um evento vencido. Também confirma as recusas: UPDATE, DELETE e TRUNCATE no `audit_event` pelo `gs_app`, UPDATE de conteúdo pela manutenção, escrita no `alembic_version` e DDL por qualquer papel de runtime.
+- `gs_app` e `gs_maintenance` trazem no próprio papel os timeouts da aplicação (`lock_timeout` 2 s, `idle_in_transaction_session_timeout` 30 s): um `psql` esquecido em `BEGIN` como um deles não segura lock sem limite. Uma manutenção manual que precise esperar mais por um lock faz `SET lock_timeout` na sessão. Mudar esses defaults em `Settings` exige mudar o script e rodá-lo de novo.
 - Dois segredos novos para guardar e girar.
 - Reverter é só voltar o `GS_DB_USER` e a senha para os de antes. Os papéis podem ficar no banco sem efeito, ou sair com `DROP OWNED BY` e `DROP ROLE`.
 

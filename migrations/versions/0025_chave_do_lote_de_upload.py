@@ -1,15 +1,15 @@
 """Chave de idempotência do lote de upload: `request_key`, `request_hash` e `request_index` (#442).
 
 Revision ID: 0025
-Revises: 0019
+Revises: 0024
 Create Date: 2026-11-22 12:00:00.000000
 
 Lembrete (docs/GoblinShiftPlan.md, 3.8): expand/contract. Colunas anuláveis e sem default: o
 código anterior não as lê nem grava, e `ADD COLUMN` sem default não reescreve a tabela. O lote
 criado com `Idempotency-Key` grava as três em cada linha; sem a chave, as três ficam nulas.
 
-O número pula de 0019 para 0025 porque o rascunho #503 reserva 0020 a 0024; quem entrar depois
-na main só troca o `down_revision`.
+O número pula de 0019 para 0025 porque o rascunho #503 reserva 0020 a 0024. Com as duas linhas
+juntas, esta revisão segue a 0024: a cadeia fica 0020 a 0024 e depois 0025.
 
 Os CHECKs e os índices parciais entram na transação do Alembic, como na 0006 e na 0019: as colunas
 acabaram de nascer nulas em todas as linhas, e `upload` só guarda os uploads da retenção. O
@@ -23,7 +23,7 @@ import sqlalchemy as sa
 from alembic import op
 
 revision: str = "0025"
-down_revision: str | Sequence[str] | None = "0019"
+down_revision: str | Sequence[str] | None = "0024"
 branch_labels: str | Sequence[str] | None = None
 depends_on: str | Sequence[str] | None = None
 

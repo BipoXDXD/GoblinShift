@@ -24,7 +24,7 @@ from goblinshift.files.storage import FileStorage
 from goblinshift.files.tables import artifact, object_use, stored_object, transfer_slot, upload
 from goblinshift.files.transfers import acquire_transfer_slot
 from goblinshift.platform.db import unit_of_work
-from tests.files.support import create_intent, create_user, ready_upload
+from tests.files.support import create_attempt, create_intent, create_user, ready_upload
 
 pytestmark = pytest.mark.integration
 
@@ -36,8 +36,9 @@ def new_artifact(
 ) -> uuid.UUID:
     """Artefato publicado pelo caminho do worker: candidato, gravação, confirmação, publicação."""
     content = b"saida"
+    run_id, attempt_id = create_attempt(factory, owner_id)
     with unit_of_work(factory) as session:
-        candidate = create_candidate_object(session, owner_id, uuid.uuid4(), uuid.uuid4(), 1)
+        candidate = create_candidate_object(session, owner_id, run_id, attempt_id, 1)
     sha256, size = storage.create_exclusive(
         candidate.storage_key, [content], max_bytes=len(content)
     )
@@ -53,8 +54,9 @@ def committed_candidate(
 ) -> uuid.UUID:
     """Saída confirmada que não chegou a virar artefato (tentativa vencida)."""
     content = b"descartada"
+    run_id, attempt_id = create_attempt(factory, owner_id)
     with unit_of_work(factory) as session:
-        candidate = create_candidate_object(session, owner_id, uuid.uuid4(), uuid.uuid4(), 1)
+        candidate = create_candidate_object(session, owner_id, run_id, attempt_id, 1)
     sha256, size = storage.create_exclusive(
         candidate.storage_key, [content], max_bytes=len(content)
     )

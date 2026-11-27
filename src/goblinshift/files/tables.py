@@ -35,7 +35,8 @@ stored_object = Table(
     # Conhecidos só depois que o conteúdo foi gravado inteiro.
     Column("sha256", LargeBinary(32)),
     Column("size_bytes", BigInteger),
-    # Candidatos (saídas antes da publicação) guardam a tentativa e a geração que os criou.
+    # Candidatos (saídas antes da publicação) guardam a tentativa e a geração que os criou. A FK
+    # composta para `attempt` fica em `runs/tables.py`: `files` não conhece `runs` (migração 0020).
     Column("attempt_id", Uuid),
     Column("generation", Integer),
     Column("created_at", DateTime(timezone=True), nullable=False, server_default=func.now()),
@@ -53,6 +54,8 @@ stored_object = Table(
         "delete_requested_at",
         postgresql_where=text("state = 'delete_requested'"),
     ),
+    # Objetos já fora do disco, que `delete_old_file_rows` apaga em ordem de `id` (migração 0024).
+    Index("stored_object_gone_idx", "id", postgresql_where=text("state IN ('deleted', 'missing')")),
     CheckConstraint(
         "state IN ('pending', 'committed', 'delete_requested', 'deleted', 'missing')", name="state"
     ),
@@ -62,6 +65,8 @@ stored_object = Table(
     ),
     CheckConstraint("size_bytes >= 0", name="size_bytes"),
     CheckConstraint("octet_length(sha256) = 32", name="sha256"),
+    # Um candidato sem geração quebra o fencing da publicação.
+    CheckConstraint("(attempt_id IS NULL) = (generation IS NULL)", name="attempt_generation"),
 )
 
 upload = Table(
@@ -96,6 +101,8 @@ upload = Table(
     # Uploads vivos da conta (teto de `files.uploads`): só as linhas sem exclusão, pelo vencimento.
     Index(None, "owner_id", "expires_at", postgresql_where=text("deleted_at IS NULL")),
     Index("upload_expires_at_idx", "expires_at", postgresql_where=text("deleted_at IS NULL")),
+    # Incompletos que `expire_incomplete_uploads` busca por vencimento (migração 0024).
+    Index("upload_incomplete_idx", "expires_at", "id", postgresql_where=text("state <> 'ready'")),
     CheckConstraint("state IN ('created', 'receiving', 'ready', 'failed')", name="state"),
     CheckConstraint("expected_size >= 0", name="expected_size"),
     CheckConstraint("length(original_name) BETWEEN 1 AND 255", name="original_name"),
@@ -185,6 +192,8 @@ object_use = Table(
     # Completo: o parcial acima não serve à checagem RESTRICT da FK nem ao "nenhum uso".
     Index("object_use_object_id_idx", "object_id"),
     Index(None, "holder_kind", "holder_id"),
+    # Usos encerrados que `delete_old_file_rows` apaga aos 90 dias (migração 0024).
+    Index("object_use_ended_at_idx", "ended_at", postgresql_where=text("ended_at IS NOT NULL")),
     CheckConstraint("holder_kind IN ('run', 'download')", name="holder_kind"),
 )
 

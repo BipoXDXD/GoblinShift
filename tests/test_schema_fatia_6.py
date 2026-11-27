@@ -17,7 +17,6 @@ from goblinshift.capacity import GLOBAL_STORAGE_MAX_BYTES, HolderKind, Resource
 from goblinshift.capacity.tables import capacity_pool, resource_reservation
 from goblinshift.identity.audit import AuditEventType, AuditOutcome
 from goblinshift.identity.tables import app_user, audit_event, login_state, web_session
-from goblinshift.platform.db import make_engine
 from goblinshift.platform.settings import Settings
 from tests.conftest import run_migrations
 
@@ -27,14 +26,6 @@ AGORA = datetime(2026, 10, 14, 12, 0, tzinfo=UTC)
 HASH = b"\x02" * 32
 HOLDER = UUID("00000000-0000-7000-8000-0000000000aa")
 GIB = 1024**3
-
-
-@pytest.fixture
-def engine(db_settings: Settings) -> Iterator[Engine]:
-    run_migrations(db_settings, "head")
-    engine = make_engine(db_settings)
-    yield engine
-    engine.dispose()
 
 
 @pytest.fixture
