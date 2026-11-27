@@ -259,19 +259,25 @@ Em produção, o login web ([plano, 3.6](docs/GoblinShiftPlan.md#s3-6)) lê a co
 | `GS_SIGNUP_MODE` (padrão `closed`, [ADR 023](docs/adr/023-cadastro-fechado-ate-a-abertura.md)) | variável no Coolify | operador |
 | `google_client_secret`, `github_client_secret` | arquivo | operador, com `read -rs` (abaixo) |
 | `csrf_secret`, `login_cookie_secret` | arquivo | operador, com `openssl rand -hex 32` (abaixo); a publicação pelo Coolify não os cria |
-| `GS_CURSOR_SECRET` | variável privada no recurso da aplicação no Coolify, usada pela API | operador |
-| `GS_USER_HASH_SECRET` | variável privada no recurso da aplicação no Coolify, compartilhada pela API, pelo worker e pela manutenção | operador |
+| `cursor_secret` | arquivo, lido pela API | operador, com `openssl rand -hex 32`, ou o valor antigo (abaixo) |
+| `user_hash_secret` | arquivo, compartilhado pela API, pelo worker e pela manutenção | operador, com `openssl rand -hex 32`, ou o valor antigo (abaixo) |
 
 Se uma variável obrigatória estiver ausente ou vazia, a interpolação do Compose falha antes da execução. Se a API iniciar sem um segredo obrigatório, ela sai na partida com um erro que identifica a configuração ausente.
 
-Mantenha os valores de `GS_CURSOR_SECRET` e `GS_USER_HASH_SECRET` entre publicações. Trocar o primeiro invalida os cursores já emitidos e obriga os clientes a reiniciar a paginação. Trocar o segundo muda o hash da conta na telemetria e impede o `gs-admin find-user` de localizar hashes emitidos com a chave anterior. [Runbook de abuso](docs/runbooks/abuso.md)
+Nenhum segredo vai em variável de ambiente, porque ela aparece no `docker inspect` e na interface do Coolify (#442). As duas chaves HMAC eram as variáveis privadas `GS_CURSOR_SECRET` e `GS_USER_HASH_SECRET`. Na migração, copie o valor de cada uma para o arquivo de mesmo nome (`cursor_secret`, `user_hash_secret`) e só então apague a variável no Coolify. A aplicação recusa a variável e o arquivo juntos.
+
+Mantenha os valores de `cursor_secret` e `user_hash_secret` entre publicações. Trocar o primeiro invalida os cursores já emitidos e obriga os clientes a reiniciar a paginação. Trocar o segundo muda o hash da conta na telemetria e impede o `gs-admin find-user` de localizar hashes emitidos com a chave anterior. [Runbook de abuso](docs/runbooks/abuso.md)
 
 ```bash
 sudo -u goblinshift -i
 cd /srv/goblinshift/secrets
 read -rs GOOGLE && printf '%s' "$GOOGLE" > google_client_secret && unset GOOGLE   # cole e Enter (não ecoa)
 read -rs GH && printf '%s' "$GH" > github_client_secret && unset GH
-chmod 644 google_client_secret github_client_secret
+# Chaves HMAC: na migração, cole o valor da variável privada do Coolify; numa instalação nova, use
+# `openssl rand -hex 32 | tr -d '\n' > cursor_secret` (idem user_hash_secret).
+read -rs CUR && printf '%s' "$CUR" > cursor_secret && unset CUR
+read -rs UH && printf '%s' "$UH" > user_hash_secret && unset UH
+chmod 644 google_client_secret github_client_secret cursor_secret user_hash_secret
 ```
 
 Rotação:

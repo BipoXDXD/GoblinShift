@@ -30,7 +30,7 @@ owner_id="$(printf '%s' "$user_hash" | gs_admin find-user --user-hash -)" && ech
 Saída 1 com "nenhuma conta tem esse user.hash" tem duas causas:
 
 - a conta já foi purgada (`DELETE /me` do titular); a auditoria dela continua na tabela `audit_event` por 90 dias;
-- o hash veio de outro ambiente (um evento de teste ou de outra instalação) ou o segredo `GS_USER_HASH_SECRET` foi trocado depois do evento: o mesmo id passa a gerar outro hash, e os eventos antigos deixam de ser traduzíveis.
+- o hash veio de outro ambiente (um evento de teste ou de outra instalação) ou o segredo `user_hash_secret` foi trocado depois do evento: o mesmo id passa a gerar outro hash, e os eventos antigos deixam de ser traduzíveis.
 
 Para descobrir **quais** contas pesam mais, no OpenObserve (túnel e acesso em [`deploy/openobserve/README.md`](../../deploy/openobserve/README.md), "Provisionar pelo túnel SSH"), stream de traces `default`, na última hora:
 

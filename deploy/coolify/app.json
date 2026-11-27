@@ -27,7 +27,7 @@
         "OTEL_EXPORTER_OTLP_ENDPOINT": "http://otel-collector:4318",
         "OTEL_SERVICE_NAME": "goblinshift-api",
         "GS_CSRF_SECRET_FILE": "/run/secrets/csrf_secret",
-        "GS_CURSOR_SECRET": "${GS_CURSOR_SECRET:?defina a variável privada no recurso da aplicação no Coolify}",
+        "GS_CURSOR_SECRET_FILE": "/run/secrets/cursor_secret",
         "GS_EXECUTOR_IMAGE": "${GS_EXECUTOR_IMAGE:?exportada pelo deploy/release.sh (imagem do executor por digest)}",
         "GS_GITHUB_CLIENT_ID": "${GS_GITHUB_CLIENT_ID:?defina em secrets/app.env (OAuth App do GitHub)}",
         "GS_GITHUB_CLIENT_SECRET_FILE": "/run/secrets/github_client_secret",
@@ -37,7 +37,7 @@
         "GS_PUBLIC_ORIGIN": "${GS_PUBLIC_ORIGIN:?defina em secrets/app.env (https://goblinshift.dev)}",
         "GS_RUNNER": "executor_ctl",
         "GS_SIGNUP_MODE": "${GS_SIGNUP_MODE:-closed}",
-        "GS_USER_HASH_SECRET": "${GS_USER_HASH_SECRET:?defina a variável privada no recurso da aplicação no Coolify}"
+        "GS_USER_HASH_SECRET_FILE": "/run/secrets/user_hash_secret"
       },
       "healthcheck": {
         "interval": "10s",
@@ -66,6 +66,14 @@
         {
           "source": "db_password",
           "target": "/run/secrets/db_password"
+        },
+        {
+          "source": "cursor_secret",
+          "target": "/run/secrets/cursor_secret"
+        },
+        {
+          "source": "user_hash_secret",
+          "target": "/run/secrets/user_hash_secret"
         },
         {
           "source": "google_client_secret",
@@ -153,7 +161,7 @@
         "OTEL_SERVICE_NAME": "goblinshift-maintenance",
         "GS_EXECUTOR_IMAGE": "${GS_EXECUTOR_IMAGE:?exportada pelo deploy/release.sh (imagem do executor por digest)}",
         "GS_RUNNER": "executor_ctl",
-        "GS_USER_HASH_SECRET": "${GS_USER_HASH_SECRET:?defina a variável privada no recurso da aplicação no Coolify}",
+        "GS_USER_HASH_SECRET_FILE": "/run/secrets/user_hash_secret",
         "GS_WORK_ROOT": "/var/lib/goblinshift/exec-work"
       },
       "group_add": [
@@ -176,6 +184,10 @@
         {
           "source": "db_password",
           "target": "/run/secrets/db_password"
+        },
+        {
+          "source": "user_hash_secret",
+          "target": "/run/secrets/user_hash_secret"
         }
       ],
       "stop_grace_period": "30s",
@@ -376,7 +388,6 @@
       "environment": {
         "FORWARDED_ALLOW_IPS": "172.30.0.0/24,172.31.0.2",
         "GS_DB_HOST": "postgres",
-        "GS_DB_PASSWORD_FILE": "/run/secrets/db_password",
         "GS_ENVIRONMENT": "production",
         "OTEL_EXPORTER_OTLP_ENDPOINT": "http://otel-collector:4318",
         "OTEL_SERVICE_NAME": "goblinshift-api"
@@ -393,12 +404,6 @@
         "internal": null
       },
       "restart": "no",
-      "secrets": [
-        {
-          "source": "db_password",
-          "target": "/run/secrets/db_password"
-        }
-      ],
       "user": "0",
       "volumes": [
         {
@@ -468,7 +473,7 @@
         "OTEL_SERVICE_NAME": "goblinshift-worker",
         "GS_EXECUTOR_IMAGE": "${GS_EXECUTOR_IMAGE:?exportada pelo deploy/release.sh (imagem do executor por digest)}",
         "GS_RUNNER": "executor_ctl",
-        "GS_USER_HASH_SECRET": "${GS_USER_HASH_SECRET:?defina a variável privada no recurso da aplicação no Coolify}",
+        "GS_USER_HASH_SECRET_FILE": "/run/secrets/user_hash_secret",
         "GS_WORK_ROOT": "/var/lib/goblinshift/exec-work"
       },
       "group_add": [
@@ -491,6 +496,10 @@
         {
           "source": "db_password",
           "target": "/run/secrets/db_password"
+        },
+        {
+          "source": "user_hash_secret",
+          "target": "/run/secrets/user_hash_secret"
         }
       ],
       "stop_grace_period": "30s",
@@ -551,6 +560,10 @@
       "file": "/srv/goblinshift/secrets/csrf_secret",
       "name": "goblinshift_csrf_secret"
     },
+    "cursor_secret": {
+      "file": "/srv/goblinshift/secrets/cursor_secret",
+      "name": "goblinshift_cursor_secret"
+    },
     "db_password": {
       "file": "/srv/goblinshift/secrets/db_password",
       "name": "goblinshift_db_password"
@@ -566,6 +579,10 @@
     "login_cookie_secret": {
       "file": "/srv/goblinshift/secrets/login_cookie_secret",
       "name": "goblinshift_login_cookie_secret"
+    },
+    "user_hash_secret": {
+      "file": "/srv/goblinshift/secrets/user_hash_secret",
+      "name": "goblinshift_user_hash_secret"
     }
   }
 }

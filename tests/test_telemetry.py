@@ -138,9 +138,11 @@ def test_producao_passa_o_segredo_do_user_hash_a_quem_emite_eventos(service: str
     # que o mesmo `owner_id` dê o mesmo `user.hash` nos três.
     compose = yaml.safe_load((ROOT / "compose.prod.yaml").read_text())
 
-    environment = compose["services"][service]["environment"]
+    config = compose["services"][service]
 
-    assert environment["GS_USER_HASH_SECRET"].startswith("${GS_USER_HASH_SECRET:?")
+    mount = config["environment"]["GS_USER_HASH_SECRET_FILE"]
+    assert mount == "/run/secrets/user_hash_secret"
+    assert "user_hash_secret" in config["secrets"]
 
 
 # Status de erro dos spans do SQLAlchemy

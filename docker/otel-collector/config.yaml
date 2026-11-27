@@ -31,7 +31,10 @@ exporters:
   otlphttp/openobserve:
     endpoint: http://openobserve:5080/api/default
     headers:
-      Authorization: "Basic ${env:OPENOBSERVE_BASIC_AUTH}"
+      # Por arquivo (#442, 34a): variável de ambiente aparece no `docker inspect`. O `${file:}`
+      # entra cru, com quebra de linha e tudo, e o Go recusa cabeçalho com `\n`: o arquivo é
+      # gravado com `printf '%s'` (scripts/dev-secrets.sh).
+      Authorization: "Basic ${file:/run/secrets/openobserve_basic_auth}"
       stream-name: default
 
 extensions:

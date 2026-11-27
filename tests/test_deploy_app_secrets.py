@@ -1,7 +1,7 @@
 """deploy/app-secrets.sh: os segredos da aplicação estão no lugar antes do deploy seguir.
 
-Gera, uma vez, os que a própria aplicação cria: no `app.env`, o do cursor (3.3) e o do
-`user.hash` (3.7); em arquivo, as chaves do CSRF e do cookie de login (fatia 6, 3.6). Confere os
+Gera, uma vez, os que a própria aplicação cria, todos em arquivo (#442, 34a): o do cursor (3.3), o
+do `user.hash` (3.7) e as chaves do CSRF e do cookie de login (fatia 6, 3.6). Confere os
 que o operador grava (os client secrets do Google e do GitHub). Roda o script de verdade sobre um
 diretório temporário com o layout de /srv/goblinshift/secrets, como o release.sh faz na VPS.
 """
@@ -16,8 +16,7 @@ import pytest
 
 ROOT = Path(__file__).resolve().parent.parent
 SCRIPT = ROOT / "deploy" / "app-secrets.sh"
-GENERATED = ("GS_CURSOR_SECRET", "GS_USER_HASH_SECRET")
-GENERATED_FILES = ("csrf_secret", "login_cookie_secret")
+GENERATED_FILES = ("cursor_secret", "user_hash_secret", "csrf_secret", "login_cookie_secret")
 OPERATOR_FILES = ("google_client_secret", "github_client_secret")
 HEX_SECRET = re.compile(r"[0-9a-f]{64}")
 # O container lê com outro UID, dentro do diretório 700 (README, "Segredos do login").
@@ -59,45 +58,15 @@ def ensure_secrets(env_file: Path) -> None:
     assert result.returncode == 0, result.stderr
 
 
-def entries(env_file: Path) -> dict[str, str]:
-    lines = env_file.read_text().splitlines()
-    return dict(line.split("=", 1) for line in lines)
-
-
 # --- app.env ----------------------------------------------------------------------------------
 
 
-def test_arquivo_sem_quebra_de_linha_final_nao_gruda_o_segredo_na_ultima_linha(
-    env_file: Path,
-) -> None:
-    env_file.write_text("GS_SMTP_HOST=smtp.example.com")
+def test_app_env_nao_recebe_segredo(env_file: Path) -> None:
+    env_file.write_text("GS_SMTP_HOST=smtp.example.com\n")
 
     ensure_secrets(env_file)
 
-    values = entries(env_file)
-    assert values["GS_SMTP_HOST"] == "smtp.example.com"
-    for name in GENERATED:
-        assert HEX_SECRET.fullmatch(values[name]), name
-    assert env_file.read_text().endswith("\n")
-
-
-def test_segredo_existente_e_mantido_e_rodar_de_novo_nao_duplica(env_file: Path) -> None:
-    env_file.write_text(f"GS_CURSOR_SECRET={'c' * 64}\n")
-
-    ensure_secrets(env_file)
-    first = env_file.read_text()
-    ensure_secrets(env_file)
-
-    assert env_file.read_text() == first
-    assert entries(env_file)["GS_CURSOR_SECRET"] == "c" * 64
-    assert sorted(entries(env_file)) == sorted(GENERATED)
-
-
-def test_arquivo_vazio_recebe_os_dois_segredos(env_file: Path) -> None:
-    ensure_secrets(env_file)
-
-    assert sorted(entries(env_file)) == sorted(GENERATED)
-    assert env_file.read_text().splitlines()[0].startswith("GS_")
+    assert env_file.read_text() == "GS_SMTP_HOST=smtp.example.com\n"
 
 
 # --- chaves do servidor em arquivo ------------------------------------------------------------

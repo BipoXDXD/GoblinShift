@@ -9,6 +9,7 @@ variável obrigatória, o Compose recusa o arquivo antes de qualquer comando, in
 
 import json
 import os
+import re
 import subprocess
 from pathlib import Path
 from typing import Any
@@ -24,8 +25,9 @@ DEV_FILES = ("compose.yaml", "compose.override.yaml")
 COMPOSE_TIMEOUT_SECONDS = 60
 MOUNT_ROOT = "/run/secrets"
 DB_PASSWORD_PATH = f"{MOUNT_ROOT}/db_password"
-# `storage-init` não lê a configuração (roda `install`), mas herda o mesmo bloco de ambiente.
-APP_SERVICES = ("api", "maintenance", "migrate", "storage-init", "worker")
+# `storage-init` fica de fora: só roda `install` e não recebe segredo
+# (test_storage_init_nao_monta_segredo).
+APP_SERVICES = ("api", "maintenance", "migrate", "worker")
 WEB_SECRETS = {
     "google_client_secret": "GS_GOOGLE_CLIENT_SECRET_FILE",
     "github_client_secret": "GS_GITHUB_CLIENT_SECRET_FILE",
@@ -38,18 +40,12 @@ REQUIRED_WEB_VARS = {
     "GS_GITHUB_CLIENT_ID": "id-github",
 }
 WEB_VARS = {*REQUIRED_WEB_VARS, "GS_SIGNUP_MODE", *WEB_SECRETS.values()}
-BASE_ENV = {
-    "OPENOBSERVE_BASIC_AUTH": "x",
-    "OPENOBSERVE_ROOT_EMAIL": "x@example.com",
-    "OPENOBSERVE_ROOT_PASSWORD": "x",
-}
+BASE_ENV = {"OPENOBSERVE_ROOT_EMAIL": "x@example.com"}
 PROD_ENV = {
     **BASE_ENV,
     "GS_ENVIRONMENT": "production",
     "GS_IMAGE_TAG": "sha-0123456789ab",
     "GS_EXECUTOR_IMAGE": f"ghcr.io/bipoxdxd/goblinshift-executor@sha256:{'a' * 64}",
-    "GS_CURSOR_SECRET": "c" * 64,
-    "GS_USER_HASH_SECRET": "u" * 64,
     **REQUIRED_WEB_VARS,
 }
 
@@ -116,8 +112,9 @@ def test_todo_servico_da_aplicacao_no_coolify_recebe_o_arquivo_de_senha_do_banco
         if "GS_APP_IMAGE" in service["image"]
     }
 
-    assert set(app_services) == set(APP_SERVICES)
-    for name, service in app_services.items():
+    assert set(app_services) == {*APP_SERVICES, "storage-init"}
+    for name in APP_SERVICES:
+        service = app_services[name]
         assert service["environment"]["GS_ENVIRONMENT"] == "production", name
         assert service["environment"]["GS_DB_PASSWORD_FILE"] == DB_PASSWORD_PATH, name
         assert secret_targets(service)["db_password"] == DB_PASSWORD_PATH, name
@@ -242,3 +239,52 @@ def test_servico_continuo_da_producao_exige_o_ambiente(service: str) -> None:
     declared = production_file["services"][service]["environment"]["GS_ENVIRONMENT"]
 
     assert declared.startswith("${GS_ENVIRONMENT:?")
+
+
+# Segredo em variável de ambiente aparece no `docker inspect` e na UI do Coolify (#442, 34a; D3).
+# Nos destinos de produção, todo segredo chega por arquivo montado (`*_FILE`).
+SECRET_NAME = re.compile(r"SECRET|PASSWORD|TOKEN|BASIC_AUTH")
+ENV_SECRET_ALLOWLIST: dict[str, str] = {}
+
+
+def _coolify_services(name: str) -> dict[str, Any]:
+    services: dict[str, Any] = json.loads((ROOT / "deploy" / "coolify" / name).read_text())[
+        "services"
+    ]
+    return services
+
+
+def _secrets_in_environment(services: dict[str, Any]) -> dict[str, list[str]]:
+    found = {}
+    for service, config in services.items():
+        keys = [
+            key
+            for key in config.get("environment") or {}
+            if SECRET_NAME.search(key)
+            and not key.endswith("_FILE")
+            and key not in ENV_SECRET_ALLOWLIST
+        ]
+        if keys:
+            found[service] = keys
+    return found
+
+
+@pytest.mark.parametrize("destination", ["app.json", "infra.json", "compose.prod"])
+def test_nenhum_segredo_em_variavel_de_ambiente_nos_destinos(
+    production: dict[str, Any], destination: str
+) -> None:
+    services = (
+        production["services"] if destination == "compose.prod" else _coolify_services(destination)
+    )
+
+    assert _secrets_in_environment(services) == {}
+
+
+def test_storage_init_nao_monta_segredo(production: dict[str, Any]) -> None:
+    """Só cria a pasta dos objetos com o dono certo: não fala com o banco."""
+    for config in (
+        production["services"]["storage-init"],
+        _coolify_services("app.json")["storage-init"],
+    ):
+        assert not config.get("secrets")
+        assert "GS_DB_PASSWORD_FILE" not in (config.get("environment") or {})

@@ -176,13 +176,36 @@ class Telemetry:
         return int(rows[0]["n"]) if rows else 0
 
 
+def _secret_files(directory: Path) -> dict[str, Path]:
+    """Os segredos montados como em produção (#442, 34a): nada de senha em variável de ambiente.
+
+    Modo 644, como em /srv/goblinshift/secrets: o root do contêiner, sem DAC_OVERRIDE, não lê
+    um arquivo 600 de outro dono. O de Basic auth vai sem quebra de linha (cabeçalho cru).
+    """
+    auth = base64.b64encode(f"{CREDENTIALS.email}:{CREDENTIALS.password}".encode()).decode()
+    files = {
+        "openobserve_env": f"ZO_ROOT_USER_PASSWORD={CREDENTIALS.password}\n",
+        "openobserve_basic_auth": auth,
+    }
+    paths = {}
+    for name, content in files.items():
+        path = directory / name
+        path.write_text(content, encoding="utf-8")
+        path.chmod(0o644)
+        paths[name] = path
+    return paths
+
+
 @pytest.fixture(scope="session")
-def telemetry() -> Iterator[Telemetry]:
+def telemetry(tmp_path_factory: pytest.TempPathFactory) -> Iterator[Telemetry]:
+    secrets_dir = tmp_path_factory.mktemp("secrets")
+    secrets_dir.chmod(0o755)
+    secret_files = _secret_files(secrets_dir)
     with (
         Network() as network,
-        _openobserve(network) as o2,
+        _openobserve(network, secret_files["openobserve_env"]) as o2,
         _filled_volume() as volumes,
-        _collector(network, volumes),
+        _collector(network, volumes, secret_files["openobserve_basic_auth"]),
     ):
         base_url = f"http://{o2.get_container_host_ip()}:{o2.get_exposed_port(O2_PORT)}"
         api = OpenObserve(base_url, CREDENTIALS)
@@ -210,7 +233,7 @@ def production_memory() -> tuple[str, dict[str, str]]:
     return limit.lower(), environment
 
 
-def _openobserve(network: Network) -> DockerContainer:
+def _openobserve(network: Network, env_file: Path) -> DockerContainer:
     memory_limit, memory_environment = production_memory()
     container = DockerContainer(compose_image("openobserve"))
     for name, value in memory_environment.items():
@@ -219,9 +242,10 @@ def _openobserve(network: Network) -> DockerContainer:
         container.with_env("ZO_LOCAL_MODE", "true")
         .with_env("ZO_DATA_DIR", "/data")
         .with_env("ZO_ROOT_USER_EMAIL", CREDENTIALS.email)
-        .with_env("ZO_ROOT_USER_PASSWORD", CREDENTIALS.password)
         .with_env("ZO_TELEMETRY", "false")
         .with_env("ZO_SKIP_SSRF_CHECKS", "true")
+        .with_command(_compose_service("openobserve")["command"])
+        .with_volume_mapping(str(env_file), "/run/secrets/openobserve_env", "ro")
         .with_exposed_ports(O2_PORT)
         .with_network(network)
         .with_network_aliases("openobserve")
@@ -272,12 +296,11 @@ class _filled_volume:  # noqa: N801 (usado como gerenciador de contexto, como as
                 client.volumes.get(name).remove(force=True)
 
 
-def _collector(network: Network, volumes: dict[str, str]) -> DockerContainer:
-    auth = base64.b64encode(f"{CREDENTIALS.email}:{CREDENTIALS.password}".encode()).decode()
+def _collector(network: Network, volumes: dict[str, str], basic_auth: Path) -> DockerContainer:
     container = (
         DockerContainer(compose_image("otel-collector"))
         .with_command(["--config=/etc/otelcol/config.yaml"])
-        .with_env("OPENOBSERVE_BASIC_AUTH", auth)
+        .with_volume_mapping(str(basic_auth), "/run/secrets/openobserve_basic_auth", "ro")
         .with_env("GS_HOSTMETRICS_INTERVAL", "5s")
         .with_volume_mapping(str(COLLECTOR_CONFIG), "/etc/otelcol/config.yaml", "ro")
         .with_network(network)

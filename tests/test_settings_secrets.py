@@ -250,7 +250,9 @@ def test_gs_admin_sem_segredo_pedido_pelo_comando_sai_com_uma_linha(tmp_path: Pa
 
     assert result.returncode == 3
     assert result.stdout == ""
-    assert result.stderr.splitlines() == ["gs-admin: GS_USER_HASH_SECRET é obrigatório em produção"]
+    assert result.stderr.splitlines() == [
+        "gs-admin: GS_USER_HASH_SECRET_FILE é obrigatório em produção"
+    ]
 
 
 def test_producao_le_a_senha_do_banco_do_arquivo_sem_a_quebra_de_linha(tmp_path: Path) -> None:
@@ -523,3 +525,55 @@ def test_varios_campos_invalidos_saem_juntos(tmp_path: Path, lease: str) -> None
     assert "cursor_secret:too_short" in output
     assert "user_hash_secret:too_short" in output
     assert "worker_lease_s:finite_number" in output
+
+
+# Chaves HMAC lidas da variável ou do arquivo montado (#442, 34a; D3): no `docker inspect`, só o
+# caminho aparece.
+HMAC_KEYS = [("cursor", "cursor_signing_key"), ("user_hash", "user_hash_key")]
+
+
+@pytest.mark.parametrize(("name", "method"), HMAC_KEYS)
+def test_settings_le_o_segredo_do_arquivo_igual_ao_da_variavel(
+    tmp_path: Path, name: str, method: str
+) -> None:
+    by_variable = _production(tmp_path)
+    by_file = _production(
+        tmp_path,
+        **{f"{name}_secret": None, f"{name}_secret_file": _secret_file(tmp_path, name, SECRET)},
+    )
+
+    assert getattr(by_file, method)() == getattr(by_variable, method)() == SECRET.encode()
+
+
+@pytest.mark.parametrize(("name", "method"), HMAC_KEYS)
+def test_variavel_e_arquivo_juntos_sao_recusados(tmp_path: Path, name: str, method: str) -> None:
+    with pytest.raises(ValidationError) as caught:
+        _production(tmp_path, **{f"{name}_secret_file": _secret_file(tmp_path, name, SECRET)})
+
+    assert describe_config_error(caught.value) == [f"{name}_secret_file:value_error"]
+    assert SECRET not in str(caught.value)
+
+
+@pytest.mark.parametrize(("name", "method"), HMAC_KEYS)
+def test_producao_sem_nenhum_dos_dois_falha_nomeando_o_arquivo(
+    tmp_path: Path, name: str, method: str
+) -> None:
+    settings = _production(tmp_path, **{f"{name}_secret": None})
+
+    with pytest.raises(MissingSecretError, match=f"GS_{name.upper()}_SECRET_FILE"):
+        getattr(settings, method)()
+
+
+@pytest.mark.parametrize(("name", "method"), HMAC_KEYS)
+def test_arquivo_da_chave_hmac_curto_nao_sobe(tmp_path: Path, name: str, method: str) -> None:
+    settings = _production(
+        tmp_path,
+        **{
+            f"{name}_secret": None,
+            f"{name}_secret_file": _secret_file(tmp_path, name, SHORT_CANARY),
+        },
+    )
+
+    with pytest.raises(WebConfigError, match=f"GS_{name.upper()}_SECRET_FILE") as caught:
+        getattr(settings, method)()
+    assert SHORT_CANARY not in str(caught.value)

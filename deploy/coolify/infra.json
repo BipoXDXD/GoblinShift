@@ -89,14 +89,17 @@
       "command": [
         "--config=/etc/otelcol/config.yaml"
       ],
+      "secrets": [
+        {
+          "source": "openobserve_basic_auth",
+          "target": "/run/secrets/openobserve_basic_auth"
+        }
+      ],
       "depends_on": {
         "openobserve": {
           "condition": "service_started",
           "required": true
         }
-      },
-      "environment": {
-        "OPENOBSERVE_BASIC_AUTH": "${OPENOBSERVE_BASIC_AUTH:?defina em .env (scripts/dev-secrets.sh)}"
       },
       "image": "otel/opentelemetry-collector-contrib:0.162.0@sha256:39923a8e431bd1f57be82411999d389fcfe40857492e4365456d97a4c1f74be6",
       "logging": {
@@ -179,10 +182,20 @@
         "ZO_MEMORY_CACHE_DATAFUSION_MAX_SIZE": "128",
         "ZO_MEMORY_CACHE_MAX_SIZE": "64",
         "ZO_MEM_TABLE_MAX_SIZE": "64",
-        "ZO_ROOT_USER_EMAIL": "${OPENOBSERVE_ROOT_EMAIL:?defina em .env (scripts/dev-secrets.sh)}",
-        "ZO_ROOT_USER_PASSWORD": "${OPENOBSERVE_ROOT_PASSWORD:?defina em .env (scripts/dev-secrets.sh)}"
+        "ZO_ROOT_USER_EMAIL": "${OPENOBSERVE_ROOT_EMAIL:?defina em .env (scripts/dev-secrets.sh)}"
       },
       "image": "openobserve/openobserve:v1.1.2@sha256:4a154849432f75c4fb024de32fe34163c02406c905dab22bf8d213d2e3386392",
+      "command": [
+        "/openobserve",
+        "-c",
+        "/run/secrets/openobserve_env"
+      ],
+      "secrets": [
+        {
+          "source": "openobserve_env",
+          "target": "/run/secrets/openobserve_env"
+        }
+      ],
       "logging": {
         "driver": "local",
         "options": {
@@ -233,6 +246,14 @@
     "db_password": {
       "file": "/srv/goblinshift/secrets/db_password",
       "name": "goblinshift_db_password"
+    },
+    "openobserve_basic_auth": {
+      "file": "/srv/goblinshift/secrets/openobserve_basic_auth",
+      "name": "goblinshift_openobserve_basic_auth"
+    },
+    "openobserve_env": {
+      "file": "/srv/goblinshift/secrets/openobserve_env",
+      "name": "goblinshift_openobserve_env"
     }
   }
 }

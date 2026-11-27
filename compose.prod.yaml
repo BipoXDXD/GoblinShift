@@ -36,8 +36,9 @@ services:
   api:
     environment:
       <<: *executor-env
-      GS_CURSOR_SECRET: ${GS_CURSOR_SECRET:?segredo obrigatório, variável privada do recurso no Coolify}
-      GS_USER_HASH_SECRET: ${GS_USER_HASH_SECRET:?segredo obrigatório, variável privada do recurso no Coolify}
+      # Chaves HMAC por arquivo (#442, 34a): no `docker inspect` só aparece o caminho.
+      GS_CURSOR_SECRET_FILE: /run/secrets/cursor_secret
+      GS_USER_HASH_SECRET_FILE: /run/secrets/user_hash_secret
       # Login web (fatia 6, 3.6), só na API. Sem uma destas, o Compose recusa o arquivo antes de
       # qualquer comando, e o deploy para antes do `migrate`, sem mexer no banco.
       GS_PUBLIC_ORIGIN: ${GS_PUBLIC_ORIGIN:?variável do recurso no Coolify (https://goblinshift.dev)}
@@ -51,6 +52,8 @@ services:
       GS_LOGIN_COOKIE_SECRET_FILE: /run/secrets/login_cookie_secret
     # Somados ao db_password da base (o Compose funde as listas pelo nome).
     secrets:
+      - cursor_secret
+      - user_hash_secret
       - google_client_secret
       - github_client_secret
       - csrf_secret
@@ -61,13 +64,15 @@ services:
     environment:
       <<: *executor-env
       GS_WORK_ROOT: /var/lib/goblinshift/exec-work
-      GS_USER_HASH_SECRET: ${GS_USER_HASH_SECRET:?segredo obrigatório, variável privada do recurso no Coolify}
+      GS_USER_HASH_SECRET_FILE: /run/secrets/user_hash_secret
+    secrets: [user_hash_secret]
   maintenance:
     <<: *executor-client
     environment:
       <<: *executor-env
       GS_WORK_ROOT: /var/lib/goblinshift/exec-work
-      GS_USER_HASH_SECRET: ${GS_USER_HASH_SECRET:?segredo obrigatório, variável privada do recurso no Coolify}
+      GS_USER_HASH_SECRET_FILE: /run/secrets/user_hash_secret
+    secrets: [user_hash_secret]
   # Ocupação dos filesystems de tamanho fixo para o alerta de disco acima de 85% (3.7 e
   # docker/otel-collector/config.yaml). Só leitura: o Collector só precisa do statfs.
   otel-collector:
@@ -103,6 +108,10 @@ services:
 # operador: a publicação pelo Coolify não as cria, e o deploy/app-secrets.sh só é chamado pelo
 # deploy/release.sh, morto (README, "Segredos do login").
 secrets:
+  cursor_secret:
+    file: ${GS_SECRETS_DIR:?diretório dos segredos no host}/cursor_secret
+  user_hash_secret:
+    file: ${GS_SECRETS_DIR:?diretório dos segredos no host}/user_hash_secret
   google_client_secret:
     file: ${GS_SECRETS_DIR:?diretório dos segredos no host}/google_client_secret
   github_client_secret:
