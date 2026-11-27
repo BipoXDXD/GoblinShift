@@ -24,13 +24,18 @@ from tests.security.authz_matrix import entries
 from tests.security.path_params import fill_path_params
 
 API_CSP = "default-src 'none'; frame-ancestors 'none'"
+# Nega tudo o que a aplicação não usa (#442, 31i): a mesma nos snippets do Nginx (test_nginx_spa).
+PERMISSIONS_POLICY = (
+    "camera=(), microphone=(), geolocation=(), payment=(), usb=(), serial=(), bluetooth=(), "
+    "display-capture=(), browsing-topics=()"
+)
 HSTS = "max-age=63072000; includeSubDomains"
 COMMON = {
     "x-content-type-options": "nosniff",
     "referrer-policy": "strict-origin-when-cross-origin",
     "cross-origin-opener-policy": "same-origin",
     "cross-origin-resource-policy": "same-origin",
-    "permissions-policy": "camera=(), microphone=(), geolocation=()",
+    "permissions-policy": PERMISSIONS_POLICY,
     "cache-control": "no-store",
 }
 STREAM_CHUNKS = [b"primeiro ", b"segundo ", b"terceiro"]
@@ -93,6 +98,12 @@ def test_resposta_json_recebe_os_cabecalhos_e_a_csp_da_api(bare_client: TestClie
     for name, value in {**COMMON, "content-security-policy": API_CSP}.items():
         assert response.headers.get_list(name) == [value], name
     assert response.json() == {"ok": True}
+
+
+def test_resposta_da_api_traz_a_permissions_policy_completa(bare_client: TestClient) -> None:
+    response = bare_client.get("/json")
+
+    assert response.headers.get_list("permissions-policy") == [PERMISSIONS_POLICY]
 
 
 def test_cabecalho_ja_definido_pela_rota_nao_e_sobrescrito_nem_duplicado(
