@@ -330,6 +330,19 @@ def test_last_seen_respeita_o_teto_absoluto(factory: sessionmaker[Session]) -> N
     assert row["idle_expires_at"] == issued.absolute_expires_at
 
 
+def test_resolve_session_nao_grava_o_uso(factory: sessionmaker[Session]) -> None:
+    # Resolver só identifica: quem registra o uso é `authenticate_session` ou a dependência da
+    # API, depois do CSRF. Senão a mutação recusada estenderia a inatividade.
+    issued = _start(factory, new_user(factory))
+
+    resolved = _resolve(factory, issued.token, NOW + timedelta(seconds=61))
+
+    assert isinstance(resolved, Principal)
+    row = _row(factory, issued.session_id)
+    assert row["last_seen_at"] == NOW
+    assert row["idle_expires_at"] == NOW + timedelta(minutes=30)
+
+
 # --- Conta ------------------------------------------------------------------------------------
 
 
