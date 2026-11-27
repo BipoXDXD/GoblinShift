@@ -13,6 +13,12 @@ REPO_URL="${REPO_URL:-https://github.com/BipoXDXD/GoblinShift.git}"
 ROOT=/srv/goblinshift
 EDGE=/srv/edge
 APP_USER=goblinshift
+# Chave primária "Docker Release (CE deb)", publicada na documentação oficial de instalação do
+# Docker Engine no Ubuntu (docs.docker.com/engine/install/ubuntu); conferida em 27/11/2026.
+DOCKER_KEY_FINGERPRINT=9DC858229FC7DD38854AE2D88D81803C0EBFCD88
+here="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+# shellcheck source=deploy/apt-key.sh
+source "$here/apt-key.sh"
 [[ $EUID -eq 0 ]] || { echo "rode com sudo" >&2; exit 1; }
 note() { printf '==> %s\n' "$*"; }
 
@@ -24,8 +30,11 @@ apt-get install -yq ca-certificates curl git ufw unattended-upgrades openssl
 note "Docker Engine"
 if ! command -v docker >/dev/null; then
   install -m 0755 -d /etc/apt/keyrings
-  curl -fsSL https://download.docker.com/linux/ubuntu/gpg -o /etc/apt/keyrings/docker.asc
-  chmod a+r /etc/apt/keyrings/docker.asc
+  docker_key=$(mktemp)
+  curl -fsSL --connect-timeout 10 --max-time 60 --retry 3 https://download.docker.com/linux/ubuntu/gpg -o "$docker_key"
+  verify_apt_key "$docker_key" "$DOCKER_KEY_FINGERPRINT"
+  install -m 0644 "$docker_key" /etc/apt/keyrings/docker.asc
+  rm -f "$docker_key"
   # /etc/os-release só existe na VPS.
   # shellcheck disable=SC1091
   cat > /etc/apt/sources.list.d/docker.sources <<EOF
@@ -85,7 +94,7 @@ bash "$(dirname "${BASH_SOURCE[0]}")/filesystems.sh"
 
 note "Segredos do GoblinShift (fora do repositório)"
 install -d -m 700 -o "$APP_USER" -g "$APP_USER" "$ROOT/secrets"
-bash "$(dirname "${BASH_SOURCE[0]}")/provision-secrets.sh" "$ROOT/secrets"
+bash "$here/provision-secrets.sh" "$ROOT/secrets"
 chown "$APP_USER:$APP_USER" "$ROOT/secrets/db_password" "$ROOT/secrets/app.env"
 
 note "Código"
