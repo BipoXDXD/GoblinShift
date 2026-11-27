@@ -215,7 +215,7 @@ Nada de credencial ou URL de destino na linha de comando: tudo vem de arquivos n
 
 Esse `app.env` só serve a este script, no host. Os contêineres não leem segredo de variável de ambiente (#442), que aparece no `docker inspect`. Eles usam arquivos em `/srv/goblinshift/secrets`, montados como segredos do Compose:
 
-- `openobserve_env`: dotenv com `ZO_ROOT_USER_PASSWORD=<senha>`, lido pelo `/openobserve -c`. A imagem não lê `*_FILE`. O OpenObserve só usa a senha enquanto o root não existe no volume: para recriar o root num `/data` novo (restauração), basta o arquivo estar lá na primeira subida.
+- `openobserve_env`: dotenv com `ZO_ROOT_USER_PASSWORD='<senha>'`, lido pelo `/openobserve -c`. As aspas simples são obrigatórias: sem elas o `-c` expande `$VAR` e cria o root com outra senha; dentro delas não há escape, então a senha não pode ter `'`. A imagem não lê `*_FILE`. O OpenObserve só usa a senha enquanto o root não existe no volume: para recriar o root num `/data` novo (restauração), basta o arquivo estar lá na primeira subida.
 - `openobserve_basic_auth`: `base64("<e-mail>:<senha>")` sem quebra de linha final, que o Collector põe no cabeçalho `Authorization` do export. Grave com `printf '%s'`.
 - `otlp_token`: token que o Collector exige no OTLP da aplicação (`openssl rand -hex 32`), montado no Collector e na API, no worker, na manutenção e na migração.
 

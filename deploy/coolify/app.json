@@ -401,13 +401,7 @@
         "700",
         "/var/lib/goblinshift/storage/objects"
       ],
-      "environment": {
-        "FORWARDED_ALLOW_IPS": "172.30.0.0/24,172.31.0.2",
-        "GS_DB_HOST": "postgres",
-        "GS_ENVIRONMENT": "production",
-        "OTEL_EXPORTER_OTLP_ENDPOINT": "http://otel-collector:4318",
-        "OTEL_SERVICE_NAME": "goblinshift-api"
-      },
+      "environment": {},
       "image": "${GS_APP_IMAGE:-ghcr.io/bipoxdxd/goblinshift:sha-03f15c824029@sha256:54e9c5f01c78fa7e005994a4a3266b0180481c6ed018da289e7648abfdddd2cc}",
       "logging": {
         "driver": "local",

@@ -24,9 +24,14 @@ if [[ ! -f .secrets/openobserve_env ]]; then
     # OpenObserve exige maiúscula, minúscula, dígito e caractere especial.
     password="$(openssl rand -base64 30 | tr -dc 'A-Za-z0-9' | head -c 28)Aa1_"
   fi
-  printf 'ZO_ROOT_USER_PASSWORD=%s\n' "$password" > .secrets/openobserve_env
+  # Aspas simples: o `-c` do OpenObserve expande `$VAR` no dotenv, e dentro delas não há escape.
+  if [[ "$password" == *"'"* ]]; then
+    echo "A senha do OpenObserve não pode ter aspas simples (dotenv do -c)." >&2
+    exit 1
+  fi
+  printf "ZO_ROOT_USER_PASSWORD='%s'\n" "$password" > .secrets/openobserve_env
 fi
-password="$(sed -n 's/^ZO_ROOT_USER_PASSWORD=//p' .secrets/openobserve_env)"
+password="$(sed -n "s/^ZO_ROOT_USER_PASSWORD='\(.*\)'\$/\1/p" .secrets/openobserve_env)"
 
 # Sem quebra de linha final: o Collector usa o conteúdo cru no cabeçalho Authorization.
 if [[ ! -f .secrets/openobserve_basic_auth ]]; then

@@ -48,7 +48,10 @@ BUSYBOX_IMAGE = (
 )
 O2_PORT = 5080
 OTLP_TOKEN = secrets.token_hex(32)
-CREDENTIALS = Credentials(email="root@goblinshift.test", password="Teste#" + secrets.token_hex(8))
+# `$HOME` na senha: o `-c` do OpenObserve expande variáveis no dotenv sem aspas simples.
+CREDENTIALS = Credentials(
+    email="root@goblinshift.test", password="Teste#$HOME_" + secrets.token_hex(8)
+)
 READY_TIMEOUT_S = 90.0
 POLL_S = 0.5
 HTTP_OK = 200
@@ -185,7 +188,7 @@ def write_secret_files(directory: Path) -> dict[str, Path]:
     """
     auth = base64.b64encode(f"{CREDENTIALS.email}:{CREDENTIALS.password}".encode()).decode()
     files = {
-        "openobserve_env": f"ZO_ROOT_USER_PASSWORD={CREDENTIALS.password}\n",
+        "openobserve_env": f"ZO_ROOT_USER_PASSWORD='{CREDENTIALS.password}'\n",
         "openobserve_basic_auth": auth,
         "otlp_token": f"{OTLP_TOKEN}\n",
     }
