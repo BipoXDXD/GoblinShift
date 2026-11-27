@@ -27,7 +27,7 @@ from tests.api.simulated_session import SimulatedSessions
 from tests.api.support import assert_problem
 from tests.identity.support import HASHER, new_key, new_user, purge_account
 from tests.runs.finished_support import RecordedFinished
-from tests.runs.test_maintenance_identity import cycles_until_purged
+from tests.runs.maintenance_support import cycles_until_purged
 from tests.runs.worker_support import local_runner, queue_run
 
 pytestmark = pytest.mark.integration

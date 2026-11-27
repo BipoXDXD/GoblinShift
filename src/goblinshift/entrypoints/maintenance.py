@@ -215,9 +215,9 @@ class AccountJobs:
     contagens do passo que falhou ficam fora do evento. Na purga, a falha de uma conta conta em
     `accounts_purge_failed` e não impede as seguintes: cada ciclo marca a tentativa nas contas
     que pega, e a fila segue pela tentativa mais antiga (#442). O cancelamento que falha conta em
-    `accounts_cancel_failed`, e a conta volta no ciclo seguinte. Perda de conexão derruba o ciclo
-    inteiro, como antes: com o banco fora, cada passo seguinte só esperaria o `connect_timeout` de
-    novo.
+    `accounts_cancel_failed`, e a conta volta num ciclo seguinte, quando chegar a vez dela na fila.
+    Perda de conexão derruba o ciclo inteiro, como antes: com o banco fora, cada passo seguinte só
+    esperaria o `connect_timeout` de novo.
     """
 
     def __init__(
@@ -344,7 +344,7 @@ class AccountJobs:
 
         Repetir a cada ciclo é seguro: o cancelamento é idempotente e, sem Run não terminal, não
         faz nada. A purga segue quando a Run terminar. A falha fica no log e na contagem, e a conta
-        volta no ciclo seguinte.
+        volta num ciclo seguinte, quando chegar a vez dela na fila.
         """
         try:
             self._cancel_active_run(owner_id)

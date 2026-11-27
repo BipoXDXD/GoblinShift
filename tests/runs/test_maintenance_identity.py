@@ -16,7 +16,7 @@ from pathlib import Path
 import psycopg
 import pytest
 from psycopg import errors as psycopg_errors
-from sqlalchemy import Table, func, insert, select
+from sqlalchemy import func, insert, select
 from sqlalchemy.exc import DBAPIError
 from sqlalchemy.orm import Session, sessionmaker
 
@@ -28,16 +28,14 @@ from goblinshift.entrypoints.maintenance import (
 from goblinshift.entrypoints.shutdown import ShutdownFlag
 from goblinshift.files import purge as files_purge
 from goblinshift.files.storage import FileStorage
-from goblinshift.files.tables import artifact, object_use, stored_object, transfer_slot, upload
+from goblinshift.files.tables import object_use, stored_object
 from goblinshift.identity import IssuedKey, Scope, issue_key, request_account_deletion
 from goblinshift.identity import purge as identity_purge
 from goblinshift.identity.rate_limit import RequestClass, count_request
 from goblinshift.identity.tables import (
     api_key,
-    app_user,
     audit_event,
     login_state,
-    request_window,
     web_session,
 )
 from goblinshift.platform.db import unit_of_work
@@ -46,40 +44,15 @@ from goblinshift.runs import purge as runs_purge
 from goblinshift.runs.lifecycle import Status
 from goblinshift.runs.maintenance import Maintenance
 from goblinshift.runs.purge import cancel_active_run
-from goblinshift.runs.tables import attempt, idempotency_record, run, run_input, run_output
+from goblinshift.runs.tables import attempt, run
 from tests.files.support import create_intent
+from tests.runs.maintenance_support import MAX_CYCLES, count_owned, cycles_until_purged
 from tests.runs.worker_support import claim, coordinator, create_user, local_runner, queue_run
 
 pytestmark = pytest.mark.integration
 
-MAX_CYCLES = 10
 # `statement_timeout`: o banco respondeu, então só o passo que o levou falha.
 QUERY_CANCELED = "57014"
-
-OWNED_TABLES: dict[str, tuple[Table, str]] = {
-    "app_user": (app_user, "id"),
-    "api_key": (api_key, "owner_id"),
-    "web_session": (web_session, "user_id"),
-    "run": (run, "owner_id"),
-    "run_input": (run_input, "owner_id"),
-    "run_output": (run_output, "owner_id"),
-    "idempotency_record": (idempotency_record, "owner_id"),
-    "upload": (upload, "owner_id"),
-    "artifact": (artifact, "owner_id"),
-    "stored_object": (stored_object, "owner_id"),
-    "transfer_slot": (transfer_slot, "owner_id"),
-    "request_window": (request_window, "owner_id"),
-}
-
-
-def count_owned(factory: sessionmaker[Session], owner_id: uuid.UUID) -> dict[str, int]:
-    with factory() as session:
-        return {
-            name: session.execute(
-                select(func.count()).select_from(table).where(table.c[column] == owner_id)
-            ).scalar_one()
-            for name, (table, column) in OWNED_TABLES.items()
-        }
 
 
 def full_account(
@@ -139,20 +112,6 @@ def real_canceller(
 def keep_run(_owner_id: uuid.UUID) -> None:
     """Cancelador que não cancela: para os testes em que a Run da conta não importa ou precisa
     seguir ativa."""
-
-
-def cycles_until_purged(
-    factory: sessionmaker[Session],
-    maintenance: Maintenance,
-    jobs: AccountJobs,
-    owner_id: uuid.UUID,
-) -> int:
-    for cycle in range(1, MAX_CYCLES + 1):
-        maintenance.run_cycle()
-        jobs.run_cycle()
-        if count_owned(factory, owner_id)["app_user"] == 0:
-            return cycle
-    raise AssertionError("a conta não foi purgada")
 
 
 @pytest.fixture
