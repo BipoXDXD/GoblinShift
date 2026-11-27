@@ -35,6 +35,7 @@ import { Button } from "../components/ui/Button";
 import { Card } from "../components/ui/Card";
 import { ConfirmDialog } from "../components/ui/ConfirmDialog";
 import { formatBytes } from "../format";
+import type { Preset } from "../presets/api";
 import type { RecipeForm, RecipeModule } from "../recipes/registry";
 import type { RecipeDraft, RecipeId, RecipeInput } from "../recipes/types";
 import { createRun } from "../runs/commands";
@@ -43,6 +44,7 @@ import { useUploadBatch, type UploadEntry, type UploadServices } from "../upload
 import { orderEntries, runInputs, uploadAnnouncement, type RunInputs } from "./inputs";
 import { DeletionFailures } from "./DeletionFailures";
 import { SavePreset } from "./SavePreset";
+import { UpdatePreset } from "./UpdatePreset";
 import { UploadEntryView } from "./UploadEntryView";
 
 const FILES_FIELD_ID = "bancada-arquivos";
@@ -60,6 +62,8 @@ interface WorkbenchProps {
   readonly uploadServices: UploadServices;
   /** De onde vieram os parâmetros (preset), logo abaixo do título; `null` sem aviso. */
   readonly notice?: ReactNode;
+  /** O preset cujos parâmetros abriram o formulário, que "Atualizar preset" substitui. */
+  readonly sourcePreset?: Preset | null;
 }
 
 interface Submission {
@@ -77,6 +81,7 @@ export function Workbench({
   form,
   uploadServices,
   notice = null,
+  sourcePreset = null,
 }: WorkbenchProps): ReactElement {
   const client = useApiClient();
   const navigate = useNavigate();
@@ -245,7 +250,8 @@ export function Workbench({
                 })}
               </div>
             </Card>
-            {/* Secundária antes da primária: Executar fecha o conteúdo e a ordem do Tab. */}
+            {/* Secundárias antes da primária: Executar fecha o conteúdo e a ordem do Tab. */}
+            {sourcePreset !== null && <UpdatePreset draft={draft} preset={sourcePreset} />}
             <SavePreset draft={draft} />
             {mutation.error !== null && serverIssues === null && (
               <FailureNotice error={mutation.error} />

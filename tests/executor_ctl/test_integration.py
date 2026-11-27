@@ -300,6 +300,24 @@ def test_remove_com_container_rodando_da_409_e_nao_apaga_nada(ctl: Ctl) -> None:
     assert len(containers_of(attempt_id)) == 1
 
 
+def test_nome_tomado_por_conteiner_sem_label_da_409_e_fica_intacto(ctl: Ctl) -> None:
+    # Outro projeto do host criou um container com o nome da tentativa, sem a label dela.
+    attempt_id = uuid.uuid4()
+    name = container_name(attempt_id)
+    docker("create", "--name", name, "--network=none", ctl.image)
+    try:
+        responses = [
+            ctl.call("GET", attempt_id),
+            ctl.call("POST", attempt_id, "/stop", {"grace_s": 0}),
+            ctl.call("DELETE", attempt_id),
+        ]
+
+        assert [(r.status, r.body["error"]) for r in responses] == [(409, "foreign_container")] * 3
+        assert docker("inspect", "--format", "{{.State.Status}}", name) == "created"
+    finally:
+        docker("rm", "--force", name)
+
+
 def test_imagem_fora_da_allowlist_da_403_sem_criar_container(ctl: Ctl) -> None:
     attempt_id = ctl.prepare("write")
     other = ctl.image.split("@")[0] + "@sha256:" + "0" * 64

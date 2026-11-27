@@ -272,6 +272,19 @@ class ExecutorStopped:
     generation: int
 
 
+@dataclass(frozen=True)
+class ExecutorYielded:
+    """O worker parou o executor no SIGTERM antes do prazo: volta à fila sem gastar tentativa."""
+
+    generation: int
+    now: datetime
+    jitter: timedelta
+
+    def __post_init__(self) -> None:
+        _require_timezone(self.now)
+        _require_retry_jitter(self.jitter)
+
+
 type Event = (
     Claim
     | CancelRequested
@@ -284,6 +297,7 @@ type Event = (
     | DeterministicFailure
     | TransientFailure
     | ExecutorStopped
+    | ExecutorYielded
 )
 
 
@@ -294,6 +308,11 @@ type Event = (
 class StartAttempt:
     generation: int
     number: int
+
+
+@dataclass(frozen=True)
+class YieldAttempt:
+    generation: int
 
 
 @dataclass(frozen=True)
@@ -323,6 +342,7 @@ class ReleaseReservations:
 
 type Effect = (
     StartAttempt
+    | YieldAttempt
     | EndAttempt
     | RequestStop
     | PublishOutputs
@@ -379,6 +399,8 @@ def decide_transition(run: RunState, event: Event) -> Transition | Refused:
             return _decide_transient_failure(run, event)
         case ExecutorStopped():
             return _decide_executor_stopped(run, event.generation)
+        case ExecutorYielded():
+            return _decide_executor_yielded(run, event)
         case _:
             assert_never(event)
 
@@ -544,6 +566,23 @@ def _decide_executor_stopped(run: RunState, generation: int) -> Transition | Ref
     status = Status.CANCELED if reason is ErrorCode.CANCELED else Status.FAILED
     stopped = replace(run, status=status, executor_started=False, error_code=reason)
     return Transition(stopped, _executor_finished_effects(run.generation))
+
+
+def _decide_executor_yielded(run: RunState, event: ExecutorYielded) -> Transition | Refused:
+    refusal = _refuse_unless_working(run, event.generation)
+    if refusal is not None:
+        return refusal
+    if _deadline_passed(run, event.now):
+        return _request_stop(run, ErrorCode.DEADLINE_EXCEEDED)
+    if run.executor_started:
+        yielded = replace(run, physical_attempts=run.physical_attempts - 1)
+        return _with_effects_first(
+            _wait_for_retry(yielded, event.now, event.jitter),
+            YieldAttempt(run.generation),
+        )
+    if run.physical_attempts >= MAX_ATTEMPTS:
+        return _request_stop(run, ErrorCode.EXECUTOR_UNAVAILABLE)
+    return _wait_for_retry(run, event.now, event.jitter)
 
 
 def _refuse_unless_working(run: RunState, generation: int) -> Refused | None:

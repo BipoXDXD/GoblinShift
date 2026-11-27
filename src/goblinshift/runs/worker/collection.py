@@ -35,7 +35,7 @@ import os
 import stat
 import unicodedata
 from collections.abc import Callable, Mapping
-from dataclasses import asdict, dataclass, field
+from dataclasses import asdict, dataclass, field, replace
 from pathlib import Path, PurePosixPath
 from typing import BinaryIO
 
@@ -63,6 +63,7 @@ from goblinshift.processing.recipe import (
     OutputGroup,
 )
 from goblinshift.processing.regular_file import NotRegularFileError, open_regular
+from goblinshift.runs.comparison import ImageComparison, ItemComparison, comparison_from_report
 from goblinshift.runs.formula_cells import FormulaCells
 from goblinshift.runs.lifecycle import ErrorCode, PublishOutcome
 from goblinshift.runs.worker.package_check import (
@@ -158,6 +159,8 @@ class ReportItem:
     notices: tuple[ItemNoticeCode, ...] = ()
     # Contagem por coluna de CSV_FORMULA_CELLS, já com os tetos; `None` sem o aviso ou sem colunas.
     formula_cells: FormulaCells | None = None
+    # Antes e depois do item, só em item `ok`; `None` quando a receita não dá ou foge da forma.
+    comparison: ItemComparison | None = None
 
     @property
     def has_warnings(self) -> bool:
@@ -257,13 +260,14 @@ def collect_outputs(
             f"relatório com {report_found.size} bytes; o teto é {limits.report_max_bytes}",
         )
     report_data = _read_no_follow(report_found, limits.report_max_bytes)
-    report = parse_report(report_data, input_count)
+    report = parse_report(report_data, input_count, recipe_id=recipe_id)
     cited = [name for item in report.items for name in item.outputs]
     cited_previews = [preview for item in report.items for preview in item.previews]
     all_cited = cited + [path for path, _of in cited_previews]
     if len(set(all_cited)) != len(all_cited) or set(all_cited) != set(files):
         raise CollectionError("os arquivos de out/ não batem com as saídas citadas no relatório")
     outputs = tuple(_digested(files[name], heartbeat) for name in cited)
+    report = _with_output_sizes(report, {output.name: output for output in outputs})
     previews = tuple(
         CollectedPreview(_checked_preview(files[path]), of) for path, of in cited_previews
     )
@@ -278,6 +282,22 @@ def collect_outputs(
     except PackageError as error:
         raise CollectionError(str(error)) from error
     return Collected(outputs, report_file, report, manifest_file, package_file, previews)
+
+
+def _with_output_sizes(report: ParsedReport, outputs: Mapping[str, OutputFile]) -> ParsedReport:
+    """Completa a comparação de imagem com o tamanho da primeira saída do item (`images/`).
+
+    O nome, e não a posição, liga a saída ao item: a lista de saídas é achatada entre itens. O
+    tamanho já foi medido pelo worker na leitura; as miniaturas não entram.
+    """
+    return replace(report, items=tuple(_with_output_size(item, outputs) for item in report.items))
+
+
+def _with_output_size(item: ReportItem, outputs: Mapping[str, OutputFile]) -> ReportItem:
+    if not isinstance(item.comparison, ImageComparison) or not item.outputs:
+        return item
+    size = outputs[item.outputs[0]].size
+    return replace(item, comparison=replace(item.comparison, bytes_after=size))
 
 
 def _verified_package(
@@ -395,8 +415,11 @@ def _package_files(
     return manifest, package
 
 
-def parse_report(data: bytes, input_count: int) -> ParsedReport:
-    """Confere o `report.json` contra o schema 1 documentado no pacote do executor."""
+def parse_report(data: bytes, input_count: int, *, recipe_id: str) -> ParsedReport:
+    """Confere o `report.json` contra o schema 1 documentado no pacote do executor.
+
+    `recipe_id` é o da Run: diz como ler `counts` e `details` de cada item para a comparação.
+    """
     try:
         raw = parse_strict_json(data)
     except ValueError as error:
@@ -404,7 +427,7 @@ def parse_report(data: bytes, input_count: int) -> ParsedReport:
     document = _mapping(raw, "relatório")
     if document.get("schema_version") != REPORT_SCHEMA_VERSION:
         raise CollectionError("relatório com schema_version desconhecida")
-    items = tuple(_item(raw_item) for raw_item in _list(document.get("items"), "items"))
+    items = tuple(_item(raw_item, recipe_id) for raw_item in _list(document.get("items"), "items"))
     if [item.position for item in items] != list(range(input_count)):
         raise CollectionError(f"relatório deve ter as posições 0..{input_count - 1}, na ordem")
     _require_duplicates_of_earlier_outputs(items)
@@ -573,7 +596,7 @@ def _read_no_follow(found: _Found, max_bytes: int) -> bytes:
     return data
 
 
-def _item(raw: object) -> ReportItem:
+def _item(raw: object, recipe_id: str) -> ReportItem:
     item = _mapping(raw, "item")
     position = _int(item.get("position"), "item.position")
     status = item.get("status")
@@ -595,6 +618,7 @@ def _item(raw: object) -> ReportItem:
             previews=previews,
             notices=notices,
             formula_cells=_formula_cells(raw_warnings),
+            comparison=_comparison(recipe_id, counts, item.get("details", {})),
         )
     if status == _ITEM_REJECTED:
         return ReportItem(position, False, (), _rejection_code(item.get("code")))
@@ -603,6 +627,15 @@ def _item(raw: object) -> ReportItem:
         duplicate_of = _int(item.get("duplicate_of"), "item.duplicate_of")
         return ReportItem(position, True, (), None, duplicate_of=duplicate_of)
     raise CollectionError(f"item com status desconhecido: {status!r}")
+
+
+def _comparison(
+    recipe_id: str, counts: Mapping[str, int], details: object
+) -> ItemComparison | None:
+    """A comparação é exibição: `details` fora da forma vira ausência, não `CollectionError`."""
+    if not isinstance(details, dict):
+        return None
+    return comparison_from_report(recipe_id, counts, details)
 
 
 def _previews(raw: object, outputs: tuple[str, ...]) -> tuple[tuple[str, str], ...]:

@@ -1,4 +1,4 @@
-"""Contrato de prazo do `start` e do `remove`: o worker espera mais que o pior caso do executor-ctl.
+"""Contrato de prazo de `start`, `stop` e `remove`: o worker espera o pior caso do executor-ctl.
 
 O worker não importa `deploy/executor_ctl` (o pacote é do host, fora da imagem do worker), então
 o cliente espelha o prazo do CLI do Docker e quantas chamadas cabem em cada operação que toma o
@@ -14,6 +14,7 @@ O fechamento definitivo é do servidor: tomar o lock com prazo e responder 503 `
 reinstalar o executor-ctl no host e fica para uma frente própria.
 """
 
+import configparser
 import os
 import uuid
 from datetime import timedelta
@@ -21,38 +22,16 @@ from pathlib import Path
 
 import pytest
 
-from executor_ctl.docker_cli import COMMAND_TIMEOUT_S, ContainerStatus, DockerCli, State
-from executor_ctl.service import ExecutorService
+from executor_ctl.docker_cli import COMMAND_TIMEOUT_S, DockerCli
+from executor_ctl.service import AREA_LOCK_WAIT_S, ExecutorService
 from goblinshift.runs.worker import executor_ctl_runner as client
 
 from .conftest import make_config
+from .counting_docker import CountingDocker
+from .installer_copy import installer_copy
 
 ATTEMPT = uuid.UUID("0193a3f0-7b2c-7def-8a01-23456789abcd")
 IMAGE = "ghcr.io/bipoxdxd/goblinshift-executor@sha256:" + "a" * 64
-
-
-class CountingDocker(DockerCli):
-    """Docker sem processo: devolve o estado pedido pelo teste e conta cada chamada ao CLI."""
-
-    def __init__(self, state: State) -> None:
-        super().__init__(binary="docker-que-nao-roda")
-        self.state: State = state
-        self.calls: list[str] = []
-
-    def inspect(self, name: str) -> ContainerStatus:
-        self.calls.append("inspect")
-        if self.state == "absent":
-            return ContainerStatus.absent()
-        exit_code = 0 if self.state == "exited" else None
-        return ContainerStatus(self.state, exit_code, False, None, None)
-
-    def run(self, arguments: list[str]) -> None:
-        self.calls.append("run")
-        self.state = "running"
-
-    def remove(self, name: str) -> None:
-        self.calls.append("rm")
-        self.state = "absent"
 
 
 def service_with(tmp_path: Path, docker: DockerCli) -> ExecutorService:
@@ -64,15 +43,22 @@ def service_with(tmp_path: Path, docker: DockerCli) -> ExecutorService:
 
 def start_calls(tmp_path: Path) -> list[str]:
     """Chamadas do `start` no pior caminho: container ausente, criado agora."""
-    docker = CountingDocker("absent")
+    docker = CountingDocker("absent", ATTEMPT)
     service_with(tmp_path, docker).start(ATTEMPT, IMAGE)
     return docker.calls
 
 
 def remove_calls(tmp_path: Path) -> list[str]:
     """Chamadas do `remove` no pior caminho: container parado, removido agora."""
-    docker = CountingDocker("exited")
+    docker = CountingDocker("exited", ATTEMPT)
     service_with(tmp_path, docker).remove(ATTEMPT)
+    return docker.calls
+
+
+def stop_calls(tmp_path: Path) -> list[str]:
+    """Chamadas do `stop` no pior caminho: container que nunca iniciou, removido no stop."""
+    docker = CountingDocker("created", ATTEMPT)
+    service_with(tmp_path, docker).stop(ATTEMPT, 0)
     return docker.calls
 
 
@@ -105,6 +91,27 @@ def test_quem_segura_o_lock_da_area_cabe_no_espelho_do_cliente(tmp_path: Path) -
     assert longest == client.CTL_LOCK_HOLDER_DOCKER_CALLS
 
 
+@pytest.mark.usefixtures("synthetic_policy_metadata")
+def test_chamadas_do_stop_espelhadas_no_cliente(tmp_path: Path) -> None:
+    calls = stop_calls(tmp_path)
+
+    assert calls == ["inspect", "stop", "inspect", "inspect", "rm"]
+    assert len(calls) == client.CTL_STOP_DOCKER_CALLS
+
+
+@pytest.mark.usefixtures("synthetic_policy_metadata")
+def test_stop_do_cliente_espera_o_pior_caso_do_servico(tmp_path: Path) -> None:
+    # Medido no serviço: as chamadas do próprio stop e a espera do lock da área antes do rm do
+    # container que nunca iniciou (o stop não espera uma operação inteira: lock ocupado devolve
+    # o que leu). A carência soma dos dois lados e fica fora da conta.
+    own = len(stop_calls(tmp_path))
+    server_ceiling = timedelta(seconds=COMMAND_TIMEOUT_S * own + AREA_LOCK_WAIT_S)
+
+    # Literal de propósito, calculado à mão (5 x 30 s + 5 s de lock), pelo mesmo motivo do start.
+    assert server_ceiling == timedelta(seconds=155)
+    assert server_ceiling < client.STOP_BASE_TIMEOUT
+
+
 def lock_wait_calls(tmp_path: Path) -> int:
     """Chamadas da operação mais longa que pode estar à frente no lock, medidas no serviço."""
     return max(len(start_calls(tmp_path / "start")), len(remove_calls(tmp_path / "remove")))
@@ -131,3 +138,28 @@ def test_cliente_espera_mais_que_o_pior_caso_do_remove_no_servidor(tmp_path: Pat
     # Literal de propósito, calculado à mão ((2 + 3) x 30 s), pelo mesmo motivo do start.
     assert server_ceiling == timedelta(seconds=150)
     assert server_ceiling < client.REMOVE_TIMEOUT
+
+
+def test_unit_gerada_tem_killmode_mixed_e_prazo_acima_da_operacao_mais_longa(
+    tmp_path: Path,
+) -> None:
+    """O restart só sinaliza o processo principal, e o systemd espera a operação mais longa.
+
+    Sem `KillMode=mixed`, o SIGTERM vai ao cgroup inteiro e mata o `docker` em voo; com prazo
+    menor que o pior caso, o SIGKILL chega antes de o servidor responder o que já aceitou.
+    """
+    with installer_copy(tmp_path) as copy:
+        result = copy.run()
+        assert result.returncode == 0, result.stderr
+        unit = configparser.ConfigParser(interpolation=None, strict=False)
+        unit.optionxform = str  # type: ignore[assignment,method-assign]
+        unit.read_string(copy.unit.read_text())
+
+    service = unit["Service"]
+    assert service["KillMode"] == "mixed"
+    stop_timeout = timedelta(seconds=int(service["TimeoutStopSec"]))
+    assert stop_timeout > client.START_TIMEOUT
+    assert stop_timeout > client.REMOVE_TIMEOUT
+    # Stop no servidor, calculado à mão: 4 chamadas de 30 s, o stop com grace máximo (40 s),
+    # 5 s de lock e 10 s de leitura do pedido.
+    assert stop_timeout > timedelta(seconds=4 * 30 + 40 + 5 + 10)

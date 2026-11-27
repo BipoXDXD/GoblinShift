@@ -9,7 +9,7 @@ from types import ModuleType, SimpleNamespace
 import pytest
 
 from executor_ctl import config, images, service
-from executor_ctl.docker_cli import ContainerStatus, DockerCli
+from executor_ctl.docker_cli import ContainerIdentity, ContainerStatus, DockerCli
 from executor_ctl.witness import (
     InstanceBinding,
     ObservationReceipt,
@@ -35,7 +35,20 @@ def binding() -> InstanceBinding:
 
 
 def cfg(path: Path) -> config.Config:
-    return config.Config(path.parent / "socket", "test", path.parent / "work", "runsc", path, False)
+    return config.Config(
+        socket=path.parent / "socket",
+        group="test",
+        socket_group="test-ctl",
+        work_area=path.parent / "work",
+        runtime="runsc",
+        images_file=path,
+        require_mount=False,
+    )
+
+
+def host_group(name: str) -> SimpleNamespace:
+    """GIDs distintos para gs-exec e gs-ctl: o main recusa os dois no mesmo GID (D11)."""
+    return SimpleNamespace(gr_gid=8 if name == "test-ctl" else 7)
 
 
 class DockerBoundary(DockerCli):
@@ -44,7 +57,9 @@ class DockerBoundary(DockerCli):
 
     def inspect(self, name: str) -> ContainerStatus:
         self.calls.append(("inspect", name))
-        return ContainerStatus("running", None, False, None, None)
+        # O container da própria tentativa: o ctl só adota o que tem a label dela e a imagem A.
+        identity = ContainerIdentity("e" * 64, str(ATTEMPT), A)
+        return ContainerStatus("running", None, False, None, None, identity)
 
     def run(self, arguments: list[str]) -> None:
         pytest.fail("unexpected Docker run boundary")
@@ -299,7 +314,7 @@ def test_optional_main_provider_wires_existing_start_without_cli_extension(
     received: list[config.Config] = []
     monkeypatch.setattr(main, "load_config", lambda path: loaded)
     monkeypatch.setattr(main, "configure_logging", lambda: None)
-    monkeypatch.setattr(main.grp, "getgrnam", lambda name: SimpleNamespace(gr_gid=7))
+    monkeypatch.setattr(main.grp, "getgrnam", host_group)
     monkeypatch.setattr(main, "DockerCli", lambda: docker)
     monkeypatch.setattr(main.signal, "signal", lambda *args: None)
 
@@ -337,7 +352,7 @@ def test_optin_main_provider_failure_does_not_construct_executor(
         main, "load_config", lambda config_path: replace(cfg(path), loaded_bytes_sha256="d" * 64)
     )
     monkeypatch.setattr(main, "configure_logging", lambda: None)
-    monkeypatch.setattr(main.grp, "getgrnam", lambda name: SimpleNamespace(gr_gid=7))
+    monkeypatch.setattr(main.grp, "getgrnam", host_group)
 
     def never() -> None:
         pytest.fail("executor must not be constructed")

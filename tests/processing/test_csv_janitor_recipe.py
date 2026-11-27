@@ -8,7 +8,7 @@ from pathlib import Path
 import pytest
 
 from goblinshift.processing.csv_janitor import FormulaGuard, Limits, Params
-from goblinshift.processing.csv_janitor.recipe import MAX_TABLES, CsvJanitorV1
+from goblinshift.processing.csv_janitor.recipe import MAX_TABLES, RECIPE_ID, CsvJanitorV1
 from goblinshift.processing.output_dir import FileSystemOutputDir
 from goblinshift.processing.recipe import (
     InputContractError,
@@ -19,6 +19,7 @@ from goblinshift.processing.recipe import (
     Report,
 )
 from goblinshift.processing.registry import RECIPES
+from goblinshift.runs.comparison import TableComparison, comparison_from_report
 
 VALID = "nome,cidade\r\nAna,Recife\r\n"
 INVALID = 'nome,cidade\r\n"Ana,Recife\r\n'  # aspas que não fecham
@@ -87,6 +88,16 @@ def test_tabela_valida_gera_um_csv_limpo_com_contagens(work: Workspace) -> None:
     assert (work.out_dir / "clientes.csv").read_bytes() == VALID.encode()
     assert work.progress.done == [0]
     assert report.has_outputs
+
+
+def test_contagens_do_item_viram_comparacao(work: Workspace) -> None:
+    """Chave renomeada na receita zeraria a comparação em silêncio."""
+    work.add("clientes.csv", "nome,cidade\r\nAna,Recife\r\nAna,Recife\r\nBia,Olinda\r\n")
+
+    item = work.run(Params(deduplicate_by=("nome", "cidade"))).items[0]
+
+    assert isinstance(item, ItemOk)
+    assert comparison_from_report(RECIPE_ID, item.counts, item.details) == TableComparison(3, 2)
 
 
 def test_tabela_invalida_e_rejeitada_com_o_codigo_da_biblioteca(work: Workspace) -> None:

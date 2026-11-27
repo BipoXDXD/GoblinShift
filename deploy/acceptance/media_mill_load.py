@@ -19,7 +19,6 @@ Usa só a biblioteca padrão (Python 3.12 do host).
 """
 
 import argparse
-import grp
 import hashlib
 import os
 import sys
@@ -77,7 +76,7 @@ def main(argv: list[str]) -> int:
     videos = options.videos.resolve()
     expected = expected_for(videos)
     config = load_config(DEFAULT_CONFIG_PATH)
-    host = Host(config, grp.getgrnam(config.group).gr_gid)
+    host = Host.from_config(config)
     if options.skip_build:
         load.require_image()
     else:

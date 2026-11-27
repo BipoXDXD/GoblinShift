@@ -3,7 +3,7 @@
 import pytest
 from PIL import Image
 
-from goblinshift.processing.image_forge import OutputFormat, Params
+from goblinshift.processing.image_forge import RECIPE_ID, OutputFormat, Params
 from goblinshift.processing.image_forge.recipe import ImageForgeV1
 from goblinshift.processing.output_dir import FileSystemOutputDir
 from goblinshift.processing.recipe import (
@@ -13,6 +13,7 @@ from goblinshift.processing.recipe import (
     Preview,
     RecipeFailure,
 )
+from goblinshift.runs.comparison import ImageComparison, comparison_from_report
 from tests.image_forge import media
 from tests.image_forge.conftest import Workspace, only_ok
 
@@ -61,6 +62,17 @@ def test_exemplo_2400x1200_vira_1600x800(work: Workspace) -> None:
     assert work.open_output("images/grande.jpg").size == (1600, 800)
     assert (item.details["width_before"], item.details["height_before"]) == (2400, 1200)
     assert (item.details["width_after"], item.details["height_after"]) == (1600, 800)
+
+
+def test_detalhes_do_item_viram_comparacao(work: Workspace) -> None:
+    """Chave renomeada na receita zeraria a comparação em silêncio."""
+    work.add("grande.jpg", rgb_jpeg((2400, 1200)))
+
+    item = only_ok(work.run())
+    comparison = comparison_from_report(RECIPE_ID, item.counts, item.details)
+
+    assert isinstance(comparison, ImageComparison)
+    assert (comparison.width_before, comparison.width_after) == (2400, 1600)
 
 
 def test_exemplo_200x100_nao_amplia(work: Workspace) -> None:

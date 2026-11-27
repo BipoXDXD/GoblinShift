@@ -55,6 +55,8 @@ run = Table(
     Column("created_at", DateTime(timezone=True), nullable=False, server_default=func.now()),
     Column("started_at", DateTime(timezone=True)),
     Column("finished_at", DateTime(timezone=True)),
+    # Gravada por quem emitiu o `run.finished`; nula numa Run terminal, a manutenção reemite.
+    Column("finished_reported_at", DateTime(timezone=True)),
     UniqueConstraint("owner_id", "id"),
     # FK composta com o dono: o banco impede apontar para preset de outra conta. Só `preset_id`
     # vira nulo na exclusão; `owner_id` continua (PostgreSQL 15+).
@@ -102,6 +104,12 @@ run = Table(
         postgresql_where=text("parameters IS NOT NULL AND finished_at IS NOT NULL"),
     ),
     Index("run_finished_at_idx", "finished_at", postgresql_where=text("finished_at IS NOT NULL")),
+    # Varredura do término não reportado (`run.finished` ao menos uma vez).
+    Index(
+        "run_finish_unreported_idx",
+        "finished_at",
+        postgresql_where=text("finished_at IS NOT NULL AND finished_reported_at IS NULL"),
+    ),
 )
 
 run_input = Table(
@@ -113,8 +121,9 @@ run_input = Table(
     Column("upload_id", Uuid, nullable=False),
     Column("outcome", Text),
     Column("error_code", Text),
-    # Avisos (códigos), contagens e duplicata do item, já conferidos pela coleta; sem texto do
-    # arquivo. Anulado com os demais detalhes por item na retenção de 30 dias (1.7).
+    # Avisos (códigos), contagens, duplicata e comparação (ADR 059) do item, já conferidos pela
+    # coleta; sem texto do arquivo. Anulado com os demais detalhes por item na retenção de 30 dias
+    # (1.7).
     Column("details", JSONB),
     PrimaryKeyConstraint("run_id", "position"),
     UniqueConstraint("run_id", "upload_id"),
@@ -138,9 +147,11 @@ attempt = Table(
     Column("container_name", Text, nullable=False, unique=True),
     Column("lease_expires_at", DateTime(timezone=True), nullable=False),
     Column("started_at", DateTime(timezone=True), nullable=False, server_default=func.now()),
-    # Só conta como tentativa física (no máximo 2) a que chegou a pôr o executor para trabalhar;
-    # um claim cujo lease venceu antes disso reagenda sem gastá-la (3.4).
+    # Só conta como tentativa física (no máximo 2) a que chegou a pôr o executor para trabalhar
+    # e não foi cedida por parada graciosa do worker (`yielded_at IS NULL`); um claim cujo lease
+    # venceu antes disso ou cuja tentativa foi cedida reagenda sem gastá-la (3.4, #442).
     Column("executor_started_at", DateTime(timezone=True)),
+    Column("yielded_at", DateTime(timezone=True)),
     Column("ended_at", DateTime(timezone=True)),
     Column("error_code", Text),
     UniqueConstraint("run_id", "number"),
@@ -155,6 +166,10 @@ attempt = Table(
     Index("attempt_lease_idx", "lease_expires_at", postgresql_where=text("ended_at IS NULL")),
     # Uma linha por claim; o quinto claim vira INFRA_POISON em vez de nova tentativa (3.4).
     CheckConstraint("number BETWEEN 1 AND 4", name="number"),
+    CheckConstraint(
+        "yielded_at IS NULL OR executor_started_at IS NOT NULL",
+        name="yielded_after_start",
+    ),
 )
 
 run_output = Table(

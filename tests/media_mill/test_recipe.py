@@ -14,7 +14,7 @@ from pathlib import Path
 import pytest
 from PIL import Image
 
-from goblinshift.processing.media_mill import AudioFormat, Params
+from goblinshift.processing.media_mill import RECIPE_ID, AudioFormat, Params
 from goblinshift.processing.media_mill.commands import Source, audio_argv
 from goblinshift.processing.media_mill.recipe import MediaMillV1
 from goblinshift.processing.media_mill.signature import Container
@@ -28,6 +28,7 @@ from goblinshift.processing.recipe import (
     Preview,
     RecipeFailure,
 )
+from goblinshift.runs.comparison import MediaComparison, comparison_from_report
 from tests.media_mill.conftest import ClipLibrary, Workspace
 from tests.media_mill.media import (
     CANARY,
@@ -77,6 +78,17 @@ def test_mp4_vira_wav_16_bits_na_taxa_e_canais_de_origem_e_uma_miniatura(
     ]
     wav = probe(workspace.path("audio/férias.wav"))
     assert (wav["codec_name"], wav["sample_rate"], wav["channels"]) == ("pcm_s16le", "44100", "2")
+
+
+def test_detalhes_do_item_viram_comparacao(workspace: Workspace, clips: ClipLibrary) -> None:
+    """Chave renomeada na receita zeraria a comparação em silêncio."""
+    workspace.add("férias.mp4", clips.bytes("mp4"))
+
+    item = ok_item(workspace)
+    comparison = comparison_from_report(RECIPE_ID, item.counts, item.details)
+
+    assert isinstance(comparison, MediaComparison)
+    assert None not in vars(comparison).values()
 
 
 def test_relatorio_traz_duration_ms_da_fonte(workspace: Workspace, clips: ClipLibrary) -> None:

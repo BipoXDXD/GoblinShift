@@ -34,6 +34,33 @@ espelhos=(archive.ubuntu.com mirrors.edge.kernel.org azure.archive.ubuntu.com)
 # A lista mirror+file do runner pode apontar para um host regional da EC2.
 hosts_do_ubuntu='((azure\.|[a-z][a-z0-9-]*\.ec2\.)?archive\.ubuntu\.com|mirrors\.edge\.kernel\.org)'
 opcoes=(-q -y --no-install-recommends -o "Dir::Cache::archives=$debs")
+fontes_dir=""
+fontes_opcoes=()
+
+limpar_fontes() {
+  if [[ -n $fontes_dir ]]; then
+    rm -rf -- "$fontes_dir"
+  fi
+}
+trap limpar_fontes EXIT
+
+# Isola apenas as fontes oficiais do Ubuntu para que repositórios de terceiros no runner
+# (ex.: microsoft-prod.list) não derrubem o `apt-get update` nem o download.
+# DEB822 (.sources) exige Dir::Etc::sourceparts (apt antigo rejeita .sources em Dir::Etc::sourcelist).
+preparar_fontes() {
+  if [[ -f $etc/sources.list.d/ubuntu.sources ]]; then
+    local sources_abs
+    sources_abs="$(cd "$etc/sources.list.d" && pwd)/ubuntu.sources"
+    fontes_dir=$(mktemp -d)
+    chmod 755 "$fontes_dir"
+    ln -s "$sources_abs" "$fontes_dir/ubuntu.sources"
+    fontes_opcoes=(-o "Dir::Etc::sourcelist=-" -o "Dir::Etc::sourceparts=$fontes_dir")
+  elif [[ -f $etc/sources.list ]]; then
+    fontes_opcoes=(-o "Dir::Etc::sourcelist=$etc/sources.list" -o "Dir::Etc::sourceparts=-")
+  else
+    fontes_opcoes=(-o "Dir::Etc::sourcelist=-" -o "Dir::Etc::sourceparts=-")
+  fi
+}
 
 main() {
   # Fora de /var/cache/apt o apt não cria o `partial` sozinho.
@@ -43,10 +70,11 @@ main() {
     return
   fi
   "$(dirname "$0")/ci-apt-sem-azure.sh"
+  preparar_fontes
   for espelho in "${espelhos[@]}"; do
     usar_espelho "$espelho"
     if baixar; then
-      sudo apt-get install "${opcoes[@]}" --no-download "${pacotes[@]}"
+      sudo apt-get install "${opcoes[@]}" "${fontes_opcoes[@]}" --no-download "${pacotes[@]}"
       deixar_so_os_debs
       return
     fi
@@ -77,8 +105,8 @@ usar_espelho() {
 
 baixar() {
   local fim=$((SECONDS + tentativa_s))
-  sudo timeout -k 10 "$(restante "$fim")" apt-get update -q &&
-    sudo timeout -k 10 "$(restante "$fim")" apt-get install "${opcoes[@]}" --download-only "${pacotes[@]}"
+  sudo timeout -k 10 "$(restante "$fim")" apt-get update -q "${fontes_opcoes[@]}" &&
+    sudo timeout -k 10 "$(restante "$fim")" apt-get install "${opcoes[@]}" "${fontes_opcoes[@]}" --download-only "${pacotes[@]}"
 }
 
 # `timeout 0` desligaria o teto: o mínimo é 1 s.

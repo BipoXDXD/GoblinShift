@@ -2,18 +2,20 @@
 
 O `executor-ctl` é o serviço do host, único com acesso ao Docker, que cria um container gVisor
 por tentativa com perfil fixo. O worker fala com ele por HTTP/1.1 num socket Unix
-(`/run/goblinshift/executor-ctl.sock`, grupo `gs-exec`), só com a biblioteca padrão, e nunca
+(`/run/goblinshift/executor-ctl.sock`, grupo `gs-ctl`), só com a biblioteca padrão, e nunca
 escolhe montagens nem opções: só manda o `attempt_id` e a imagem fixada na Run.
 
 Uma conexão por chamada, com timeout de 10 s. `start` e `remove`, que tomam o lock da área no
 serviço, esperam mais que o pior caso dele (`START_TIMEOUT`, `REMOVE_TIMEOUT`): desistir antes
 deixaria o container nascer sem ninguém esperando, e a área ocupada recusaria o claim seguinte
-(`work_area_dirty`). Qualquer
-falha de transporte (socket ausente, recusa, timeout, resposta ilegível ou fora do contrato) vira
-`ExecutorCtlError` com código `unavailable` ou `invalid_response`; recusas do serviço trazem o
-código do corpo (`image_not_allowed`, `work_area_dirty`, `still_running`…). Para quem chama, tudo
-é `RunnerError`: o coordenador encerra a tentativa como falha transitória, e a manutenção não
-toca no que não consegue inspecionar.
+(`work_area_dirty`). O `stop` espera as 5 chamadas do pior caso no serviço (`STOP_BASE_TIMEOUT`:
+inspect, stop, inspect e, no container que nunca iniciou, inspect e rm sob o lock), mais a
+carência: desistir antes deixaria o `docker stop` seguindo lá, e o `supervise`, ao repetir,
+abriria outro concorrente. Qualquer falha de transporte (socket ausente, recusa, timeout, resposta
+ilegível ou fora do contrato) vira `ExecutorCtlError` com código `unavailable` ou
+`invalid_response`; recusas do serviço trazem o código do corpo (`image_not_allowed`,
+`work_area_dirty`, `still_running`…). Para quem chama, tudo é `RunnerError`: o coordenador encerra
+a tentativa como falha transitória, e a manutenção não toca no que não consegue inspecionar.
 
 A área de trabalho (`<work_root>/<attempt_id>`) é criada pelo worker, que pertence ao grupo do
 executor (GID 61001), com modo 2770; o `remove` do serviço a apaga inteira, inclusive o que o
@@ -51,11 +53,17 @@ CALL_TIMEOUT = timedelta(seconds=10)
 CTL_DOCKER_CALL_TIMEOUT = timedelta(seconds=30)
 CTL_START_DOCKER_CALLS = 3
 CTL_REMOVE_DOCKER_CALLS = 2
+# O stop não espera uma operação inteira no lock: só o rm do container que nunca iniciou o toma,
+# com prazo curto, e lock ocupado devolve o que foi lido.
+CTL_STOP_DOCKER_CALLS = 5
 CTL_LOCK_HOLDER_DOCKER_CALLS = 3
 # O que o serviço faz fora do Docker: allowlist, posse da área e o próprio HTTP.
 START_MARGIN = timedelta(seconds=10)
 # O `rmtree` da área (até o filesystem de 6 GiB, ADR 005) e o próprio HTTP.
 REMOVE_MARGIN = timedelta(seconds=10)
+# A espera do lock da área antes do rm (5 s no serviço) e o próprio HTTP; a carência soma à parte.
+STOP_MARGIN = timedelta(seconds=10)
+STOP_BASE_TIMEOUT = CTL_DOCKER_CALL_TIMEOUT * CTL_STOP_DOCKER_CALLS + STOP_MARGIN
 START_TIMEOUT = (
     CTL_DOCKER_CALL_TIMEOUT * (CTL_START_DOCKER_CALLS + CTL_LOCK_HOLDER_DOCKER_CALLS) + START_MARGIN
 )
@@ -95,6 +103,7 @@ class ExecutorCtlRunner:
         work_group: int,
         call_timeout: timedelta = CALL_TIMEOUT,
         start_timeout: timedelta = START_TIMEOUT,
+        stop_base_timeout: timedelta = STOP_BASE_TIMEOUT,
         remove_timeout: timedelta = REMOVE_TIMEOUT,
     ) -> None:
         self._socket_path = socket_path
@@ -102,6 +111,7 @@ class ExecutorCtlRunner:
         self._group = work_group
         self._call_timeout = call_timeout
         self._start_timeout = start_timeout
+        self._stop_base_timeout = stop_base_timeout
         self._remove_timeout = remove_timeout
 
     def work_dir(self, attempt_id: uuid.UUID) -> Path:
@@ -134,7 +144,7 @@ class ExecutorCtlRunner:
             "POST",
             f"{_path(attempt_id)}/stop",
             {"grace_s": grace_s},
-            self._call_timeout + timedelta(seconds=grace_s),
+            self._stop_base_timeout + timedelta(seconds=grace_s),
         )
 
     def remove(self, attempt_id: uuid.UUID) -> None:

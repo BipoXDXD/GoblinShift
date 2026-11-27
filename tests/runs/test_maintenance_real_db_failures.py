@@ -65,6 +65,7 @@ STEP_COUNTS: dict[str, str] = {
     "expire_queue": "queue_expired",
     "apply_deadlines": "deadlines",
     "release_orphan_holds": "holds_released",
+    "report_unreported_finishes": "finishes_reported",
     "discard_stale_candidates": "candidates_discarded",
     "sweep_work_areas": "work_areas_removed",
     "expire_incomplete_uploads": "incomplete_uploads_expired",

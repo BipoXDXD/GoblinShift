@@ -77,6 +77,12 @@ def downgrade_migrations(settings: Settings, target: str) -> None:
         command.downgrade(Config("alembic.ini"), target)
 
 
+def stamp_migrations(settings: Settings, target: str) -> None:
+    """Grava `target` como revisão corrente sem rodar nada, como um carimbo que não saiu."""
+    with _alembic_env(settings):
+        command.stamp(Config("alembic.ini"), target)
+
+
 @contextmanager
 def _alembic_env(settings: Settings) -> Iterator[None]:
     env = {

@@ -1,16 +1,23 @@
 """Regras da área de trabalho: uma tentativa por vez, nada fora de <area>/<id> (ADR 005)."""
 
 import os
-import shutil
 import stat
 import subprocess
+import sys
 import uuid
+from collections.abc import Callable, Iterator
 from pathlib import Path
+from typing import Self
 
 import pytest
 
 from executor_ctl import workarea
-from executor_ctl.workarea import WorkAreaDirtyError, WorkDirMissingError, WorkDirModeError
+from executor_ctl.workarea import (
+    UnsafeRemovalError,
+    WorkAreaDirtyError,
+    WorkDirMissingError,
+    WorkDirModeError,
+)
 
 pytestmark = pytest.mark.host_python
 
@@ -294,7 +301,167 @@ def test_remove_nao_segue_symlink_dentro_da_tentativa(area: Path, tmp_path: Path
 
 
 def test_remocao_recursiva_e_a_versao_segura_contra_symlink() -> None:
-    assert shutil.rmtree.avoids_symlink_attacks
+    assert os.rmdir in os.supports_dir_fd
+    assert os.unlink in os.supports_dir_fd
+    assert os.scandir in os.supports_fd
+
+
+def test_plataforma_sem_remocao_por_descritor_recusa_remover(
+    area: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    work_dir = make_attempt_dir(area)
+    monkeypatch.setattr(os, "supports_dir_fd", os.supports_dir_fd - {os.rmdir})
+
+    with pytest.raises(UnsafeRemovalError):
+        workarea.remove_attempt_dir(area, ATTEMPT)
+
+    assert work_dir.is_dir()
+
+
+def build_deep_tree(
+    top: Path, *, depth: int, symlink_at: int | None = None, target: Path | None = None
+) -> None:
+    """`top/d/d/.../d` com `depth` níveis e um arquivo em cada; sem caminho longo (dir_fd)."""
+    top.mkdir()
+    fd = os.open(top, os.O_RDONLY | os.O_DIRECTORY)
+    try:
+        for level in range(depth):
+            file_fd = os.open("arquivo", os.O_WRONLY | os.O_CREAT, 0o600, dir_fd=fd)
+            os.close(file_fd)
+            if level == symlink_at:
+                assert target is not None
+                os.symlink(target, "link", dir_fd=fd)
+            os.mkdir("d", dir_fd=fd)
+            child = os.open("d", os.O_RDONLY | os.O_DIRECTORY, dir_fd=fd)
+            os.close(fd)
+            fd = child
+    finally:
+        os.close(fd)
+
+
+def run_in_subprocess_with_nofile_limit(
+    limit: int, func: Callable[[Path, uuid.UUID], None], area: Path, attempt_id: uuid.UUID
+) -> subprocess.CompletedProcess[str]:
+    """Chama `func` num processo com RLIMIT_NOFILE baixo, sem mexer no limite do pytest."""
+    code = (
+        "import importlib, resource, sys, uuid\n"
+        "from pathlib import Path\n"
+        f"resource.setrlimit(resource.RLIMIT_NOFILE, ({limit}, {limit}))\n"
+        f"func = getattr(importlib.import_module({func.__module__!r}), {func.__name__!r})\n"
+        "func(Path(sys.argv[1]), uuid.UUID(sys.argv[2]))\n"
+    )
+    deploy_dir = Path(workarea.__file__).resolve().parents[1]
+    return subprocess.run(
+        [sys.executable, "-c", code, str(area), str(attempt_id)],
+        env={**os.environ, "PYTHONPATH": str(deploy_dir)},
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+
+
+@pytest.mark.skipif(sys.platform != "linux", reason="RLIMIT_NOFILE e dir_fd do host")
+def test_remove_arvore_mais_funda_que_o_limite_de_descritores(area: Path) -> None:
+    build_deep_tree(area / str(ATTEMPT), depth=300)
+
+    result = run_in_subprocess_with_nofile_limit(64, workarea.remove_attempt_dir, area, ATTEMPT)
+
+    assert result.returncode == 0, result.stderr
+    assert not (area / str(ATTEMPT)).exists()
+
+
+def test_remocao_funda_nao_segue_symlink_no_meio(area: Path, tmp_path: Path) -> None:
+    outside = tmp_path / "fora"
+    outside.mkdir()
+    (outside / "guardado").write_text("x")
+    build_deep_tree(area / str(ATTEMPT), depth=50, symlink_at=25, target=outside)
+
+    workarea.remove_attempt_dir(area, ATTEMPT)
+
+    assert (outside / "guardado").read_text() == "x"
+    assert not (area / str(ATTEMPT)).exists()
+
+
+class _ListedEntries:
+    """O que `os.scandir(fd)` devolve, com a listagem já lida (o gancho age depois dela)."""
+
+    def __init__(self, entries: list[os.DirEntry[str]]) -> None:
+        self._entries = entries
+
+    def __enter__(self) -> Self:
+        return self
+
+    def __exit__(self, *_: object) -> None:
+        return None
+
+    def __iter__(self) -> Iterator[os.DirEntry[str]]:
+        return iter(self._entries)
+
+
+def hook_scandir_of(
+    monkeypatch: pytest.MonkeyPatch, directory: Path, action: Callable[[], object]
+) -> None:
+    """Roda `action` uma vez, logo depois de listar `directory` e antes do passo seguinte."""
+    real_scandir = os.scandir
+    watched = directory.stat()
+    fired = False
+
+    def scandir_then_act(fd: int) -> _ListedEntries:
+        nonlocal fired
+        with real_scandir(fd) as listing:
+            entries = list(listing)
+        opened = os.fstat(fd)
+        if not fired and (opened.st_dev, opened.st_ino) == (watched.st_dev, watched.st_ino):
+            fired = True
+            action()
+        return _ListedEntries(entries)
+
+    monkeypatch.setattr(os, "scandir", scandir_then_act)
+    # O gancho aceita fd como o original; sem isso a remoção se recusaria a rodar.
+    monkeypatch.setattr(os, "supports_fd", os.supports_fd | {scandir_then_act})
+
+
+def test_subida_com_pai_trocado_recusa(
+    area: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    outside = tmp_path / "fora"
+    outside.mkdir()
+    (outside / "guardado").write_text("x")
+    top = area / str(ATTEMPT)
+    leaf = top / "a" / "b" / "c"
+    leaf.mkdir(parents=True)
+    # Enquanto o ctl está em c, alguém move c para fora: o `..` de c deixa de ser b.
+    hook_scandir_of(monkeypatch, leaf, lambda: leaf.rename(outside / "c"))
+
+    with pytest.raises(WorkDirMissingError):
+        workarea.remove_attempt_dir(area, ATTEMPT)
+
+    assert (outside / "guardado").read_text() == "x"
+    assert (outside / "c").is_dir()
+    assert top.is_dir()
+
+
+def test_symlink_trocado_entre_scandir_e_open_nao_e_seguido(
+    area: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    outside = tmp_path / "fora"
+    outside.mkdir()
+    (outside / "guardado").write_text("x")
+    top = area / str(ATTEMPT)
+    (top / "a").mkdir(parents=True)
+
+    def swap_for_symlink() -> None:
+        (top / "a").rename(tmp_path / "movido")
+        (top / "a").symlink_to(outside)
+
+    # A listagem de top ainda diz que `a` é diretório; quando o ctl o abre, é um symlink.
+    hook_scandir_of(monkeypatch, top, swap_for_symlink)
+
+    with pytest.raises(WorkDirMissingError):
+        workarea.remove_attempt_dir(area, ATTEMPT)
+
+    assert (outside / "guardado").read_text() == "x"
+    assert top.is_dir()
 
 
 def test_remove_de_symlink_apaga_so_o_link(area: Path, tmp_path: Path) -> None:

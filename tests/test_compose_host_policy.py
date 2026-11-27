@@ -829,3 +829,26 @@ def test_as_regras_de_imagem_nao_alcancam_o_compose_da_vps() -> None:
     config = config_with({"image": "caddy:2", "build": {"context": "."}})
 
     assert host_policy_violations(config, HOST) == []
+
+
+INSTALLER = ROOT / "deploy" / "executor-ctl" / "install.sh"
+
+
+def installer_gid(variable: str) -> str:
+    match = re.search(rf"^{variable}=(\d+)$", INSTALLER.read_text(), re.MULTILINE)
+    assert match is not None, variable
+    return match.group(1)
+
+
+@pytest.mark.parametrize("source", ["compose.prod.yaml", "app.json"])
+def test_worker_e_manutencao_tem_os_dois_grupos(source: str) -> None:
+    # D11: o executor-ctl novo põe o socket no gs-ctl; o velho, no gs-exec. Com os dois grupos,
+    # o deploy da app vem antes da reinstalação do ctl e nenhuma Run perde o socket na troca.
+    config = (
+        merged_config() if source == "compose.prod.yaml" else rendered(coolify_document(source))
+    )
+    expected = sorted([installer_gid("GROUP_ID"), installer_gid("SOCKET_GROUP_ID")])
+
+    assert expected == ["61001", "61002"]
+    for name in ("worker", "maintenance"):
+        assert sorted(config["services"][name]["group_add"]) == expected, name

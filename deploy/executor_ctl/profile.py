@@ -4,7 +4,10 @@ Quem chama não escolhe opção, montagem nem comando: o nome e os caminhos deri
 `attempt_id` já validado como UUID, e o comando é o ENTRYPOINT da imagem.
 """
 
+import os
 import uuid
+from collections.abc import Callable
+from dataclasses import dataclass
 from pathlib import Path
 
 # Limites do executor (docs/GoblinShiftPlan.md, 1.7).
@@ -34,21 +37,81 @@ OUTPUT_DIR = "out"
 ATTEMPT_LABEL = "goblinshift.attempt"
 
 
+@dataclass(frozen=True)
+class IoLimits:
+    """Teto de I/O do disco da área, que é o mesmo do banco (D13); bytes/s e operações/s."""
+
+    read_bps: int
+    write_bps: int
+    read_iops: int
+    write_iops: int
+
+
+@dataclass(frozen=True)
+class DiskThrottle:
+    """O teto e o dispositivo de bloco em que o Docker o aplica (o loop device da área)."""
+
+    device: str
+    limits: IoLimits
+
+
+class UnusableDiskDeviceError(Exception):
+    """O dispositivo da área não tem um nó que o Docker aceite no `--device-*`; o teto não sai."""
+
+
+def block_device(st_dev: int) -> str:
+    """Nó real do dispositivo de um `st_dev`: o udev publica /dev/block/M:m como link (/dev/loopN).
+
+    O Docker separa dispositivo e valor no primeiro `:` de `--device-read-bps`, então o link
+    /dev/block/M:m não serve; sem o link, o caminho fica com `:` e `disk_throttle` o recusa.
+    """
+    return os.path.realpath(f"/dev/block/{os.major(st_dev)}:{os.minor(st_dev)}")
+
+
+def disk_throttle(
+    work_area: Path, limits: IoLimits | None, *, resolve_device: Callable[[int], str] | None = None
+) -> DiskThrottle | None:
+    """O teto no dispositivo do filesystem da área (o loop device do exec-work), ou nada sem teto.
+
+    Resolvido na hora de cada uso: uma remontagem da área pode trocar o loopN.
+    """
+    if limits is None:
+        return None
+    resolve = block_device if resolve_device is None else resolve_device
+    device = resolve(os.stat(work_area).st_dev)
+    if not device.startswith("/dev/") or ":" in device:
+        raise UnusableDiskDeviceError(f"{device!r} não serve de dispositivo no --device-*")
+    return DiskThrottle(device=device, limits=limits)
+
+
 def container_name(attempt_id: uuid.UUID) -> str:
     # O tipo UUID já é a validação: um nome nunca é montado a partir de texto livre.
     return f"gs-exec-{attempt_id}"
 
 
 def run_arguments(
-    attempt_id: uuid.UUID, image: str, *, work_dir: Path, runtime: str, executor_gid: int
+    attempt_id: uuid.UUID,
+    image: str,
+    *,
+    work_dir: Path,
+    runtime: str,
+    executor_gid: int,
+    throttle: DiskThrottle | None = None,
 ) -> list[str]:
     """Argumentos completos do `docker run`; a imagem é o último, sem comando depois dela."""
-    options = run_options(attempt_id, work_dir=work_dir, runtime=runtime, executor_gid=executor_gid)
+    options = run_options(
+        attempt_id, work_dir=work_dir, runtime=runtime, executor_gid=executor_gid, throttle=throttle
+    )
     return ["run", "--detach", *options, image]
 
 
 def run_options(
-    attempt_id: uuid.UUID, *, work_dir: Path, runtime: str, executor_gid: int
+    attempt_id: uuid.UUID,
+    *,
+    work_dir: Path,
+    runtime: str,
+    executor_gid: int,
+    throttle: DiskThrottle | None = None,
 ) -> list[str]:
     """As opções do perfil, sem a imagem; o teste de aceitação as reaproveita com as sondas."""
     memory = str(MEMORY_BYTES)
@@ -72,4 +135,18 @@ def run_options(
         *(f"--log-opt={key}={value}" for key, value in LOG_OPTIONS.items()),
         f"--mount=type=bind,src={work_dir},dst={WORK_MOUNT}",
         f"--mount=type=bind,src={work_dir / INPUTS_DIR},dst={WORK_MOUNT}/{INPUTS_DIR},readonly",
+        *_throttle_options(throttle),
+    ]
+
+
+def _throttle_options(throttle: DiskThrottle | None) -> list[str]:
+    # Sem teto configurado, nenhuma flag: o perfil fica exatamente como antes do D13.
+    if throttle is None:
+        return []
+    device, limits = throttle.device, throttle.limits
+    return [
+        f"--device-read-bps={device}:{limits.read_bps}",
+        f"--device-write-bps={device}:{limits.write_bps}",
+        f"--device-read-iops={device}:{limits.read_iops}",
+        f"--device-write-iops={device}:{limits.write_iops}",
     ]
