@@ -12,6 +12,8 @@ from typing import BinaryIO
 
 from PIL import Image
 
+from goblinshift.processing.image_forge.formats import V1_FORMATS as V1_FORMATS
+from goblinshift.processing.image_forge.formats import V2_FORMATS as V2_FORMATS
 from goblinshift.processing.image_forge.header import (
     PNG_HEADER_BYTES,
     PngHeader,
@@ -20,11 +22,7 @@ from goblinshift.processing.image_forge.header import (
 from goblinshift.processing.image_forge.limits import Limits
 from goblinshift.processing.image_forge.rejection import ImageRejected, RejectionCode
 
-# Limitam os decodificadores que o Pillow tenta. O MPO não entra nas listas: ele vem pela fábrica
-# do JPEG, que devolve um MpoImageFile quando o arquivo tem o índice de várias imagens. A v1 fica
-# com JPEG e PNG para sempre (1.6); WebP e GIF estáticos entram só pela v2.
-V1_FORMATS = ("JPEG", "PNG")
-V2_FORMATS = ("JPEG", "PNG", "WEBP", "GIF")
+# Os formatos limitam os decodificadores que o Pillow tenta (`formats.py`).
 ACCEPTED_FORMATS = V1_FORMATS
 MPO = "MPO"
 EIGHT_BIT_MODES = frozenset({"1", "L", "LA", "P", "RGB", "RGBA"})
