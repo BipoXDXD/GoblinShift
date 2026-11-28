@@ -577,7 +577,7 @@ export const TEXT = {
     maxWidth: "Largura máxima, em pixels",
     maxHeight: "Altura máxima, em pixels",
     sideHint: (min: number, max: number) =>
-      `De ${String(min)} a ${String(max)}. A imagem é reduzida para caber, mantendo a proporção; nunca é ampliada.`,
+      `De ${String(min)} a ${String(max)}. A imagem nunca é ampliada.`,
     outputFormat: "Formato de saída",
     outputFormats: {
       preserve: "Manter o formato (PNG e GIF saem PNG; JPEG sai JPEG; WebP sai WebP)",
@@ -597,8 +597,17 @@ export const TEXT = {
       pad: "A margem fica transparente em PNG e WebP, e na cor de fundo em JPEG.",
     },
     scalePercent: "Escala, em %",
+    scaleHint: (min: number, max: number) => `De ${String(min)} a ${String(max)}.`,
     webpQuality: "Qualidade do WebP",
+    webpQualityHint: (min: number, max: number) => `De ${String(min)} a ${String(max)}.`,
     webpLossless: "WebP sem perdas",
+    // Motivo de cada controle desabilitado (D4); o campo mostra o valor que vai no envio.
+    disabledHints: {
+      box: "Escolha outro ajuste para usar este campo.",
+      mode: (mode: string) => `Escolha ${mode} para usar este campo.`,
+      webpOnly: "Vale só com saída WebP ou Manter.",
+      lossless: "Desmarque WebP sem perdas para usar este campo.",
+    },
     jpegQuality: "Qualidade do JPEG",
     jpegQualityHint: (min: number, max: number) =>
       `De ${String(min)} a ${String(max)}. Vale só para as saídas em JPEG.`,

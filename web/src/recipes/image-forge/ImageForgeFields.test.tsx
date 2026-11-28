@@ -210,6 +210,61 @@ describe("ImageForgeFields", () => {
     });
   });
 
+  it("escala e qualidade do WebP mostram a faixa do catálogo", () => {
+    setup();
+
+    expect(scale()).toHaveAccessibleDescription(/^De 1 a 100\./);
+    expect(webpQuality()).toHaveAccessibleDescription(/^De 60 a 95\./);
+  });
+
+  it("a dica de largura e altura não promete manter a proporção", () => {
+    setup();
+
+    expect(width()).toHaveAccessibleDescription("De 16 a 4096. A imagem nunca é ampliada.");
+  });
+
+  it("caixa desabilitada diz o motivo e mostra o valor que vai", async () => {
+    const { user } = setup();
+
+    await user.click(screen.getByRole("radio", { name: "Escala em porcentagem" }));
+
+    expect(width()).toHaveAccessibleDescription(/Escolha outro ajuste para usar este campo\.$/);
+    expect(height()).toHaveAccessibleDescription(/Escolha outro ajuste para usar este campo\.$/);
+    expect(width()).toHaveValue("1600");
+    expect(height()).toHaveValue("1600");
+  });
+
+  it("escala desabilitada diz o motivo; reabilitada volta ao valor digitado", async () => {
+    const { user } = setup();
+    expect(scale()).toHaveAccessibleDescription(
+      /Escolha Escala em porcentagem para usar este campo\.$/,
+    );
+
+    await user.click(screen.getByRole("radio", { name: "Escala em porcentagem" }));
+    expect(scale()).not.toHaveAccessibleDescription(/Escolha/);
+    expect(width()).toHaveValue("1600");
+
+    await user.click(screen.getByRole("radio", { name: "Caber na caixa (mantém a proporção)" }));
+    expect(width()).toHaveValue("1200");
+  });
+
+  it("opções de WebP desabilitadas dizem o motivo e mostram o valor que vai", async () => {
+    const { user } = setup();
+
+    await user.selectOptions(format(), "jpeg");
+    expect(webpQuality()).toHaveAccessibleDescription(/Vale só com saída WebP ou Manter\.$/);
+    expect(webpLossless()).toHaveAccessibleDescription("Vale só com saída WebP ou Manter.");
+
+    await user.selectOptions(format(), "webp");
+    await user.clear(webpQuality());
+    await user.type(webpQuality(), "70");
+    await user.click(webpLossless());
+    expect(webpQuality()).toHaveAccessibleDescription(
+      /Desmarque WebP sem perdas para usar este campo\.$/,
+    );
+    expect(webpQuality()).toHaveValue("80");
+  });
+
   it("saída WebP esconde as opções de JPEG", async () => {
     const { user } = setup();
 

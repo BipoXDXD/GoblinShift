@@ -27,20 +27,31 @@ interface TextFieldSpec {
   readonly label: string;
   readonly description?: string;
   readonly numeric: boolean;
-  readonly disabled?: boolean;
+  /** Motivo do controle desabilitado; sem ele, o campo está habilitado. */
+  readonly disabledHint?: string | null;
 }
 
 interface CheckboxSpec {
   readonly field: "webp_lossless" | "make_thumbnails";
   readonly label: string;
   readonly description?: string;
-  readonly disabled: boolean;
+  readonly disabledHint?: string | null;
+}
+
+/** Descrição do campo com o motivo, quando desabilitado, no fim (D4). */
+function withReason(
+  description: string | undefined,
+  disabledHint: string | null,
+): string | undefined {
+  const parts = [description, disabledHint].filter((part) => part !== undefined && part !== null);
+  return parts.length === 0 ? undefined : parts.join(" ");
 }
 
 /**
  * Formulário do Image Forge v2, escrito à mão (2.2), com defaults e faixas do catálogo. Os
  * controles sem efeito na combinação ficam desabilitados, mas visíveis, como no Media Mill: a caixa
- * em escala, a escala fora dela e as opções de WebP sem saída WebP. As de JPEG somem, como na v1,
+ * em escala, a escala fora dela e as opções de WebP sem saída WebP. Cada um diz o motivo e mostra o
+ * valor que vai no envio; o digitado volta quando ele habilita. As de JPEG somem, como na v1,
  * quando nenhuma saída é JPEG.
  */
 export function ImageForgeFields({
@@ -49,7 +60,7 @@ export function ImageForgeFields({
   onDraftChange,
 }: RecipeFieldsProps<"image-forge", ImageForgeSettings>): ReactElement {
   const [values, setValues] = useState(settings.defaults);
-  const { limits } = settings;
+  const { limits, disabledValues } = settings;
   const disabled = disabledControls(values);
 
   const update = (next: ImageForgeFormValues): void => {
@@ -64,49 +75,69 @@ export function ImageForgeFields({
     label,
     description,
     numeric,
-    disabled: off = false,
-  }: TextFieldSpec): ReactElement => (
-    <Field
-      id={fieldId(field)}
-      label={label}
-      {...(description === undefined ? {} : { description })}
-      error={errorOf(field)}
-    >
-      {(control) => (
-        <input
-          {...control}
-          {...(numeric ? { inputMode: "numeric" as const } : {})}
-          disabled={off}
-          value={values[field]}
-          onChange={(event) => {
-            update({ ...values, [field]: event.currentTarget.value });
-          }}
-        />
-      )}
-    </Field>
-  );
+    disabledHint = null,
+  }: TextFieldSpec): ReactElement => {
+    const off = disabledHint !== null;
+    const shown = withReason(description, disabledHint);
+    return (
+      <Field
+        id={fieldId(field)}
+        label={label}
+        {...(shown === undefined ? {} : { description: shown })}
+        error={errorOf(field)}
+      >
+        {(control) => (
+          <input
+            {...control}
+            {...(numeric ? { inputMode: "numeric" as const } : {})}
+            disabled={off}
+            value={off ? disabledValues[field] : values[field]}
+            onChange={(event) => {
+              update({ ...values, [field]: event.currentTarget.value });
+            }}
+          />
+        )}
+      </Field>
+    );
+  };
 
-  const checkbox = ({ field, label, description, disabled: off }: CheckboxSpec): ReactElement => (
-    <Field
-      layout="inline"
-      id={fieldId(field)}
-      label={label}
-      {...(description === undefined ? {} : { description })}
-      error={errorOf(field)}
-    >
-      {(control) => (
-        <input
-          {...control}
-          type="checkbox"
-          disabled={off}
-          checked={values[field]}
-          onChange={(event) => {
-            update({ ...values, [field]: event.currentTarget.checked });
-          }}
-        />
-      )}
-    </Field>
-  );
+  const checkbox = ({
+    field,
+    label,
+    description,
+    disabledHint = null,
+  }: CheckboxSpec): ReactElement => {
+    const off = disabledHint !== null;
+    const shown = withReason(description, disabledHint);
+    const checked = off && field === "webp_lossless" ? disabledValues.webp_lossless : values[field];
+    return (
+      <Field
+        layout="inline"
+        id={fieldId(field)}
+        label={label}
+        {...(shown === undefined ? {} : { description: shown })}
+        error={errorOf(field)}
+      >
+        {(control) => (
+          <input
+            {...control}
+            type="checkbox"
+            disabled={off}
+            checked={checked}
+            onChange={(event) => {
+              update({ ...values, [field]: event.currentTarget.checked });
+            }}
+          />
+        )}
+      </Field>
+    );
+  };
+  const boxHint = disabled.box ? T.disabledHints.box : null;
+  const webpQualityHint = disabled.webp
+    ? T.disabledHints.webpOnly
+    : disabled.webpQuality
+      ? T.disabledHints.lossless
+      : null;
 
   return (
     <>
@@ -115,14 +146,14 @@ export function ImageForgeFields({
         label: T.maxWidth,
         description: T.sideHint(limits.width.min, limits.width.max),
         numeric: true,
-        disabled: disabled.box,
+        disabledHint: boxHint,
       })}
       {textField({
         field: "max_height",
         label: T.maxHeight,
         description: T.sideHint(limits.height.min, limits.height.max),
         numeric: true,
-        disabled: disabled.box,
+        disabledHint: boxHint,
       })}
       <Field id={fieldId("output_format")} label={T.outputFormat} error={errorOf("output_format")}>
         {(control) => (
@@ -171,8 +202,9 @@ export function ImageForgeFields({
       {textField({
         field: "scale_percent",
         label: T.scalePercent,
+        description: T.scaleHint(limits.scale.min, limits.scale.max),
         numeric: true,
-        disabled: disabled.scale,
+        disabledHint: disabled.scale ? T.disabledHints.mode(T.fitModes.scale) : null,
       })}
       {!disabled.jpeg && (
         <>
@@ -193,15 +225,19 @@ export function ImageForgeFields({
       {textField({
         field: "webp_quality",
         label: T.webpQuality,
+        description: T.webpQualityHint(limits.webpQuality.min, limits.webpQuality.max),
         numeric: true,
-        disabled: disabled.webpQuality,
+        disabledHint: webpQualityHint,
       })}
-      {checkbox({ field: "webp_lossless", label: T.webpLossless, disabled: disabled.webp })}
+      {checkbox({
+        field: "webp_lossless",
+        label: T.webpLossless,
+        disabledHint: disabled.webp ? T.disabledHints.webpOnly : null,
+      })}
       {checkbox({
         field: "make_thumbnails",
         label: T.makeThumbnails,
         description: T.makeThumbnailsHint(limits.thumbnailBox),
-        disabled: false,
       })}
     </>
   );
