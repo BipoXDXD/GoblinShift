@@ -148,13 +148,13 @@ function SampleTable({
         </caption>
         <thead>
           <tr>
-            {sample.header.map((name, index) => (
+            {headerLabels(sample.header).map((label, index) => (
               <th
                 key={index}
                 scope="col"
                 className="border-b-2 border-line px-3 py-2 font-semibold whitespace-nowrap"
               >
-                {name}
+                {label}
               </th>
             ))}
           </tr>
@@ -176,6 +176,25 @@ function SampleTable({
       </table>
     </div>
   );
+}
+
+/**
+ * Texto de cada `<th>`: o nome como veio ou, em branco, `Coluna N` pela posição. O rótulo nunca
+ * repete um cabeçalho real (D7 do plano contrato-e-front): na colisão, ganha um sufixo numérico.
+ * Dois rótulos não colidem entre si, porque a posição de cada um é diferente.
+ */
+function headerLabels(header: readonly string[]): string[] {
+  const taken = new Set(header.map((name) => name.trim()).filter((name) => name !== ""));
+  return header.map((name, index) => {
+    if (name.trim() !== "") {
+      return name;
+    }
+    let copy = 1;
+    while (taken.has(T.unnamedColumn(index + 1, copy))) {
+      copy += 1;
+    }
+    return T.unnamedColumn(index + 1, copy);
+  });
 }
 
 function PageMapPreview({ source }: { readonly source: ResultReference }): ReactElement {

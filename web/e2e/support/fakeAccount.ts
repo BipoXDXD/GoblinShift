@@ -286,6 +286,7 @@ export class FakeAccount {
     return {
       id: "5f0c7c1a-2b3d-4e5f-8a9b-0c1d2e3f4a5b",
       display_name: "Ana Teste",
+      provider: "google",
       scopes: ["files:read", "files:write", "runs:read", "runs:write"],
       via: viaSession ? "session" : "api_key",
       limits: {

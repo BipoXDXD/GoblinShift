@@ -11,7 +11,13 @@ from sqlalchemy.orm import Session, sessionmaker
 from goblinshift.entrypoints.maintenance import AccountJobs
 from goblinshift.files.storage import FileStorage
 from goblinshift.files.tables import artifact, stored_object, transfer_slot, upload
-from goblinshift.identity.tables import api_key, app_user, request_window, web_session
+from goblinshift.identity.tables import (
+    api_key,
+    app_user,
+    channel_request_window,
+    legacy_request_window,
+    web_session,
+)
 from goblinshift.runs.maintenance import Maintenance
 from goblinshift.runs.purge import cancel_active_run
 from goblinshift.runs.tables import idempotency_record, run, run_input, run_output
@@ -30,7 +36,8 @@ OWNED_TABLES: dict[str, tuple[Table, str]] = {
     "artifact": (artifact, "owner_id"),
     "stored_object": (stored_object, "owner_id"),
     "transfer_slot": (transfer_slot, "owner_id"),
-    "request_window": (request_window, "owner_id"),
+    "channel_request_window": (channel_request_window, "owner_id"),
+    "request_window": (legacy_request_window, "owner_id"),
 }
 
 

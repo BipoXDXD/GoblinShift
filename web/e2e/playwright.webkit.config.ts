@@ -1,10 +1,10 @@
 import { defineConfig, devices } from "@playwright/test";
 
 import base from "./playwright.config";
-import { E2E, NOTICE_BUILD } from "./support/env";
+import { E2E, NOTICE_KIND } from "./support/env";
 import { CDP_TAG, titleTag } from "./support/tags";
 
-if (E2E.remote || NOTICE_BUILD) {
+if (E2E.remote || NOTICE_KIND !== null) {
   throw new Error("A suíte WebKit do palco exige o build local normal, com API falsa.");
 }
 
