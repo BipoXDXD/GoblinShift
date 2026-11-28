@@ -586,6 +586,38 @@ describe("Bancada: Atualizar preset", () => {
     });
   });
 
+  it("atualizar um preset da v1 aberto na v2 grava recipe_version 2", async () => {
+    const { api, user } = setup(`/bancada/image-forge?preset=${PRESET_ID}`, {
+      [`GET /api/v1/presets/${PRESET_ID}`]: () =>
+        jsonResponse(
+          presetBody({
+            recipe_id: "image-forge",
+            recipe_version: 1,
+            revision: 2,
+            parameters: { output_format: "png", max_width: 800 },
+          }),
+        ),
+      [PUT_PRESET]: nextRevision,
+    });
+
+    await confirmUpdate(user);
+
+    await waitFor(() => {
+      expect(sent(api.requests, PUT_PRESET)).toHaveLength(1);
+    });
+    const [request] = sent(api.requests, PUT_PRESET);
+    expect(request?.headers.get("If-Match")).toBe('"2"');
+    expect(await request?.json()).toMatchObject({
+      recipe_id: "image-forge",
+      recipe_version: 2,
+      parameters: expect.objectContaining({
+        output_format: "png",
+        max_width: 800,
+        fit: "contain",
+      }) as unknown,
+    });
+  });
+
   it("aberto, o diálogo de atualizar não tem violações do axe", async () => {
     const { user } = setup(PRESET_ROUTE);
 
