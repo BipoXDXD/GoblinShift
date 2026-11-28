@@ -6,7 +6,7 @@ import pytest
 from hypothesis import given
 from hypothesis import strategies as st
 
-from goblinshift.processing.image_forge.geometry import fit_size
+from goblinshift.processing.image_forge.geometry import FitMode, Layout, fit_size, layout
 
 
 @pytest.mark.parametrize(
@@ -74,3 +74,70 @@ def test_cada_dimensao_perde_menos_de_um_pixel_da_escala_exata(
     fw, fh = fit_size(w, h, bw, bh)
     assert 0 <= w * scale - fw < 1 or fw == 1
     assert 0 <= h * scale - fh < 1 or fh == 1
+
+
+# --- `layout`: os quatro modos de ajuste da v2, todos sem ampliar (D5) ---
+
+
+def test_cover_corta_o_centro_e_preenche_a_caixa() -> None:
+    assert layout(2400, 1200, fit=FitMode.COVER, box=(1080, 1080), scale_percent=100) == Layout(
+        crop=(600, 0, 1200, 1200), content=(1080, 1080), canvas=(1080, 1080), offset=(0, 0)
+    )
+
+
+def test_cover_menor_que_a_caixa_so_corta_na_proporcao() -> None:
+    result = layout(800, 400, fit=FitMode.COVER, box=(1080, 1080), scale_percent=100)
+    assert (result.crop, result.canvas) == ((200, 0, 400, 400), (400, 400))
+
+
+def test_cover_em_retrato_corta_em_cima_e_embaixo() -> None:
+    result = layout(1000, 3001, fit=FitMode.COVER, box=(1000, 1000), scale_percent=100)
+    assert result.crop == (0, 1000, 1000, 1000)
+
+
+def test_contain_e_o_fit_size_da_v1() -> None:
+    result = layout(2400, 1200, fit=FitMode.CONTAIN, box=(1600, 1600), scale_percent=100)
+    assert result == Layout(
+        crop=(0, 0, 2400, 1200), content=(1600, 800), canvas=(1600, 800), offset=(0, 0)
+    )
+
+
+def test_pad_centraliza_o_conteudo_na_caixa_exata() -> None:
+    result = layout(2400, 1200, fit=FitMode.PAD, box=(1600, 1600), scale_percent=100)
+    assert (result.content, result.canvas, result.offset) == ((1600, 800), (1600, 1600), (0, 400))
+
+
+def test_pad_com_imagem_menor_nao_amplia() -> None:
+    result = layout(401, 200, fit=FitMode.PAD, box=(1000, 1000), scale_percent=100)
+    assert (result.content, result.canvas, result.offset) == ((401, 200), (1000, 1000), (299, 400))
+
+
+def test_escala_trunca_e_nunca_zera() -> None:
+    assert layout(3, 1001, fit=FitMode.SCALE, box=(1600, 1600), scale_percent=10).content == (
+        1,
+        100,
+    )
+
+
+_image_side = st.integers(min_value=1, max_value=8192)
+_box_side = st.integers(min_value=16, max_value=4096)
+_percent = st.integers(min_value=1, max_value=100)
+
+
+@given(_image_side, _image_side, _box_side, _box_side, _percent, st.sampled_from(FitMode))
+def test_layout_cabe_na_caixa_dentro_da_imagem_e_nunca_amplia(
+    w: int, h: int, bw: int, bh: int, p: int, fit: FitMode
+) -> None:
+    result = layout(w, h, fit=fit, box=(bw, bh), scale_percent=p)
+    x, y, cw, ch = result.crop
+    assert min(x, y) >= 0
+    assert min(cw, ch) >= 1
+    assert x + cw <= w and y + ch <= h
+    assert 1 <= result.content[0] <= cw and 1 <= result.content[1] <= ch
+    assert result.offset[0] >= 0 and result.offset[1] >= 0
+    assert result.content[0] + result.offset[0] <= result.canvas[0]
+    assert result.content[1] + result.offset[1] <= result.canvas[1]
+    if fit is not FitMode.SCALE:
+        assert result.canvas[0] <= bw and result.canvas[1] <= bh
+    if fit is FitMode.PAD:
+        assert result.canvas == (bw, bh)
