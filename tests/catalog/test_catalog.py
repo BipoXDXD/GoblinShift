@@ -2,7 +2,7 @@
 
 import json
 from dataclasses import replace
-from datetime import UTC, datetime
+from datetime import UTC, date, datetime
 from typing import Any
 
 import pytest
@@ -16,7 +16,11 @@ from goblinshift.catalog import (
     VersionStatus,
 )
 from goblinshift.catalog.csv_janitor_v1 import CsvJanitorV1Parameters
-from goblinshift.catalog.versions import COMMON_MAX_INPUT_BYTES
+from goblinshift.catalog.versions import (
+    COMMON_MAX_INPUT_BYTES,
+    CSV_JANITOR_V2_MERGE_DEADLINE,
+    sunset_after_merge,
+)
 from goblinshift.files.limits import MAX_FILE_BYTES
 from goblinshift.processing import downloads_detox, image_forge
 from goblinshift.processing.csv_janitor import (
@@ -381,6 +385,30 @@ def test_csv_janitor_v1_recusa_opcao_da_v2_no_campo() -> None:
         CATALOG.resolve("csv-janitor", 1, {"output_bom": True})
 
     assert [field.location for field in error.value.errors] == [("output_bom",)]
+
+
+@pytest.mark.parametrize(
+    ("merged_on", "sunset"),
+    [
+        # Merge + 90 dias cai em 28/02/2027: Sunset no 1º de março.
+        (date(2026, 11, 30), datetime(2027, 3, 1, tzinfo=UTC)),
+        # Um dia depois, merge + 90 dias já é 01/03: o Sunset passa a 1º de abril.
+        (date(2026, 12, 1), datetime(2027, 4, 1, tzinfo=UTC)),
+        # Virada do ano.
+        (date(2026, 10, 15), datetime(2027, 2, 1, tzinfo=UTC)),
+    ],
+)
+def test_sunset_e_o_primeiro_dia_do_mes_seguinte_a_merge_mais_90_dias(
+    merged_on: date, sunset: datetime
+) -> None:
+    assert sunset_after_merge(merged_on) == sunset
+
+
+def test_sunset_da_csv_janitor_v1_segue_a_regra_a_partir_do_prazo_de_merge() -> None:
+    # A data não lê o relógio: um merge depois do prazo exige mover CSV_JANITOR_V2_MERGE_DEADLINE.
+    v1 = CATALOG.get_version("csv-janitor", 1)
+
+    assert v1.sunset_at == sunset_after_merge(CSV_JANITOR_V2_MERGE_DEADLINE)
 
 
 def test_csv_janitor_v1_fica_deprecated_com_sunset_e_v2_e_a_atual() -> None:

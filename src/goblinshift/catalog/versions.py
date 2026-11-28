@@ -14,7 +14,7 @@ import copy
 import dataclasses
 from collections.abc import Callable, Iterable, Mapping
 from dataclasses import dataclass, field
-from datetime import UTC, datetime
+from datetime import UTC, date, datetime, timedelta
 from enum import StrEnum
 from typing import Any
 
@@ -167,8 +167,22 @@ _CSV_JANITOR_LIMITS: Mapping[str, int] = {
     **dataclasses.asdict(Limits()),
 }
 
-# Primeiro dia do mês seguinte a (merge da v2 + 90 dias), a regra de 1.6 (ADR 067).
-CSV_JANITOR_V1_SUNSET = datetime(2027, 3, 1, tzinfo=UTC)
+_DEPRECATION_NOTICE = timedelta(days=90)
+
+
+def sunset_after_merge(merged_on: date) -> datetime:
+    """Primeiro dia do mês seguinte a (merge + 90 dias), à meia-noite UTC: a regra de 1.6."""
+    last_day = merged_on + _DEPRECATION_NOTICE
+    year, month = (
+        (last_day.year + 1, 1) if last_day.month == 12 else (last_day.year, last_day.month + 1)
+    )
+    return datetime(year, month, 1, tzinfo=UTC)
+
+
+# Último dia de merge da v2 para o qual o Sunset abaixo vale (ADR 067). A data é fixa, sem ler o
+# relógio, para o catálogo e os snapshots não mudarem sozinhos; merge depois disso move o prazo.
+CSV_JANITOR_V2_MERGE_DEADLINE = date(2026, 11, 30)
+CSV_JANITOR_V1_SUNSET = sunset_after_merge(CSV_JANITOR_V2_MERGE_DEADLINE)
 
 CSV_JANITOR_V1 = RecipeVersion(
     recipe_id=csv_janitor.RECIPE_ID,
