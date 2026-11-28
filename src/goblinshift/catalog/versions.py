@@ -25,7 +25,8 @@ from goblinshift.catalog.csv_janitor_v2 import CsvJanitorV2Parameters
 from goblinshift.catalog.downloads_detox_v1 import DownloadsDetoxV1Parameters
 from goblinshift.catalog.image_forge_v1 import ImageForgeV1Parameters
 from goblinshift.catalog.media_mill_v1 import MediaMillV1Parameters
-from goblinshift.catalog.pdf_press_v1 import PdfPressV1Parameters, upload_references
+from goblinshift.catalog.pdf_press_common import upload_references
+from goblinshift.catalog.pdf_press_v1 import PdfPressV1Parameters
 from goblinshift.catalog.pdf_press_v2 import PdfPressV2Parameters
 from goblinshift.catalog.references import UploadReference, no_upload_references
 from goblinshift.processing import downloads_detox, image_forge, media_mill, pdf_press

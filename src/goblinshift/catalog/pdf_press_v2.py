@@ -14,7 +14,7 @@ from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict, Field, Strict, model_validator
 
-from goblinshift.catalog.pdf_press_v1 import PageNumber
+from goblinshift.catalog.pdf_press_common import PageNumber
 from goblinshift.processing.pdf_press import (
     DEFAULT_PAGES_PER_DOCUMENT,
     MAX_OUTPUT_PAGES,
@@ -53,9 +53,7 @@ class PageRangeParameters(BaseModel):
 
 
 class PdfPressV2Parameters(BaseModel):
-    model_config = ConfigDict(
-        extra="forbid", strict=True, frozen=True, title="PdfPressV2Parameters"
-    )
+    model_config = _STRICT
 
     operation: Annotated[Operation, Strict(False)] = Operation.MERGE
     # Só no split: 1 separa página a página; N, em grupos de N.

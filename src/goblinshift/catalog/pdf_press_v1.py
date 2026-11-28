@@ -6,20 +6,19 @@ apontar o campo sem duplicar a regra. Dentro da versão 1, schema, defaults e en
 
 Duas recusas moram aqui e não na biblioteca, porque dependem do que o cliente enviou de fato:
 `pages_per_document` explícito fora do `split` (como o `name_prefix` do Detox, A13) e, na
-aceitação, a página citada de um upload que não está em `input_upload_ids` (`upload_references`).
+aceitação, a página citada de um upload que não está em `input_upload_ids` (`upload_references`,
+em `pdf_press_common`).
 Por isso parâmetros já resolvidos não devem ser validados de novo por este modelo.
 """
 
-from collections.abc import Mapping, Sequence
 from typing import Annotated, Self
 from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict, Field, Strict, model_validator
 
-from goblinshift.catalog.references import UploadReference
+from goblinshift.catalog.pdf_press_common import PageNumber
 from goblinshift.processing.pdf_press import (
     DEFAULT_PAGES_PER_DOCUMENT,
-    MAX_INPUT_PAGES,
     MAX_OUTPUT_PAGES,
     InvalidParametersError,
     Operation,
@@ -28,8 +27,6 @@ from goblinshift.processing.pdf_press import (
 )
 
 _STRICT = ConfigDict(extra="forbid", strict=True, frozen=True)
-
-type PageNumber = Annotated[int, Field(ge=1, le=MAX_INPUT_PAGES)]
 
 
 class PageSelectionParameters(BaseModel):
@@ -70,25 +67,3 @@ class PdfPressV1Parameters(BaseModel):
         if self.select is not None:
             select = tuple(PageRange.single(str(p.upload_id), p.page_number) for p in self.select)
         return Params(self.operation, self.pages_per_document, select)
-
-
-def upload_references(parameters: Mapping[str, object]) -> tuple[UploadReference, ...]:
-    """Uploads citados pelo `select` dos parâmetros já resolvidos, com o campo de cada um.
-
-    Lê só o `upload_id` de cada item do mapa canônico, sem o parser de uma versão: vale para a
-    página da v1 e para o intervalo da v2 (ADR 070), com o mesmo resultado na v1.
-    """
-    selection = parameters.get("select") or ()
-    if not isinstance(selection, Sequence) or isinstance(selection, str):
-        raise TypeError("select resolvido não é uma lista")
-    return tuple(
-        UploadReference(("select", str(index), "upload_id"), UUID(_upload_id(item)))
-        for index, item in enumerate(selection)
-    )
-
-
-def _upload_id(item: object) -> str:
-    upload_id = item.get("upload_id") if isinstance(item, Mapping) else None
-    if not isinstance(upload_id, str):
-        raise TypeError("item de select resolvido sem upload_id")
-    return upload_id

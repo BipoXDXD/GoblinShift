@@ -4,19 +4,23 @@ import hashlib
 import uuid
 from datetime import UTC, datetime
 from pathlib import Path
+from typing import get_args
 
 import pikepdf
 import pytest
 from pydantic import ValidationError
 
 from goblinshift.catalog import CATALOG, InvalidParametersError, VersionStatus
-from goblinshift.catalog.pdf_press_v1 import PdfPressV1Parameters, upload_references
+from goblinshift.catalog.pdf_press_common import upload_references
+from goblinshift.catalog.pdf_press_v1 import PdfPressV1Parameters
+from goblinshift.catalog.pdf_press_v2 import Rotation
 from goblinshift.catalog.references import UploadReference
 from goblinshift.catalog.versions import PDF_PRESS_V2_MERGE_DEADLINE, sunset_after_merge
 from goblinshift.processing.output_dir import FileSystemOutputDir
 from goblinshift.processing.pdf_press import (
     MAX_INPUT_PAGES,
     MAX_OUTPUT_PAGES,
+    ROTATIONS,
     Compression,
     Operation,
     PageRange,
@@ -376,3 +380,8 @@ def test_v1_fica_deprecated_com_sunset_e_v2_e_a_atual() -> None:
     assert v2.status is VersionStatus.CURRENT
     assert v2.limits == v1.limits
     assert v2.upload_references is v1.upload_references
+
+
+def test_literal_rotation_do_catalogo_e_o_de_rotations() -> None:
+    # O schema publica o literal; a biblioteca valida por ROTATIONS: os dois não podem divergir.
+    assert get_args(Rotation.__value__) == ROTATIONS
