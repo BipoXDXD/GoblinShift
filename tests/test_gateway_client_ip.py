@@ -35,6 +35,7 @@ from tests.gateway_support import (
     docker,
     gateway_image,
     gateway_proxy,
+    gateway_security_args,
     proxy_header,
     without_origin_certificate,
 )
@@ -119,6 +120,7 @@ def gateway(tmp_path_factory: pytest.TempPathFactory) -> Iterator[Gateway]:
         )  # fmt: skip
         docker(
             "run", "-d", "--name", proxy, "--network", network, "-p", "127.0.0.1::443",
+            *gateway_security_args(),
             "-v", f"{workdir / 'caddy'}:/etc/caddy:ro", image,
         )  # fmt: skip
         published = docker("port", proxy, "443/tcp").splitlines()[0].rsplit(":", 1)[1]
@@ -173,8 +175,31 @@ def test_lista_so_vale_nos_sites_atras_da_cloudflare() -> None:
         assert "CF-Connecting-IP" not in text, path
 
 
+# Cabeçalhos de resposta que só o site do GoblinShift emite (tests/test_caddy_headers.py).
+CABECALHOS_DO_GOBLINSHIFT = (
+    "header -Server",
+    'header Strict-Transport-Security "max-age=63072000; includeSubDomains"',
+)
+
+
+def _sem_cabecalhos_de_resposta(site: str) -> str:
+    """Tira as linhas de `CABECALHOS_DO_GOBLINSHIFT` e o comentário logo acima de cada uma."""
+    linhas = site.splitlines(keepends=True)
+    fica = [True] * len(linhas)
+    for i, linha in enumerate(linhas):
+        if linha.strip() in CABECALHOS_DO_GOBLINSHIFT:
+            fica[i] = False
+            j = i - 1
+            while j >= 0 and linhas[j].startswith(" #"):
+                fica[j] = False
+                j -= 1
+    return "".join(linha for linha, manter in zip(linhas, fica, strict=True) if manter)
+
+
 def test_site_do_stillon_tem_a_mesma_regra_do_site_do_goblinshift() -> None:
-    goblinshift = (SITES / "goblinshift.dev.caddy").read_text()
+    # Os cabeçalhos de resposta (HSTS do www, `header -Server`) são do GoblinShift
+    # (tests/test_caddy_headers.py); a regra comparada é a da Cloudflare e do proxy.
+    goblinshift = _sem_cabecalhos_de_resposta((SITES / "goblinshift.dev.caddy").read_text())
     expected = goblinshift.replace(GOBLINSHIFT, STILLON).replace("172.31.0.4:80", "172.31.0.3:80")
 
     assert (SITES / "stillon.tech.caddy").read_text() == expected
@@ -266,6 +291,21 @@ def _issue_certificate(directory: Path, host: str) -> None:
     )
 
 
+def _certificates_volume(certificates: Path, volume: str) -> None:
+    """Copia os certificados para um volume como na produção: root:root, modo 600.
+
+    O `openssl` grava a chave 600 com o UID de quem roda o teste (1001 no runner da CI). O root
+    do proxy, sem DAC_OVERRIDE, não lê arquivo 600 de outro dono: montar a pasta do host direto
+    falharia no Linux, e passaria no Docker Desktop, que não aplica dono e modo.
+    """
+    docker("volume", "create", volume)
+    docker(
+        "run", "--rm", "--network", "none", "--entrypoint", "sh",
+        "-v", f"{certificates}:/src:ro", "-v", f"{volume}:/dst", gateway_image(),
+        "-c", "cp /src/* /dst/ && chown 0:0 /dst/* && chmod 600 /dst/*",
+    )  # fmt: skip
+
+
 def _served_certificate(port: int, host: str) -> bytes:
     """Certificado que o gateway entrega no handshake com este SNI, em DER."""
     # Certificado autoassinado do teste: quem confere é a comparação com o arquivo.
@@ -300,6 +340,7 @@ class OriginGateway:
     port: int
     config: Path
     certificates: Path
+    volume: str
 
     def validate(self, *mounts: str) -> subprocess.CompletedProcess[str]:
         """Roda o `caddy validate` da configuração num container novo, com estas montagens."""
@@ -324,8 +365,10 @@ def origin_gateway(tmp_path_factory: pytest.TempPathFactory) -> Iterator[OriginG
     suffix = uuid.uuid4().hex[:8]
     network = f"gs-test-origem-{suffix}"
     proxy = f"gs-test-origem-proxy-{suffix}"
+    volume = f"gs-test-origem-certs-{suffix}"
     docker("network", "create", network)
     try:
+        _certificates_volume(certificates, volume)
         subnet = docker(
             "network", "inspect", "-f", "{{(index .IPAM.Config 0).Subnet}}", network
         ).strip()
@@ -334,15 +377,22 @@ def origin_gateway(tmp_path_factory: pytest.TempPathFactory) -> Iterator[OriginG
             (config / "conf.d" / site.name).write_text(site.read_text())
         docker(
             "run", "-d", "--name", proxy, "--network", network, "-p", "127.0.0.1::443",
+            *gateway_security_args(),
             "-v", f"{config}:/etc/caddy:ro",
-            "-v", f"{certificates}:{ORIGIN_CERT_DIR}:ro", gateway_image(),
+            "-v", f"{volume}:{ORIGIN_CERT_DIR}:ro", gateway_image(),
         )  # fmt: skip
         port = int(docker("port", proxy, "443/tcp").splitlines()[0].rsplit(":", 1)[1])
         _wait_for_certificate(port, GOBLINSHIFT)
-        yield OriginGateway(port, config, certificates)
+        yield OriginGateway(port, config, certificates, volume)
     finally:
         subprocess.run(  # noqa: S603 - nomes gerados pelo teste, sem shell
             ["docker", "rm", "--force", proxy],  # noqa: S607
+            capture_output=True,
+            check=False,
+            timeout=DOCKER_TIMEOUT_SECONDS,
+        )
+        subprocess.run(  # noqa: S603 - nome gerado pelo teste, sem shell
+            ["docker", "volume", "rm", "--force", volume],  # noqa: S607
             capture_output=True,
             check=False,
             timeout=DOCKER_TIMEOUT_SECONDS,
@@ -367,7 +417,7 @@ def test_gateway_entrega_o_certificado_de_origem(
 def test_configuracao_com_os_arquivos_do_certificado_e_valida(
     origin_gateway: OriginGateway,
 ) -> None:
-    result = origin_gateway.validate("-v", f"{origin_gateway.certificates}:{ORIGIN_CERT_DIR}:ro")
+    result = origin_gateway.validate("-v", f"{origin_gateway.volume}:{ORIGIN_CERT_DIR}:ro")
 
     assert result.returncode == 0, result.stderr
 

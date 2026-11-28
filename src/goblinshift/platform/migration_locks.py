@@ -14,10 +14,11 @@ from collections import deque
 from collections.abc import Callable, Collection, Iterable, Iterator, Mapping
 from functools import partial
 
-import psycopg
 from alembic.runtime.migration import MigrationContext, MigrationInfo, RevisionStep
 from alembic.util import CommandError
 from sqlalchemy.exc import OperationalError
+
+from goblinshift.platform.db import is_lock_timeout
 
 # Curto: enquanto a migration espera o lock, as consultas da API que chegam depois esperam
 # atrás dela.
@@ -85,13 +86,6 @@ def session_settings(lock_timeout_ms: int) -> list[str]:
         f"SET lock_timeout = {lock_timeout_ms}",
         f"SET statement_timeout = {MIGRATION_STATEMENT_TIMEOUT_MS}",
     ]
-
-
-def is_lock_timeout(error: BaseException) -> bool:
-    """O comando desistiu do lock (55P03), e não de outra coisa."""
-    return isinstance(error, OperationalError) and isinstance(
-        error.orig, psycopg.errors.LockNotAvailable
-    )
 
 
 def run_with_lock_retries(

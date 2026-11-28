@@ -56,3 +56,23 @@ def test_download_tem_location_propria_sem_buffer() -> None:
         "error_page 502 504 = @upstream_unavailable;",
     } <= set(directives)
     assert f"send_timeout {int(TRANSFER_IDLE_TIMEOUT.total_seconds())}s;" in directives
+
+
+def test_proxy_da_api_nunca_grava_resposta_em_arquivo_temporario() -> None:
+    """R10 (#442, 33a): com a raiz só leitura, `/var/cache/nginx` é `tmpfs` e conta na memória.
+
+    Sem arquivo temporário, a resposta maior que os buffers sai no ritmo do cliente, em vez de ir
+    para o `proxy_temp` (até 1 GiB por resposta por padrão). Uma vez só por location: a diretiva
+    repetida no mesmo nível é erro de configuração.
+    """
+    api_locations = {
+        name: directives
+        for name, directives in location_blocks().items()
+        if "proxy_pass $api;" in directives
+    }
+
+    assert api_locations
+    assert {
+        name: directives.count("proxy_max_temp_file_size 0;")
+        for name, directives in api_locations.items()
+    } == dict.fromkeys(api_locations, 1)

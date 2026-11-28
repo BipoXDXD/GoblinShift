@@ -27,6 +27,10 @@ from typing import Any
 import pytest
 import yaml
 
+from goblinshift.entrypoints.api.security_headers import _COMMON_HEADERS
+from tests.api.test_security_headers import PERMISSIONS_POLICY
+from tests.test_nginx_logs import nginx_read_only_args
+
 ROOT = Path(__file__).resolve().parent.parent
 DOCKERFILE = ROOT / "docker" / "web.Dockerfile"
 IMAGE = "goblinshift-web:test"
@@ -60,7 +64,7 @@ SPA_CSP = (
     "default-src 'self'; script-src 'self' 'wasm-unsafe-eval'; connect-src 'self' blob:; "
     "img-src 'self' blob: data:; "
     "style-src 'self'; object-src 'none'; base-uri 'none'; frame-ancestors 'none'; "
-    "form-action 'self'"
+    "form-action 'self'; frame-src 'none'"
 )
 IMMUTABLE = "public, max-age=31536000, immutable"
 SECURITY_TXT = ROOT / "web" / "public" / ".well-known" / "security.txt"
@@ -82,6 +86,37 @@ def _yaml(path: Path) -> Any:
 
 
 # Contrato nos arquivos ---------------------------------------------------------------------
+
+
+SNIPPETS = ROOT / "docker" / "nginx" / "snippets"
+ADD_HEADER = re.compile(r'^add_header (?P<nome>[\w-]+) "(?P<valor>[^"]*)" always;$', re.M)
+
+
+def _snippet_header(snippet: str, nome: str) -> str:
+    valores = [
+        m["valor"]
+        for m in ADD_HEADER.finditer((SNIPPETS / snippet).read_text(encoding="utf-8"))
+        if m["nome"] == nome
+    ]
+    assert len(valores) == 1, (snippet, nome, valores)
+    return valores[0]
+
+
+def test_permissions_policy_e_a_mesma_nos_tres_lugares() -> None:
+    api = dict(_COMMON_HEADERS)["permissions-policy"]
+
+    assert {
+        "spa-headers.conf": _snippet_header("spa-headers.conf", "Permissions-Policy"),
+        "problem-headers.conf": _snippet_header("problem-headers.conf", "Permissions-Policy"),
+        "api": api,
+    } == dict.fromkeys(("spa-headers.conf", "problem-headers.conf", "api"), PERMISSIONS_POLICY)
+
+
+def test_csp_da_spa_proibe_frame() -> None:
+    csp = _snippet_header("spa-headers.conf", "Content-Security-Policy")
+
+    assert "frame-src 'none'" in [d.strip() for d in csp.split(";")]
+    assert csp == SPA_CSP
 
 
 def test_estagio_node_do_build_e_fixado_por_digest() -> None:
@@ -281,7 +316,8 @@ def stack() -> Iterator[Stack]:
         docker_ok(*common, api, "--network", network, "--network-alias", "api",
                   PYTHON_IMAGE, "python", "-c", FAKE_API)  # fmt: skip
         docker_ok(*common, nginx, "--network", network, "--ip", NGINX_IP,
-                  "--publish", "127.0.0.1::80", *_compose_privileges("nginx"), IMAGE)  # fmt: skip
+                  "--publish", "127.0.0.1::80", *_compose_privileges("nginx"),
+                  *nginx_read_only_args(), IMAGE)  # fmt: skip
         port = docker_ok("port", nginx, "80/tcp").splitlines()[0].rsplit(":", 1)[1]
         current = Stack(f"http://127.0.0.1:{port}", nginx)
         _wait_until_ready(current)
@@ -335,7 +371,7 @@ def _assert_spa_security_headers(response: Response) -> None:
     assert response.headers["referrer-policy"] == "strict-origin-when-cross-origin"
     assert response.headers["cross-origin-opener-policy"] == "same-origin"
     assert response.headers["cross-origin-resource-policy"] == "same-origin"
-    assert response.headers["permissions-policy"] == "camera=(), microphone=(), geolocation=()"
+    assert response.headers["permissions-policy"] == PERMISSIONS_POLICY
 
 
 class TestSpa:

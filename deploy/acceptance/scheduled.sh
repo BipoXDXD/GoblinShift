@@ -11,11 +11,29 @@
 # depois do `start`; se ele não voltar, o resultado é /fail. Só o SIGKILL não deixa religar. A
 # manutenção, o próprio run.py suspende e religa (ADR 017).
 #
+# Antes de tudo, o script toma a trava da publicação do projeto (a release.lock que o receptor,
+# deploy/coolify/release/receiver.py, toma com LOCK_NB) e a segura até o fim: um merge na janela
+# recriaria worker e manutenção no meio das sondas, e a manutenção nova apagaria as sondas. Espera
+# até 15 min pela publicação em curso, que costuma ser curta; ocupada ou ausente depois disso, pinga /fail e sai com
+# 75 sem tocar em nada. A publicação que chega durante o teste falha na hora e precisa ser rodada
+# de novo depois da janela (README, "Aceitação semanal, agendada"). A trava não é a host.lock,
+# que barraria por até 1 h a publicação dos outros projetos do host.
+#
+# Com Persistent=true, o teste perdido roda logo depois do boot, e o worker pode ainda não ter
+# subido: a menos de 30 min do boot, o script espera até 10 min o worker aparecer no `docker ps`
+# antes de procurá-lo para parar. Se ele não aparecer, a aceitação roda sem worker para parar.
+# SIGTERM durante a espera pinga /fail e sai sem tocar no worker.
+#
 # Roda da cópia que o deploy/acceptance/install.sh faz em /usr/local/lib/goblinshift (do root), nunca
 # do checkout, que pertence ao usuário goblinshift; o lib.sh e o pacote vêm da mesma cópia.
 #
 # Variável (EnvironmentFile da unit, /etc/goblinshift/acceptance.env):
 #   ACCEPTANCE_HEALTHCHECK_URL   URL de ping do check; é segredo e vai pelo stdin do curl
+#   ACCEPTANCE_RELEASE_LOCK      opcional; a trava da publicação (padrão abaixo, só para o teste)
+#   ACCEPTANCE_LOCK_WAIT_S       opcional; espera pela trava, 900 s (só para o teste)
+#   ACCEPTANCE_PROC_UPTIME       opcional; /proc/uptime (só para o teste)
+#   ACCEPTANCE_WORKER_WAIT_S     opcional; espera pelo worker depois do boot, 600 s (só para o teste)
+#   ACCEPTANCE_WORKER_POLL_S     opcional; intervalo entre as consultas, 5 s (só para o teste)
 #
 # Uso: sudo systemctl start goblinshift-acceptance.service
 set -euo pipefail
@@ -30,6 +48,44 @@ APP_PROJECT=goblinshift
 # prazo leva SIGKILL e volta pelo lease vencido.
 WORKER_STOP_S=30
 SIGTERM_EXIT=143
+RELEASE_LOCK="${ACCEPTANCE_RELEASE_LOCK:-/var/lib/coolify-release/${APP_PROJECT}/release.lock}"
+LOCK_WAIT_S="${ACCEPTANCE_LOCK_WAIT_S:-900}"
+# EX_TEMPFAIL: a aceitação não rodou, mas nada foi tocado.
+LOCK_BUSY_EXIT=75
+PROC_UPTIME="${ACCEPTANCE_PROC_UPTIME:-/proc/uptime}"
+RECENT_BOOT_S=1800
+WORKER_WAIT_S="${ACCEPTANCE_WORKER_WAIT_S:-600}"
+WORKER_POLL_S="${ACCEPTANCE_WORKER_POLL_S:-5}"
+
+# find_workers: IDs dos workers rodando do projeto, um por linha.
+find_workers() {
+  docker ps --quiet \
+    --filter="label=com.docker.compose.project=${APP_PROJECT}" \
+    --filter="label=com.docker.compose.service=worker"
+}
+
+# wait_for_worker_after_boot: perto do boot, espera o worker religar antes da procura que decide
+# se ele para. Falha do `docker ps` aqui conta como "ainda não": o daemon pode estar subindo, e a
+# procura de verdade, depois, é que reprova se ele continuar falhando. Sai com 1 se o serviço
+# recebeu SIGTERM durante a espera.
+wait_for_worker_after_boot() {
+  local uptime_s deadline
+  uptime_s="$(cut -d. -f1 "$PROC_UPTIME" 2>/dev/null)" || return 0
+  [[ "$uptime_s" =~ ^[0-9]+$ ]] && ((uptime_s < RECENT_BOOT_S)) || return 0
+  echo "máquina ligada há ${uptime_s} s: esperando o worker subir (até ${WORKER_WAIT_S} s)"
+  deadline=$((SECONDS + WORKER_WAIT_S))
+  while ((interrupted == 0)); do
+    [[ -n "$(find_workers 2>/dev/null)" ]] && return 0
+    ((SECONDS < deadline)) || break
+    # Em segundo plano: o `wait` volta assim que chega o sinal, e o `sleep` morto pelo SIGTERM do
+    # cgroup não derruba o script pelo `set -e`.
+    sleep "$WORKER_POLL_S" &
+    wait "$!" || true
+  done
+  ((interrupted == 0)) || return 1
+  echo "o worker não apareceu em ${WORKER_WAIT_S} s depois do boot; o teste segue sem parar" \
+    "worker nenhum" >&2
+}
 
 # restart_workers: religa e confere; sai com erro se algum não ficou rodando. Interrompido, o
 # cliente do `docker stop` pode ter morrido com a parada ainda em curso no daemon. O `start` nessa
@@ -48,6 +104,15 @@ restart_workers() {
   done
 }
 
+# Somente leitura: o flock vale em qualquer modo, e a unit tem ProtectSystem=strict. O descritor 9
+# fica aberto até o fim do script, e com ele a trava.
+if ! { exec 9<"$RELEASE_LOCK"; } 2>/dev/null || ! flock -w "$LOCK_WAIT_S" 9; then
+  echo "a trava da publicação ($RELEASE_LOCK) está ocupada ou ausente depois de ${LOCK_WAIT_S} s;" \
+    "a aceitação não rodou e o worker não foi tocado" >&2
+  healthcheck_ping "$ACCEPTANCE_HEALTHCHECK_URL" "/fail"
+  exit "$LOCK_BUSY_EXIT"
+fi
+
 healthcheck_ping "$ACCEPTANCE_HEALTHCHECK_URL" "/start"
 
 # O SIGTERM do systemd vai ao cgroup inteiro: o `docker` e o python em curso morrem ou limpam por
@@ -55,12 +120,17 @@ healthcheck_ping "$ACCEPTANCE_HEALTHCHECK_URL" "/start"
 interrupted=0
 trap 'interrupted=1' TERM INT
 
+if ! wait_for_worker_after_boot; then
+  # Nada foi tocado ainda: sem parar nem religar o worker.
+  echo "interrompido durante a espera pelo worker; o worker não foi tocado" >&2
+  healthcheck_ping "$ACCEPTANCE_HEALTHCHECK_URL" "/fail"
+  exit "$SIGTERM_EXIT"
+fi
+
 status=0
 # Em variável, e não em `< <(...)`: a substituição de processo esconde a falha do `docker ps`, e
 # uma lista vazia por erro pareceria worker parado.
-running="$(docker ps --quiet \
-  --filter="label=com.docker.compose.project=${APP_PROJECT}" \
-  --filter="label=com.docker.compose.service=worker")" || status=$?
+running="$(find_workers)" || status=$?
 mapfile -t workers < <(printf '%s' "$running")
 
 if ((${#workers[@]})); then

@@ -44,3 +44,13 @@ A fatia 6 traz o login por Google (OIDC) e GitHub (OAuth 2.0), a sessão web, o 
 - `tests/test_settings_secrets.py`: produção sem segredo, sem ID de cliente ou sem origem `https` não sobe.
 - Frente A: callback com `state` válido sem o cookie de login do mesmo navegador é recusado (regressão do CVE-2026-41425), e o `redirect_uri` ignora `Host: evil.example`.
 - Frente B: atributos dos cookies, CSRF por toda rota mutável da matriz e um teste de streaming do download com o middleware de cabeçalhos.
+
+## Atualização de 2026-11-27 (#442)
+
+Trocar `csrf_secret` invalidaria os tokens CSRF emitidos: o cookie `__Host-gs_csrf` não tem Max-Age e só muda com uma sessão nova, então toda mutação daria 403 por até 8 h (#442, 46a). `POST /auth/logout` confere só a origem e o par cookie e header, nunca o HMAC, e sai mesmo assim. Para trocar sem trancar ninguém:
+
+1. montar o segredo atual num arquivo novo apontado por `GS_CSRF_SECRET_PREVIOUS_FILE` e o segredo novo em `GS_CSRF_SECRET_FILE`, e reiniciar a API (a chave anterior segue as regras da atual: mínimo de 32 caracteres, arquivo legível);
+2. esperar `ABSOLUTE_TIMEOUT` (8 h): toda sessão aberta com a chave antiga terá vencido;
+3. retirar `GS_CSRF_SECRET_PREVIOUS_FILE` e o arquivo, e reiniciar.
+
+A variável não fica ligada no Compose nem no Coolify: o arquivo só existe durante a troca, e montá-lo sempre obrigaria a criá-lo no host.
