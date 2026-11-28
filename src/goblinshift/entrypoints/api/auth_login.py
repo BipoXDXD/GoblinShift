@@ -22,6 +22,7 @@ As rotas são `async` porque a integração Starlette do Authlib é; o banco é 
 do pool, em transação curta, e nunca durante uma chamada ao provedor.
 """
 
+import asyncio
 import logging
 import re
 from collections.abc import Awaitable, Callable
@@ -38,13 +39,14 @@ from authlib.integrations.starlette_client import (  # type: ignore[import-untyp
 )
 from fastapi import APIRouter, FastAPI, Request
 from fastapi.responses import RedirectResponse, Response
-from httpx2 import HTTPError, HTTPStatusError
+from httpx2 import AsyncHTTPTransport, HTTPError, HTTPStatusError
 from joserfc.errors import JoseError
 from sqlalchemy.orm import Session, sessionmaker
 from starlette.concurrency import run_in_threadpool
 
 from goblinshift.entrypoints.api.cookies import SESSION_COOKIE, set_session_cookies
 from goblinshift.entrypoints.api.dependencies import Now
+from goblinshift.entrypoints.api.oauth_http import MAX_PROVIDER_RESPONSE_BYTES, CappedTransport
 from goblinshift.entrypoints.api.problems import ApiProblem, ProblemCode, request_id_of
 from goblinshift.identity import (
     AuditEventType,
@@ -96,8 +98,12 @@ MAX_RETURN_TO_CHARS = 512
 DEFAULT_RETURN_TO = "/"
 REAUTH_PROMPT = "select_account"
 # Falhas esperadas de um provedor externo ou de um callback forjado. Qualquer outra exceção é
-# defeito nosso e segue para o handler de erro 500.
-LOGIN_ERRORS = (OAuthError, JoseError, HTTPError, ValueError)
+# defeito nosso e segue para o handler de erro 500. `TimeoutError` é o prazo total; `TypeError`
+# vem do Authlib lendo JSON válido com forma errada (a JWKS em lista ou `null`).
+LOGIN_ERRORS = (OAuthError, JoseError, HTTPError, ValueError, TimeoutError, TypeError)
+# Prazo do callback inteiro (token, JWKS, `/user`) em múltiplos de `oauth_http_timeout_s`, que o
+# httpx aplica a cada fase de cada chamada.
+LOGIN_FETCH_TIMEOUT_FACTOR = 2
 
 IdentityReader = Callable[[Any, Request], Awaitable[ExternalIdentity]]
 
@@ -109,8 +115,11 @@ class LoginProvider:
     oauth_app: Any  # StarletteOAuth2App do Authlib
     read_identity: IdentityReader
 
-    async def fetch_identity(self, request: Request) -> ExternalIdentity:
-        return await self.read_identity(self.oauth_app, request)
+    async def fetch_identity(self, request: Request, deadline_s: float) -> ExternalIdentity:
+        """Token, JWKS e `/user` dentro de um prazo só: o do httpx vale por fase de cada chamada,
+        e um provedor que pinga bytes nunca estoura nenhuma delas."""
+        async with asyncio.timeout(deadline_s):
+            return await self.read_identity(self.oauth_app, request)
 
 
 LoginProviders = dict[ProviderName, LoginProvider]
@@ -127,9 +136,12 @@ def build_login_providers(
 ) -> LoginProviders:
     """Clientes do Authlib para os provedores configurados; `transport` existe para os testes."""
     oauth = OAuth(cache=cache)
-    http = {"timeout": web.oauth_http_timeout_s}
-    if transport is not None:
-        http["transport"] = transport
+    http = {
+        "timeout": web.oauth_http_timeout_s,
+        "transport": CappedTransport(
+            transport or AsyncHTTPTransport(), MAX_PROVIDER_RESPONSE_BYTES
+        ),
+    }
     providers: LoginProviders = {}
     if web.google is not None:
         providers[ProviderName.GOOGLE] = LoginProvider(
@@ -260,14 +272,16 @@ async def finish_login(request: Request, provider: str, now: Now) -> Response:
     if login_provider is None:
         await run_in_threadpool(_record_login_failure, factory, attempt)
         return _login_failed(attempt)
+    web: WebIdentityConfig = request.app.state.web_identity
     try:
-        identity = await login_provider.fetch_identity(request)
+        identity = await login_provider.fetch_identity(
+            request, LOGIN_FETCH_TIMEOUT_FACTOR * web.oauth_http_timeout_s
+        )
     except LOGIN_ERRORS as exc:
         logger.warning("login %s recusado: %s", name, _failure_kind(exc))
         await run_in_threadpool(_record_login_failure, factory, attempt)
         return _login_failed(attempt)
 
-    web: WebIdentityConfig = request.app.state.web_identity
     result = await run_in_threadpool(
         _complete_login,
         factory,
