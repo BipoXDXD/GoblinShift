@@ -10,11 +10,15 @@ dos tipos novos e a coluna e, se houver algum desses dados, só roda com
 from collections.abc import Iterator
 
 import pytest
+from alembic.config import Config
+from alembic.script import ScriptDirectory
 from sqlalchemy import Engine, inspect, text
 from sqlalchemy.exc import DBAPIError, IntegrityError
 
+from goblinshift.capacity import BYTE_AMOUNT_CEILING
 from goblinshift.platform.db import make_engine
 from goblinshift.platform.settings import Settings
+from tests.alembic_cli import REPO_ROOT
 from tests.conftest import downgrade_migrations, run_migrations
 
 pytestmark = pytest.mark.integration
@@ -190,7 +194,16 @@ def test_downgrade_sem_dado_novo_desce_sem_licenca(db_settings: Settings, engine
 
 # --- Tetos de reserva (Tarefa 10): barreira contra o estouro do bigint -------------------------
 
-CEILING = 2**50
+CEILING = BYTE_AMOUNT_CEILING
+
+
+def test_literal_do_teto_na_migracao_bate_com_a_constante() -> None:
+    # A migração é congelada e não importa código vivo: repete o valor como literal.
+    script = ScriptDirectory.from_config(Config(str(REPO_ROOT / "alembic.ini")))
+    migration = script.get_revision(REVISION)
+    assert migration is not None
+
+    assert migration.module._CEILING == BYTE_AMOUNT_CEILING
 
 
 def new_user(engine: Engine) -> str:

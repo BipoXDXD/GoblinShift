@@ -51,6 +51,8 @@ _ACTOR_CHECK = "audit_event_actor_check"
 _INPUT_CEILING_CHECK = "account_quota_input_bytes_per_24h_ceiling_check"
 _POOL_CEILING_CHECK = "capacity_pool_max_amount_ceiling_check"
 # 2^50 bytes (1 PiB): `reserved + amount` de dois valores até aqui nunca chega perto de 2^63.
+# Literal porque a migração é congelada e não importa código vivo; tem de bater com
+# `goblinshift.capacity.BYTE_AMOUNT_CEILING` (tests/test_migration_0032.py confere).
 _CEILING = 2**50
 _TYPES_0016 = (
     "'LOGIN_SUCCEEDED', 'LOGIN_FAILED', 'LOGOUT', 'LOGOUT_ALL', 'KEY_ISSUED', 'KEY_REVOKED', "
@@ -94,10 +96,8 @@ def downgrade() -> None:
         )
     op.drop_constraint(op.f(_POOL_CEILING_CHECK), "capacity_pool", type_="check")
     op.drop_constraint(op.f(_INPUT_CEILING_CHECK), "account_quota", type_="check")
-    op.execute(
-        "DELETE FROM audit_event "
-        "WHERE event_type IN ('ACCOUNT_CREATED', 'ACCOUNT_LOOKED_UP', 'ACCOUNT_APPROVED')"
-    )
+    # _NEW_TYPES é constante do módulo, sem entrada externa: não há o que injetar.
+    op.execute(f"DELETE FROM audit_event WHERE event_type IN ({_NEW_TYPES})")  # noqa: S608
     op.drop_constraint(op.f(_ACTOR_CHECK), "audit_event", type_="check")
     op.drop_column("audit_event", "actor")
     _replace_event_type_check(_TYPES_0016)
