@@ -1,0 +1,10 @@
+{
+  "notice": {
+    "id": "e2e-incidente",
+    "kind": "incident",
+    "title": "Investigamos um acesso indevido",
+    "body": "Por precaução, as chaves de API criadas antes de hoje foram revogadas. Crie uma nova para continuar.",
+    "link": { "href": "/privacidade", "label": "Ler o Aviso de Privacidade" },
+    "from": "2026-01-01T00:00:00Z"
+  }
+}

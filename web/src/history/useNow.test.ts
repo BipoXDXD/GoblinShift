@@ -17,7 +17,7 @@ describe("useNow", () => {
 
   it("começa no relógio e anda a cada intervalo", () => {
     let clock = START;
-    const { result } = renderHook(() => useNow(() => clock, MINUTE));
+    const { result } = renderHook(() => useNow(() => clock, MINUTE, 0));
     expect(result.current).toBe(START);
 
     clock = START + 3 * MINUTE;
@@ -30,12 +30,43 @@ describe("useNow", () => {
 
   it("antes do intervalo, não relê o relógio", () => {
     let clock = START;
-    const { result } = renderHook(() => useNow(() => clock, MINUTE));
+    const { result } = renderHook(() => useNow(() => clock, MINUTE, 0));
 
     clock = START + MINUTE;
     act(() => {
       vi.advanceTimersByTime(MINUTE - 1);
     });
+
+    expect(result.current).toBe(START);
+  });
+
+  it("relê o relógio quando a chave muda, sem esperar o intervalo", () => {
+    let clock = START;
+    const { result, rerender } = renderHook(({ key }) => useNow(() => clock, MINUTE, key), {
+      initialProps: { key: 0 },
+    });
+
+    clock = START + 3 * 60 * MINUTE;
+    rerender({ key: 1 });
+
+    expect(result.current).toBe(START + 3 * 60 * MINUTE);
+  });
+
+  it("com a mesma chave, o render não relê o relógio", () => {
+    let clock = START;
+    const { result, rerender } = renderHook(({ key }) => useNow(() => clock, MINUTE, key), {
+      initialProps: { key: 0 },
+    });
+
+    clock = START + MINUTE;
+    rerender({ key: 0 });
+
+    expect(result.current).toBe(START);
+  });
+
+  it("exige a chave de ressincronização", () => {
+    // @ts-expect-error: sem a chave, a tela não se acertaria com o relógio do servidor
+    const { result } = renderHook(() => useNow(() => START, MINUTE));
 
     expect(result.current).toBe(START);
   });
