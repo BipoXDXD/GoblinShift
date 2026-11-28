@@ -173,3 +173,32 @@ def test_par_ausente_divergente_ou_malformado_nao_confere(
 @given(st.text(max_size=200), st.text(max_size=200))
 def test_par_qualquer_nunca_levanta(cookie: str, header: str) -> None:
     csrf_pair_matches(cookie, header)
+
+
+# --- Troca da chave (#442, 46a) ---------------------------------------------------------------
+
+
+def test_token_da_chave_anterior_vale_so_com_ela_configurada() -> None:
+    token = issue_csrf_token(OTHER_KEY, SESSION_ID)
+
+    assert not csrf_token_matches(KEY, SESSION_ID, token, token)
+    assert csrf_token_matches(KEY, SESSION_ID, token, token, previous_key=OTHER_KEY)
+
+
+def test_token_da_chave_atual_continua_valendo_com_a_anterior_configurada() -> None:
+    token = issue_csrf_token(KEY, SESSION_ID)
+
+    assert csrf_token_matches(KEY, SESSION_ID, token, token, previous_key=OTHER_KEY)
+
+
+def test_token_de_outra_sessao_nao_vale_nem_com_a_anterior() -> None:
+    token = issue_csrf_token(OTHER_KEY, uuid4())
+
+    assert not csrf_token_matches(KEY, SESSION_ID, token, token, previous_key=OTHER_KEY)
+
+
+def test_header_diferente_do_cookie_nao_vale_nem_com_a_anterior() -> None:
+    token = issue_csrf_token(OTHER_KEY, SESSION_ID)
+    header = issue_csrf_token(OTHER_KEY, SESSION_ID)
+
+    assert not csrf_token_matches(KEY, SESSION_ID, token, header, previous_key=OTHER_KEY)

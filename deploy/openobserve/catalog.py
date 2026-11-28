@@ -129,6 +129,7 @@ CAUSE_COLUMNS: tuple[str, ...] = (
     "maintenance_runs_stuck_stopping",
     "maintenance_purge_limit_reached",
     "maintenance_accounts_deletion_overdue",
+    "maintenance_audit_events_overdue",
     "maintenance_storage_global_reserved_bytes",
     "maintenance_storage_global_max_bytes",
     "maintenance_missing_sweep_skipped",
@@ -192,6 +193,14 @@ SPAN_CAUSES: tuple[_SpanCause, ...] = (
         period_minutes=10,
         silence_minutes=60,
         destination=DestinationKey.URGENT,
+    ),
+    _SpanCause(
+        "causa-auditoria-atrasada",
+        "Retenção da auditoria atrasada: há eventos com mais de 91 dias, e a promessa é 90. A "
+        "entrada passou do que o laço apaga no prazo de cada ciclo; veja o runbook.",
+        period_minutes=10,
+        silence_minutes=180,
+        destination=DestinationKey.WARNING,
     ),
     _SpanCause(
         "causa-capacidade-global",
