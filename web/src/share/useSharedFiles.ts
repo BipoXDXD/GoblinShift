@@ -5,6 +5,8 @@ import { peekShared, takeSharedFiles } from "./sharedInbox";
 export interface SharedFiles {
   /** O compartilhamento tinha vencido ou já fora usado. */
   readonly expired: boolean;
+  /** Há compartilhamento e a caixa de entrada ainda não disse o que chegou nele. */
+  readonly reading: boolean;
   /** Nomes dos arquivos que esperam a decisão; eles seguem na caixa de entrada até lá. */
   readonly pending: readonly string[];
   /** A pessoa aceitou: os arquivos saem da caixa e vão para o lote. */
@@ -28,6 +30,7 @@ export function useSharedFiles(
 ): SharedFiles {
   const [expired, setExpired] = useState(false);
   const [pending, setPending] = useState<readonly string[]>([]);
+  const [readId, setReadId] = useState<string | null>(null);
   const peeked = useRef<string | null>(null);
   useEffect(() => {
     if (id === null || peeked.current === id) {
@@ -37,6 +40,7 @@ export function useSharedFiles(
     void peekShared(id)
       .catch(() => "expired" as const)
       .then((names) => {
+        setReadId(id);
         if (names === "expired") {
           setExpired(true);
         } else {
@@ -51,6 +55,7 @@ export function useSharedFiles(
   };
   return {
     expired,
+    reading: id !== null && readId !== id,
     pending,
     accept: async () => {
       const files = await take();

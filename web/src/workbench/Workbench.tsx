@@ -147,7 +147,8 @@ export function Workbench({
   const loadSampleFromButton = (): void => {
     sample.load(focusFilesField);
   };
-  useSampleRequest(sampleRequested, sample.load, onSampleRequested);
+  // Quem chega pelo Compartilhar já trouxe os próprios arquivos: o pedido de amostra só sai da URL.
+  useSampleRequest(sampleRequested, sharedId === null ? sample.load : null, onSampleRequested);
 
   const mutation = useMutation({
     mutationFn: (submission: Submission) => createRun(client, submission),
@@ -303,8 +304,10 @@ export function Workbench({
               }}
               notice={pickNotice?.tone === "info" ? pickNotice.message : null}
               extraAction={
-                // Com o compartilhado à espera da decisão, a amostra iria no mesmo lote.
+                // Com o compartilhado em leitura ou à espera da decisão, a amostra iria no
+                // mesmo lote.
                 entries.length === 0 &&
+                !shared.reading &&
                 shared.pending.length === 0 && (
                   <Button
                     type="button"
@@ -624,18 +627,18 @@ function useSample({ recipeId, fetcher, add, announce, entryCount }: SampleOptio
 }
 
 /**
- * Carrega a amostra pedida pela URL e avisa quem tirou o pedido dela. O modo estrito roda o efeito
- * duas vezes antes de a URL mudar; o segundo `load` não baixa de novo, porque o primeiro ainda
- * está em curso.
+ * Carrega a amostra pedida pela URL e avisa quem tirou o pedido dela. Com `load` nulo, o pedido é
+ * ignorado, mas o aviso sai do mesmo jeito. O modo estrito roda o efeito duas vezes antes de a URL
+ * mudar; o segundo `load` não baixa de novo, porque o primeiro ainda está em curso.
  */
 function useSampleRequest(
   requested: boolean,
-  load: () => void,
+  load: (() => void) | null,
   onRequested: (() => void) | undefined,
 ): void {
   useEffect(() => {
     if (requested) {
-      load();
+      load?.();
       onRequested?.();
     }
   }, [requested, load, onRequested]);
