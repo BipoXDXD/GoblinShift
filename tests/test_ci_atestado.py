@@ -157,11 +157,15 @@ def test_sbom_e_gerado_antes_de_atestar_e_nao_entra_na_verificacao() -> None:
         assert all("continue-on-error" not in passos[i] for i in atestados), nome
 
     # Só a proveniência bloqueia a publicação: nenhum verify pede o predicado do SBOM.
-    for passo in _workflow("coolify.yml")["jobs"]["publish-images"]["steps"]:
-        comando = passo.get("run", "")
-        if "gh attestation verify" in comando:
-            assert "--predicate-type" not in comando
-            assert "spdx" not in comando.lower()
+    verificacoes = [
+        passo["run"]
+        for passo in _workflow("coolify.yml")["jobs"]["publish-images"]["steps"]
+        if "gh attestation verify" in passo.get("run", "")
+    ]
+    assert verificacoes
+    for comando in verificacoes:
+        assert "--predicate-type" not in comando
+        assert "spdx" not in comando.lower()
 
 
 # `ci-oci.sh sbom` com um `docker` falso no PATH: ele grava os argumentos e escreve no diretório
@@ -245,8 +249,7 @@ def test_sbom_invalido_ou_trivy_com_erro_falha_alto(tmp_path: Path, env: dict[st
     resultado = _sbom(tmp_path, **env)
 
     assert resultado.returncode != 0
-    if "FAKE_DOCKER_STATUS" not in env:
-        assert "::error::" in resultado.stderr
+    assert "::error::" in resultado.stderr
 
 
 def test_sbom_recusa_plataforma_fora_do_release(tmp_path: Path) -> None:

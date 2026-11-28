@@ -95,7 +95,7 @@ case "$operation" in
     rm -f "$RUNNER_TEMP/$file"
     docker run --rm --network host --volume "$RUNNER_TEMP:/out" "$TRIVY_IMAGE" image \
       --image-src remote --platform "$4" --format spdx-json --output "/out/$file" \
-      "$repository@$digest"
+      "$repository@$digest" || fail "Trivy failed to generate the SBOM for $4"
     [[ -s "$RUNNER_TEMP/$file" ]] || fail "Trivy wrote no SBOM for $4"
     # actions/attest-sbom rejects predicates above 16 MiB; fail here with a clear message.
     (( $(wc -c < "$RUNNER_TEMP/$file") < 16 * 1024 * 1024 )) || fail "SBOM for $4 exceeds 16 MiB"
