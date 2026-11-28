@@ -43,6 +43,6 @@ O teste lê `-c max_connections=` do serviço postgres em `compose.yaml` e `depl
 ## Compliance
 
 - `tests/test_db_pool_budget.py`: a soma cabe no teto; a API fica em 10 + 5; worker, manutenção e `gs-admin` pedem o próprio pool ao compor o processo; o `env.py` pede o `MIGRATE_POOL`.
-- `tests/runs/test_worker_process.py`, `test_worker_completa_a_run_dentro_do_worker_pool`: roda o `serve` no processo do teste com o `WORKER_POOL`. Faz claim, renova o lease durante um `start` que bloqueia por dois leases, coleta e publica. O pico de conexões em uso, medido pelos eventos `checkout` e `checkin` do pool, fica em `WORKER_POOL.size` ou menos.
+- `tests/runs/test_worker_process.py`, `test_worker_completa_a_run_dentro_do_worker_pool`: roda o `serve` no processo do teste com o `WORKER_POOL`. Faz claim, renova o lease durante um `start` que bloqueia por dois leases, coleta e publica. O pico de conexões em uso, medido pelos eventos `checkout` e `checkin` do pool, é exatamente 1: o laço e a renovação nunca seguram conexão juntos.
 - `tests/test_db_pool_budget.py` também recusa `make_engine(` sem `pool=` fora de `api/app.py` e `GS_DB_POOL_SIZE` ou `GS_DB_POOL_MAX_OVERFLOW` em `compose.yaml` e `deploy/coolify/*.json`.
 - Os testes do `gs-admin` (`tests/identity/test_admin_cli*.py`) e das migrações rodam contra PostgreSQL com os pools de 1 conexão.

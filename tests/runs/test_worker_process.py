@@ -575,8 +575,8 @@ def test_worker_completa_a_run_dentro_do_worker_pool(
 ) -> None:
     """Claim, renovação do lease durante um `start` lento, coleta e publicação (ADR 073).
 
-    Mede no próprio processo as conexões do pool em uso ao mesmo tempo: o pico fica dentro do
-    `WORKER_POOL.size`, e o overflow é só margem.
+    Mede no próprio processo as conexões do pool em uso ao mesmo tempo: o pico é 1, e o resto
+    do `WORKER_POOL` é margem.
     """
     checkouts = PoolCheckouts()
     monkeypatch.setattr(worker_entrypoint, "make_engine", checkouts.make_engine)
@@ -610,4 +610,5 @@ def test_worker_completa_a_run_dentro_do_worker_pool(
     assert checkouts.pools == [WORKER_POOL]
     # O `start` levou dois leases: a Run só termina com a renovação feita pela thread.
     assert run_row(factory, run_id)["status"] == "succeeded"
-    assert 1 <= checkouts.peak <= WORKER_POOL.size, checkouts.peak
+    # Uma conexão por vez: o laço e a renovação nunca seguram conexão juntos (ADR 073).
+    assert checkouts.peak == 1, checkouts.peak
