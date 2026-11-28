@@ -1,4 +1,4 @@
-import { useQuery, type Query, type UseQueryResult } from "@tanstack/react-query";
+import { focusManager, useQuery, type Query, type UseQueryResult } from "@tanstack/react-query";
 import { useCallback, useRef, useState } from "react";
 
 import { useApiClient } from "../api/ApiClientContext";
@@ -32,11 +32,18 @@ interface RunPollingOptions {
   readonly random?: () => number;
 }
 
+/**
+ * Espera mínima entre consultas com a aba escondida: o término ainda é percebido (título e aviso
+ * do navegador) sem consultar a cada 2 s uma tela que ninguém olha.
+ */
+const BACKGROUND_MIN_INTERVAL_MS = 10_000;
+
 type RunQuery = Query<ApiResponse<RunDetail>, Error, ApiResponse<RunDetail>, readonly string[]>;
 
 /**
  * Acompanha uma execução por polling (2.2): a próxima consulta espera o Retry-After da resposta,
- * para no estado terminal, recua em falha transitória e fica parada com a aba oculta. Sem
+ * para no estado terminal, recua em falha transitória e, com a aba oculta, segue a cada 10 s no
+ * mínimo, para o término ser percebido (completionSignal.ts). Sem
  * `retry` do TanStack: a própria próxima consulta é a nova tentativa, com o recuo de polling.ts.
  */
 export function useRunPolling(runId: string, options: RunPollingOptions = {}): RunPolling {
@@ -47,6 +54,15 @@ export function useRunPolling(runId: string, options: RunPollingOptions = {}): R
   const delayAfter = (query: RunQuery): number | false => {
     const snapshot = pollSnapshot(query, consecutiveFailures.current);
     return snapshot === null ? false : nextPollDelayMs(snapshot, random);
+  };
+
+  // O TanStack recalcula a espera a cada consulta: a que sai com a aba escondida já usa o mínimo de
+  // segundo plano; o Retry-After maior continua mandando.
+  const intervalAfter = (query: RunQuery): number | false => {
+    const delayMs = delayAfter(query);
+    return delayMs === false || focusManager.isFocused()
+      ? delayMs
+      : Math.max(delayMs, BACKGROUND_MIN_INTERVAL_MS);
   };
 
   const query = useQuery({
@@ -63,8 +79,8 @@ export function useRunPolling(runId: string, options: RunPollingOptions = {}): R
     },
     select: (response) => response.data,
     retry: false,
-    refetchInterval: delayAfter,
-    refetchIntervalInBackground: false,
+    refetchInterval: intervalAfter,
+    refetchIntervalInBackground: true,
     // Ao voltar para a aba, só consulta se a espera pedida já passou.
     refetchOnWindowFocus: (focused) => {
       const delayMs = delayAfter(focused);

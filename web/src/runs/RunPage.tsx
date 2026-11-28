@@ -25,6 +25,7 @@ import { findRecipe } from "../recipes/registry";
 import { TEXT } from "../text";
 import type { Run, RunStatus } from "./api";
 import { CancelRun } from "./CancelRun";
+import { useCompletionTitle } from "./completionSignal";
 import type { ResultReference, RunResults as RunResultsData } from "./commands";
 import { artifactDownloadPath, getRunResults } from "./commands";
 import { unavailableReason } from "./availability";
@@ -66,6 +67,7 @@ export function RunPage(): ReactElement {
 function RunView({ runId }: { readonly runId: string }): ReactElement {
   const { query, announcement, acknowledge, failure } = useRunPolling(runId);
   const run = query.data;
+  useCompletionTitle(run?.status);
   // O convite para entrar (ou aceitar os termos) não é alerta; anunciado aqui, uma vez só.
   const showsGuidance = failure !== null && isGuidance(failure);
   const guidanceText = failure === null ? null : guidanceAnnouncement(failure);

@@ -411,6 +411,14 @@ export const TEXT = {
       alreadyFinished: "A execução já tinha terminado; não havia o que cancelar.",
     },
     backToWorkbench: (recipe: string) => `Bancada da ${recipe}`,
+    // Aviso de término com a aba escondida (D3); a cancelada não avisa: foi a pessoa que cancelou.
+    completion: {
+      title: {
+        succeeded: "✓ Concluída",
+        succeeded_with_warnings: "! Concluída com avisos",
+        failed: "✕ Falhou",
+      },
+    },
     flavor: {
       queued: "As goblins pegam este lote assim que uma bancada vagar.",
       succeeded: "Pronto! As goblins terminaram o lote.",
