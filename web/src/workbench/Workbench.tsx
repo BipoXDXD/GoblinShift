@@ -27,7 +27,7 @@ import {
 } from "../components/a11y/ErrorSummary";
 import { FileDropzone } from "../components/a11y/FileDropzone";
 import { FocusHeading } from "../components/a11y/FocusHeading";
-import { LiveRegion } from "../components/a11y/LiveRegion";
+import { ANNOUNCE_DELAY_MS, LiveRegion } from "../components/a11y/LiveRegion";
 import { moveItem, ReorderableList } from "../components/a11y/ReorderableList";
 import { EmptyState } from "../components/feedback/EmptyState";
 import { FailureNotice } from "../components/feedback/FailureNotice";
@@ -110,8 +110,19 @@ export function Workbench({
   const command = commandFrom(draft, inputs);
   const intent = command === null ? "" : JSON.stringify(command);
   const idempotency = useIdempotencyKey(intent);
-  const announcement = useUploadAnnouncement(batch.entries);
-  const sample = useSample(recipe.id, uploadServices.fetchSample, batch.add);
+  const { announcement, announce } = useUploadAnnouncement(batch.entries);
+  const sample = useSample({
+    recipeId: recipe.id,
+    fetcher: uploadServices.fetchSample,
+    add: batch.add,
+    announce,
+    entryCount: batch.entries.length,
+  });
+  // O botão some quando a amostra entra na lista: o foco vai para a escolha de arquivos, e não
+  // para o body. Só no clique: com `?exemplo=1` o foco fica onde a página o pôs.
+  const loadSampleFromButton = (): void => {
+    sample.load(focusFilesField);
+  };
   useSampleRequest(sampleRequested, sample.load, onSampleRequested);
 
   const mutation = useMutation({
@@ -157,7 +168,7 @@ export function Workbench({
   useEffect(() => {
     if (pendingRemoval === null && focusFilesAfterRemoval.current) {
       focusFilesAfterRemoval.current = false;
-      document.getElementById(FILES_FIELD_ID)?.focus();
+      focusFilesField();
     }
   }, [pendingRemoval]);
 
@@ -211,7 +222,7 @@ export function Workbench({
                     type="button"
                     variant="secondary"
                     aria-disabled={sample.status === "loading"}
-                    onClick={sample.load}
+                    onClick={loadSampleFromButton}
                   >
                     {sample.status === "loading"
                       ? TEXT.workbench.sampleLoading
@@ -445,17 +456,30 @@ function useStableInputs(entries: readonly UploadEntry[]): readonly RecipeInput[
 
 type SampleStatus = "idle" | "loading" | "failed";
 
+interface SampleOptions {
+  readonly recipeId: RecipeId;
+  readonly fetcher: typeof fetch;
+  readonly add: (files: readonly File[]) => void;
+  /** Anuncia na região viva da Bancada. */
+  readonly announce: (message: string) => void;
+  /** Quantos arquivos há no lote: quando muda, a falha anterior deixa de valer. */
+  readonly entryCount: number;
+}
+
+interface Sample {
+  readonly status: SampleStatus;
+  /** Baixa a amostra; `onLoaded` roda logo depois de ela entrar no lote. */
+  readonly load: (onLoaded?: () => void) => void;
+}
+
 /**
  * O "Testar com arquivo de exemplo": baixa a amostra da receita e a põe no mesmo caminho do
  * upload. Clique repetido durante o download não baixa de novo; a resposta que chega depois de a
  * Bancada sair de cena não entra em lote nenhum.
  */
-function useSample(
-  recipeId: RecipeId,
-  fetcher: typeof fetch,
-  add: (files: readonly File[]) => void,
-): { readonly status: SampleStatus; readonly load: () => void } {
+function useSample({ recipeId, fetcher, add, announce, entryCount }: SampleOptions): Sample {
   const [status, setStatus] = useState<SampleStatus>("idle");
+  const [seenCount, setSeenCount] = useState(entryCount);
   const loading = useRef(false);
   const mounted = useRef(true);
   useEffect(() => {
@@ -464,26 +488,47 @@ function useSample(
       mounted.current = false;
     };
   }, []);
-  const load = useCallback(() => {
-    if (loading.current) {
-      return;
+  if (seenCount !== entryCount) {
+    // Ajuste de estado durante a renderização: escolher ou remover arquivos apaga a falha velha.
+    setSeenCount(entryCount);
+    if (status === "failed") {
+      setStatus("idle");
     }
-    loading.current = true;
-    setStatus("loading");
-    loadSample(recipeId, fetcher).then(
-      (files) => {
-        loading.current = false;
-        if (mounted.current) {
+  }
+  const load = useCallback(
+    (onLoaded?: () => void) => {
+      if (loading.current) {
+        return;
+      }
+      loading.current = true;
+      setStatus("loading");
+      announce(TEXT.workbench.sampleLoading);
+      loadSample(recipeId, fetcher).then(
+        (files) => {
+          loading.current = false;
+          if (!mounted.current) {
+            return;
+          }
           setStatus("idle");
           add(files);
-        }
-      },
-      () => {
-        loading.current = false;
-        setStatus("failed");
-      },
-    );
-  }, [recipeId, fetcher, add]);
+          onLoaded?.();
+          // Depois da espera: a mudança de foco de `onLoaded` cancelaria a fala.
+          window.setTimeout(() => {
+            if (mounted.current) {
+              announce(TEXT.workbench.sampleLoaded(files.map((file) => file.name).join(", ")));
+            }
+          }, ANNOUNCE_DELAY_MS);
+        },
+        () => {
+          loading.current = false;
+          if (mounted.current) {
+            setStatus("failed");
+          }
+        },
+      );
+    },
+    [recipeId, fetcher, add, announce],
+  );
   return { status, load };
 }
 
@@ -505,14 +550,24 @@ function useSampleRequest(
   }, [requested, load, onRequested]);
 }
 
+function focusFilesField(): void {
+  document.getElementById(FILES_FIELD_ID)?.focus();
+}
+
 function localIdOf(entry: UploadEntry): string {
   return entry.localId;
 }
 
 type StatusById = ReadonlyMap<string, UploadEntry["state"]["status"]>;
 
-/** Anúncio de envio concluído ou falho, recalculado só quando algum arquivo muda de estado. */
-function useUploadAnnouncement(entries: readonly UploadEntry[]): string | null {
+/**
+ * Anúncio de envio concluído ou falho, recalculado só quando algum arquivo muda de estado.
+ * `announce` põe outro texto na mesma região, até a próxima mudança.
+ */
+function useUploadAnnouncement(entries: readonly UploadEntry[]): {
+  readonly announcement: string | null;
+  readonly announce: (message: string) => void;
+} {
   const [tracked, setTracked] = useState<{ statuses: StatusById; message: string | null }>({
     statuses: new Map(),
     message: null,
@@ -525,7 +580,10 @@ function useUploadAnnouncement(entries: readonly UploadEntry[]): string | null {
       message: uploadAnnouncement(tracked.statuses, entries) ?? tracked.message,
     });
   }
-  return tracked.message;
+  const announce = useCallback((message: string) => {
+    setTracked((current) => ({ ...current, message }));
+  }, []);
+  return { announcement: tracked.message, announce };
 }
 
 function sameStatuses(previous: StatusById, next: StatusById): boolean {

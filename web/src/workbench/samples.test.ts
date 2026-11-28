@@ -10,6 +10,7 @@ import { inputLimitsOf } from "../catalog/inputLimits";
 import { RECIPE_LIST, recipeOf } from "../recipes/registry";
 import type { RecipeId } from "../recipes/types";
 import { CATALOG_BODY } from "../test/catalogBody";
+import { urlOf } from "../test/fakeSample";
 import { loadSample, SAMPLES } from "./samples";
 
 // web/, a raiz do Vite: o `?url` devolve o caminho a partir dela (`/src/...?no-inline`).
@@ -17,10 +18,6 @@ const WEB_ROOT = join(dirname(fileURLToPath(import.meta.url)), "..", "..");
 
 function sizeOf(url: string): number {
   return statSync(join(WEB_ROOT, url.split("?")[0] ?? url)).size;
-}
-
-function urlOf(input: RequestInfo | URL): string {
-  return typeof input === "string" ? input : input instanceof URL ? input.href : input.url;
 }
 
 function catalogLimits(recipeId: RecipeId) {

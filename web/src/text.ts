@@ -193,6 +193,7 @@ export const TEXT = {
     dropHere: "Solte para adicionar.",
     trySample: "Testar com arquivo de exemplo",
     sampleLoading: "Baixando o exemplo…",
+    sampleLoaded: (names: string) => `Exemplo na lista: ${names}.`,
     sampleFailed:
       "Não deu para baixar o arquivo de exemplo. Tente de novo ou escolha os seus arquivos.",
     filesChosen: (count: number) =>
