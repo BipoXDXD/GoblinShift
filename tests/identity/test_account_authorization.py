@@ -5,6 +5,7 @@ regra já vale. As hipóteses:
 
 - (a) `unblock_account` ativa conta com exclusão pedida;
 - (b) `issue_key_for_session` concede escopo que a conta não tem, ou emite para conta inativa;
+  `issue_key_for_admin` (o `gs-admin issue-key`) emite sem esperar o bloqueio em curso;
 - (c) `authenticate_api_key` e `authenticate_session` divergem sobre status e exclusão;
 - (d) bloqueio concorrente com um login em andamento deixa uma sessão viva;
 - (e) `revoke_key` (por `public_id`, sem dono) alcançável fora da CLI do administrador.
@@ -31,13 +32,14 @@ from goblinshift.identity import (
     authenticate_api_key,
     authenticate_session,
     block_account,
+    issue_key_for_admin,
     issue_key_for_session,
     request_account_deletion,
     resolve_login,
     start_session,
     unblock_account,
 )
-from goblinshift.identity.tables import app_user, web_session
+from goblinshift.identity.tables import api_key, app_user, web_session
 from goblinshift.platform.db import unit_of_work
 from tests.identity.support import HASHER, new_key, new_user
 
@@ -248,6 +250,38 @@ def test_login_durante_o_bloqueio_e_recusado(factory: sessionmaker[Session]) -> 
     refusal = result[0]
     assert isinstance(refusal, LoginRefusal)
     assert refusal.reason in {LoginRefused.BLOCKED, LoginRefused.PENDING_APPROVAL}
+
+
+def test_issue_key_espera_o_bloqueio_e_e_recusada(factory: sessionmaker[Session]) -> None:
+    """A emissão do administrador espera a trava do bloqueio e relê a conta já bloqueada.
+
+    Sem a trava, a chave emitida durante o bloqueio escaparia de `revoke_all_credentials` e
+    voltaria a valer num `unblock`.
+    """
+    user_id = new_user(factory)
+
+    def issue() -> object:
+        try:
+            with unit_of_work(factory) as session:
+                return issue_key_for_admin(
+                    session, owner_id=user_id, scopes=frozenset({Scope.RUNS_READ}), days=30, now=NOW
+                )
+        except UnknownAccountError as error:
+            return error
+
+    with unit_of_work(factory) as blocking:
+        block_account(blocking, user_id, NOW)
+        attempt, result = _in_thread(issue)
+        _wait_until_someone_waits_for_a_lock(factory)
+    attempt.join(LOCK_WAIT_DEADLINE_S)
+
+    assert not attempt.is_alive()
+    assert isinstance(result[0], UnknownAccountError)
+    with factory() as session:
+        assert (
+            session.execute(select(api_key.c.id).where(api_key.c.owner_id == user_id)).first()
+            is None
+        )
 
 
 # --- (e) revogação sem dono só na CLI do administrador ----------------------------------------

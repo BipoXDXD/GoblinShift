@@ -148,8 +148,8 @@ def issue_key(
     return IssuedKey(id=key_id, public_id=key.public_id, token=key.token, expires_at=expires_at)
 
 
-def revoke_key(session: Session, public_id: str, now: datetime) -> bool:
-    """Revoga a chave; devolve False só se ela não existir.
+def revoke_key(session: Session, public_id: str, now: datetime) -> UUID | None:
+    """Revoga a chave e devolve o dono, para a auditoria; None só se ela não existir.
 
     Revogar de novo é sucesso e preserva o instante da primeira revogação.
     """
@@ -157,9 +157,10 @@ def revoke_key(session: Session, public_id: str, now: datetime) -> bool:
         update(api_key)
         .where(api_key.c.public_id == public_id)
         .values(revoked_at=func.coalesce(api_key.c.revoked_at, now))
-        .returning(api_key.c.id)
+        .returning(api_key.c.owner_id)
     )
-    return session.execute(statement).first() is not None
+    owner_id: UUID | None = session.execute(statement).scalar_one_or_none()
+    return owner_id
 
 
 def authenticate_api_key(
@@ -346,11 +347,33 @@ def issue_key_for_session(
 ) -> IssuedKey:
     """Emite chave pela sessão web, dentro dos dois tetos da conta.
 
-    Com `MAX_ACTIVE_KEYS` ativas levanta `ActiveKeyLimitError`; com `MAX_STORED_KEYS` guardadas,
-    contando revogadas e vencidas, `StoredKeyLimitError`. A linha da conta fica travada
-    (`FOR UPDATE`) da contagem até o INSERT: duas emissões simultâneas se enfileiram, e a segunda
-    conta a chave da primeira (sem write skew). A mesma trava enfileira a emissão atrás de um
-    bloqueio ou pedido de exclusão, que a recusa.
+    A linha da conta fica travada (`FOR UPDATE`) da leitura até o INSERT. A mesma trava enfileira
+    a emissão atrás de um bloqueio ou pedido de exclusão, que a recusa com `UnknownAccountError`.
+    Os tetos ficam em `_issue_locked`.
+    """
+    _lock_active_account(session, owner_id)
+    return _issue_locked(session, owner_id=owner_id, scopes=scopes, days=days, now=now)
+
+
+def issue_key_for_admin(
+    session: Session, *, owner_id: UUID, scopes: frozenset[Scope], days: int, now: datetime
+) -> IssuedKey:
+    """Emite chave pelo `gs-admin issue-key`, com a mesma trava, recusa e tetos da sessão web.
+
+    Conta inexistente, bloqueada, pendente ou com exclusão pedida levanta `UnknownAccountError`:
+    sem essa recusa, a chave emitida durante o bloqueio escaparia de `revoke_all_credentials` e
+    passaria a valer num `unblock`. Os tetos ficam em `_issue_locked`.
+    """
+    _lock_active_account(session, owner_id)
+    return _issue_locked(session, owner_id=owner_id, scopes=scopes, days=days, now=now)
+
+
+def _lock_active_account(session: Session, owner_id: UUID) -> None:
+    """Trava a linha da conta (`FOR UPDATE`); se ela não existe ou não está ativa, levanta
+    `UnknownAccountError`.
+
+    Ativa é `active` e sem exclusão pedida: a pendente do cadastro fechado e a bloqueada por abuso
+    têm `status = blocked`.
     """
     account = session.execute(
         select(app_user.c.id)
@@ -363,6 +386,18 @@ def issue_key_for_session(
     ).first()
     if account is None:
         raise UnknownAccountError(f"conta {owner_id} não existe ou não está ativa")
+
+
+def _issue_locked(
+    session: Session, *, owner_id: UUID, scopes: frozenset[Scope], days: int, now: datetime
+) -> IssuedKey:
+    """Miolo da emissão, com a linha da conta já travada por quem chama.
+
+    Com `MAX_ACTIVE_KEYS` ativas levanta `ActiveKeyLimitError`; com `MAX_STORED_KEYS` guardadas,
+    contando revogadas e vencidas, `StoredKeyLimitError`. Como a trava vale da contagem até o
+    INSERT, duas emissões simultâneas se enfileiram, e a segunda conta a chave da primeira (sem
+    write skew).
+    """
     active, stored = session.execute(
         select(
             func.count().filter(api_key.c.revoked_at.is_(None), api_key.c.expires_at > now),
@@ -381,10 +416,10 @@ def issue_key_for_session(
 def list_keys(session: Session, owner_id: UUID, now: datetime) -> list[KeySummary]:
     """Chaves da conta até `MAX_LISTED_KEYS`: ativas primeiro, depois das mais novas às antigas.
 
-    Revogadas e vencidas ficam na tabela até `KEY_RETENTION` depois do fim. A emissão pela sessão
-    para em `MAX_STORED_KEYS`, que cabe inteiro na lista, mas o `gs-admin issue-key` não passa por
-    esse teto; sem priorizar as ativas (no máximo `MAX_ACTIVE_KEYS` pela sessão), chaves mais novas
-    tirariam da lista uma chave que ainda autentica, e o dono ficaria sem o id para revogá-la.
+    Revogadas e vencidas ficam na tabela até `KEY_RETENTION` depois do fim. A emissão, pela sessão
+    ou pelo `gs-admin issue-key`, para em `MAX_STORED_KEYS`, que cabe inteiro na lista. As ativas
+    vêm primeiro mesmo assim: chaves emitidas antes do teto existir podem passar dele, e as mais
+    novas não podem tirar da lista uma chave que ainda autentica, sem o id para revogá-la.
     """
     is_inactive = case(
         (and_(api_key.c.revoked_at.is_(None), api_key.c.expires_at > now), False), else_=True

@@ -11,7 +11,7 @@ from uuid import UUID, uuid4, uuid7
 
 import pytest
 from psycopg import OperationalError as PsycopgOperationalError
-from sqlalchemy import select, text
+from sqlalchemy import func, select, text, update
 from sqlalchemy.engine.default import DefaultDialect
 from sqlalchemy.engine.interfaces import DBAPIConnection
 from sqlalchemy.orm import Session, sessionmaker
@@ -28,6 +28,7 @@ from goblinshift.entrypoints.admin_cli import (
 from goblinshift.entrypoints.maintenance import AccountJobs
 from goblinshift.files.storage import FileStorage
 from goblinshift.identity import (
+    MAX_STORED_KEYS,
     Scope,
     authenticate_api_key,
     block_account,
@@ -41,7 +42,7 @@ from goblinshift.runs.lifecycle import Status
 from goblinshift.runs.maintenance import Maintenance
 from goblinshift.runs.quotas import QuotaOverride, quota_override
 from goblinshift.runs.tables import run as run_table
-from tests.identity.support import HASHER, new_user
+from tests.identity.support import HASHER, new_key, new_user
 from tests.runs.finished_support import RecordedFinished
 from tests.runs.worker_support import local_runner, queue_run
 
@@ -168,6 +169,129 @@ def test_revogar_chave_inexistente_sai_como_nao_encontrada(
     assert "0" * 16 in err
 
 
+# --- Emissão travada pela conta e auditoria das chaves, da criação e da busca ------------------
+
+
+def keys_of(factory: sessionmaker[Session], user_id: str) -> int:
+    with factory() as session:
+        found: int = session.execute(
+            select(func.count()).select_from(api_key).where(api_key.c.owner_id == UUID(user_id))
+        ).scalar_one()
+    return found
+
+
+def put_in_state(factory: sessionmaker[Session], user_id: str, state: str) -> None:
+    owner_id = UUID(user_id)
+    with unit_of_work(factory) as session:
+        if state == "bloqueada":
+            block_account(session, owner_id, datetime.now(UTC))
+        elif state == "pendente":
+            session.execute(
+                update(app_user)
+                .where(app_user.c.id == owner_id)
+                .values(status="blocked", awaiting_approval=True)
+            )
+        elif state == "exclusao-pedida":
+            request_account_deletion(session, owner_id, datetime.now(UTC))
+
+
+@pytest.mark.parametrize(
+    ("state", "expected"),
+    [
+        ("bloqueada", EXIT_NOT_FOUND),
+        ("pendente", EXIT_NOT_FOUND),
+        ("exclusao-pedida", EXIT_NOT_FOUND),
+        ("ativa", EXIT_OK),
+    ],
+)
+def test_issue_key_recusa_conta_que_nao_esta_ativa(
+    capsys: pytest.CaptureFixture[str], factory: sessionmaker[Session], state: str, expected: int
+) -> None:
+    user_id = create_user(capsys)
+    put_in_state(factory, user_id, state)
+
+    exit_code, out, _ = run(capsys, "issue-key", "--user", user_id, "--scopes", "files:read")
+
+    assert exit_code == expected
+    assert keys_of(factory, user_id) == (1 if expected == EXIT_OK else 0)
+    assert (out == "") is (expected != EXIT_OK)
+
+
+@pytest.mark.parametrize(("active", "expected"), [(4, EXIT_OK), (5, EXIT_USAGE)])
+def test_issue_key_acima_do_teto_sai_com_2(
+    capsys: pytest.CaptureFixture[str], factory: sessionmaker[Session], active: int, expected: int
+) -> None:
+    user_id = create_user(capsys)
+    for _ in range(active):
+        new_key(factory, UUID(user_id))
+
+    exit_code, out, err = run(capsys, "issue-key", "--user", user_id, "--scopes", "files:read")
+
+    assert exit_code == expected
+    assert keys_of(factory, user_id) == active + (1 if expected == EXIT_OK else 0)
+    if expected == EXIT_USAGE:
+        assert out == ""
+        assert "a conta já tem 5 chaves ativas" in err
+
+
+def test_issue_key_com_o_teto_de_guardadas_sai_com_2(
+    capsys: pytest.CaptureFixture[str], factory: sessionmaker[Session]
+) -> None:
+    user_id = create_user(capsys)
+    for _ in range(MAX_STORED_KEYS):
+        new_key(factory, UUID(user_id))
+    with unit_of_work(factory) as session:
+        session.execute(update(api_key).values(revoked_at=datetime.now(UTC)))
+
+    exit_code, out, err = run(capsys, "issue-key", "--user", user_id, "--scopes", "files:read")
+
+    assert exit_code == EXIT_USAGE
+    assert out == ""
+    assert f"{MAX_STORED_KEYS} chaves" in err
+    assert keys_of(factory, user_id) == MAX_STORED_KEYS
+
+
+def test_issue_key_grava_key_issued_com_o_dono(
+    capsys: pytest.CaptureFixture[str], factory: sessionmaker[Session]
+) -> None:
+    user_id = create_user(capsys)
+
+    exit_code, _, _ = run(capsys, "issue-key", "--user", user_id, "--scopes", "files:read")
+
+    assert exit_code == EXIT_OK
+    assert actors(factory, user_id) == [("ACCOUNT_CREATED", "admin"), ("KEY_ISSUED", "admin")]
+
+
+def test_revoke_key_grava_key_revoked_com_o_dono(
+    capsys: pytest.CaptureFixture[str], factory: sessionmaker[Session]
+) -> None:
+    user_id = create_user(capsys)
+    issued = new_key(factory, UUID(user_id))
+
+    exit_code, _, _ = run(capsys, "revoke-key", "--key", issued.public_id)
+
+    assert exit_code == EXIT_OK
+    assert actors(factory, user_id) == [("ACCOUNT_CREATED", "admin"), ("KEY_REVOKED", "admin")]
+
+
+def test_revoke_key_inexistente_nao_grava_evento(
+    capsys: pytest.CaptureFixture[str], factory: sessionmaker[Session]
+) -> None:
+    exit_code, _, _ = run(capsys, "revoke-key", "--key", "0" * 16)
+
+    assert exit_code == EXIT_NOT_FOUND
+    with factory() as session:
+        assert session.execute(select(audit_event.c.id)).first() is None
+
+
+def test_create_user_grava_account_created(
+    capsys: pytest.CaptureFixture[str], factory: sessionmaker[Session]
+) -> None:
+    user_id = create_user(capsys)
+
+    assert actors(factory, user_id) == [("ACCOUNT_CREATED", "admin")]
+
+
 def test_nome_em_branco_sai_com_erro_de_uso(capsys: pytest.CaptureFixture[str]) -> None:
     exit_code, out, _ = run(capsys, "create-user", "--display-name", "   ")
 
@@ -241,7 +365,7 @@ def test_block_bloqueia_revoga_chaves_e_cancela_a_execucao(
         )
         run_status = session.execute(select(run_table.c.status).where(run_table.c.id == run_id))
         assert run_status.scalar_one() == Status.CANCELED
-    assert audited(factory, user_id) == ["ACCOUNT_BLOCKED"]
+    assert audited(factory, user_id) == ["ACCOUNT_CREATED", "KEY_ISSUED", "ACCOUNT_BLOCKED"]
 
 
 @pytest.fixture
@@ -303,7 +427,7 @@ def test_sem_segredo_do_user_hash_em_producao_falha_antes_de_gravar(
     assert "GS_USER_HASH_SECRET" in err
     assert status_of(factory, user_id) == "active"
     assert deletion_requested_at(factory, user_id) is None
-    assert audited(factory, user_id) == []
+    assert audited(factory, user_id) == ["ACCOUNT_CREATED"]
     with factory() as session:
         status = session.execute(
             select(run_table.c.status).where(run_table.c.id == run_id)
@@ -350,7 +474,7 @@ def test_unblock_libera_a_conta(
     assert exit_code == EXIT_OK
     assert user_id in err
     assert status_of(factory, user_id) == "active"
-    assert audited(factory, user_id) == ["ACCOUNT_BLOCKED", "ACCOUNT_UNBLOCKED"]
+    assert audited(factory, user_id) == ["ACCOUNT_CREATED", "ACCOUNT_BLOCKED", "ACCOUNT_UNBLOCKED"]
 
 
 def test_unblock_de_conta_inexistente_sai_como_nao_encontrada(
@@ -374,7 +498,7 @@ def test_unblock_de_conta_em_exclusao_e_recusado_sem_auditoria(
     assert exit_code == EXIT_NOT_FOUND
     assert "exclusão" in err
     assert status_of(factory, user_id) == "blocked"
-    assert audited(factory, user_id) == ["ACCOUNT_BLOCKED"]
+    assert audited(factory, user_id) == ["ACCOUNT_CREATED", "ACCOUNT_BLOCKED"]
 
 
 def test_request_deletion_marca_revoga_cancela_e_audita(
@@ -396,7 +520,11 @@ def test_request_deletion_marca_revoga_cancela_e_audita(
         )
         run_status = session.execute(select(run_table.c.status).where(run_table.c.id == run_id))
         assert run_status.scalar_one() == Status.CANCELED
-    assert audited(factory, user_id) == ["ACCOUNT_DELETION_REQUESTED"]
+    assert audited(factory, user_id) == [
+        "ACCOUNT_CREATED",
+        "KEY_ISSUED",
+        "ACCOUNT_DELETION_REQUESTED",
+    ]
 
 
 def actors(factory: sessionmaker[Session], user_id: str) -> list[tuple[str, str | None]]:
@@ -487,6 +615,8 @@ def test_conta_bloqueada_com_exclusao_pedida_e_purgada_pela_manutencao(
     assert runs is None
     # A auditoria fica por 90 dias depois da exclusão (ADR 026).
     assert audited(factory, user_id) == [
+        "ACCOUNT_CREATED",
+        "KEY_ISSUED",
         "ACCOUNT_BLOCKED",
         "ACCOUNT_DELETION_REQUESTED",
     ]
@@ -573,6 +703,36 @@ def test_find_user_de_hash_sem_conta_sai_como_nao_encontrada(
     assert exit_code == EXIT_NOT_FOUND
     assert out == ""
     assert "nenhuma conta" in err
+
+
+@pytest.mark.usefixtures("user_hash_secret")
+def test_find_user_grava_o_evento_com_a_conta_achada(
+    capsys: pytest.CaptureFixture[str], factory: sessionmaker[Session]
+) -> None:
+    other = create_user(capsys)
+    wanted = create_user(capsys)
+
+    exit_code, _, _ = run(capsys, "find-user", "--user-hash", user_hash(wanted))
+
+    assert exit_code == EXIT_OK
+    assert actors(factory, wanted) == [("ACCOUNT_CREATED", "admin"), ("ACCOUNT_LOOKED_UP", "admin")]
+    assert actors(factory, other) == [("ACCOUNT_CREATED", "admin")]
+
+
+@pytest.mark.usefixtures("user_hash_secret")
+def test_find_user_sem_conta_nao_grava(
+    capsys: pytest.CaptureFixture[str], factory: sessionmaker[Session]
+) -> None:
+    create_user(capsys)
+
+    exit_code, _, _ = run(capsys, "find-user", "--user-hash", "0" * 64)
+
+    assert exit_code == EXIT_NOT_FOUND
+    with factory() as session:
+        looked_up = session.execute(
+            select(audit_event.c.id).where(audit_event.c.event_type == "ACCOUNT_LOOKED_UP")
+        ).first()
+    assert looked_up is None
 
 
 @pytest.mark.parametrize(

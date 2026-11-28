@@ -18,7 +18,9 @@ variáveis GS_* da API para chegar ao banco e ao armazenamento.
     gs-admin orphan-files [--min-age-hours H] [--limit N]
 
 `issue-key` imprime o segredo uma única vez na saída padrão, e só ele, para que
-`> arquivo` o capture sem metadados; o identificador público e a expiração vão para stderr.
+`> arquivo` o capture sem metadados; o identificador público e a expiração vão para stderr. Emite
+pelo mesmo caminho travado da sessão web: só para conta ativa, sem exclusão pedida, e dentro dos
+tetos de chaves ativas e guardadas.
 `block` bloqueia, revoga sessões e chaves e cancela a execução ativa; repetir completa o que
 faltou. `request-deletion` pede a exclusão da conta pelo mesmo caminho do `DELETE /me`, também
 para conta bloqueada, que não consegue entrar: marca o pedido, revoga, audita e cancela a execução
@@ -42,7 +44,10 @@ menos de `--min-age-hours` (padrão 6, aceita decimal) fica de fora, porque pode
 curso; a lista vai até `--limit` linhas (padrão 200) e os totais por categoria, em stderr, contam
 tudo. Sem a sentinela de montagem o storage não é verificado e a saída é 4. Sai com 0 mesmo com
 órfãos: decidir o que fazer com eles é do administrador.
-Sai com 0 em sucesso, 1 se a conta ou a chave não existir, 2 em erro de uso e 3 se faltar um
+`create-user`, `issue-key`, `revoke-key`, `find-user` (quando acha a conta) e os comandos que mudam
+a conta gravam a auditoria com `actor = admin` e sem IP, na mesma transação da ação.
+Sai com 0 em sucesso, 1 se a conta ou a chave não existir (no `issue-key`, também conta que não
+está ativa), 2 em erro de uso ou com o teto de chaves da conta cheio e 3 se faltar um
 segredo obrigatório, com uma linha em stderr que nomeia a variável; Ctrl-C sai com 130 e a linha
 `gs-admin: interrompido`. Qualquer outra falha sai com 4
 e uma linha em stderr só com o tipo do erro e, se vier do PostgreSQL, o SQLSTATE: sem stack trace
@@ -76,17 +81,19 @@ from goblinshift.files.storage import FileStorage
 from goblinshift.identity import (
     DEFAULT_KEY_DAYS,
     MAX_KEY_DAYS,
+    ActiveKeyLimitError,
     AuditActor,
     AuditEventType,
     AuditOutcome,
     InvalidDisplayNameError,
     InvalidKeyLifetimeError,
     InvalidScopesError,
+    StoredKeyLimitError,
     UnknownAccountError,
     block_account,
     create_admin_user,
     find_account,
-    issue_key,
+    issue_key_for_admin,
     parse_scopes,
     record_audit_event,
     request_account_deletion,
@@ -297,6 +304,7 @@ def _create_user(args: argparse.Namespace, context: _Context) -> int:
     try:
         with unit_of_work(context.factory) as session:
             user_id = create_admin_user(session, args.display_name)
+            _audit(session, AuditEventType.ACCOUNT_CREATED, user_id, datetime.now(UTC))
     except InvalidDisplayNameError as error:
         return _fail(EXIT_USAGE, str(error))
     print(user_id)
@@ -304,17 +312,21 @@ def _create_user(args: argparse.Namespace, context: _Context) -> int:
 
 
 def _issue_key(args: argparse.Namespace, context: _Context) -> int:
+    now = datetime.now(UTC)
     try:
         scopes = parse_scopes(args.scopes)
+        # Chave e evento na mesma transação: ou os dois, ou nenhum.
         with unit_of_work(context.factory) as session:
-            issued = issue_key(
-                session,
-                owner_id=args.user,
-                scopes=scopes,
-                now=datetime.now(UTC),
-                days=args.days,
+            issued = issue_key_for_admin(
+                session, owner_id=args.user, scopes=scopes, days=args.days, now=now
             )
-    except (InvalidScopesError, InvalidKeyLifetimeError) as error:
+            _audit(session, AuditEventType.KEY_ISSUED, args.user, now)
+    except (
+        InvalidScopesError,
+        InvalidKeyLifetimeError,
+        ActiveKeyLimitError,
+        StoredKeyLimitError,
+    ) as error:
         return _fail(EXIT_USAGE, str(error))
     except UnknownAccountError as error:
         return _fail(EXIT_NOT_FOUND, str(error))
@@ -324,9 +336,12 @@ def _issue_key(args: argparse.Namespace, context: _Context) -> int:
 
 
 def _revoke_key(args: argparse.Namespace, context: _Context) -> int:
+    now = datetime.now(UTC)
     with unit_of_work(context.factory) as session:
-        found = revoke_key(session, args.key, datetime.now(UTC))
-    if not found:
+        owner_id = revoke_key(session, args.key, now)
+        if owner_id is not None:
+            _audit(session, AuditEventType.KEY_REVOKED, owner_id, now)
+    if owner_id is None:
         return _fail(EXIT_NOT_FOUND, f"chave {args.key} não existe")
     print(f"chave {args.key} revogada", file=sys.stderr)
     return EXIT_OK
@@ -410,6 +425,9 @@ def _find_user(args: argparse.Namespace, context: _Context) -> int:
     hasher = UserHasher(context.settings.user_hash_key())
     with unit_of_work(context.factory) as session:
         owner_id = find_account_by_user_hash(session, user_hash, hasher.hash)
+        # Reidentificar o hash é ação a rastrear; a busca sem resultado não aponta para ninguém.
+        if owner_id is not None:
+            _audit(session, AuditEventType.ACCOUNT_LOOKED_UP, owner_id, datetime.now(UTC))
     if owner_id is None:
         return _fail(EXIT_NOT_FOUND, "nenhuma conta tem esse user.hash")
     print(owner_id)
