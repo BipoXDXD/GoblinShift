@@ -7,7 +7,7 @@ ocupando uma vaga de transferência, sem transação aberta durante a transferê
 Inexistente e de outra conta dão o mesmo 404; expirado ou excluído do próprio dono, 410.
 """
 
-from datetime import datetime
+from datetime import datetime, timedelta
 from functools import partial
 from typing import Annotated, Any, Literal
 from uuid import UUID
@@ -39,6 +39,8 @@ from goblinshift.entrypoints.api.transfers import (
     OCTET_STREAM,
     OCTET_STREAM_BODY,
     TransferTimeoutError,
+    TransferTooSlowError,
+    declared_length,
     is_octet_stream,
     request_body_chunks,
     timeouts_of,
@@ -65,6 +67,7 @@ from goblinshift.files.limits import (
     MAX_NAME_CHARS,
     MAX_VIDEO_FILE_BYTES,
     MIB,
+    TRANSFER_MAX_DURATION,
     VIDEO_EXTENSIONS,
 )
 from goblinshift.files.states import Availability, TransferDirection, UploadState
@@ -83,6 +86,11 @@ from goblinshift.platform.db import retry_on_pool_timeout
 router = APIRouter(tags=["uploads"])
 
 # Nomes do serviço que mudam na borda HTTP.
+# O prazo do texto vem da constante: mudar o prazo total muda a frase junto (1.7).
+_TOO_SLOW_DETAIL = (
+    "A conexão está lenta demais para enviar este arquivo em "
+    f"{TRANSFER_MAX_DURATION // timedelta(minutes=1)} minutos; o upload falhou."
+)
 _API_FIELD_NAMES = {"expected_size": "size"}
 
 
@@ -224,13 +232,15 @@ async def put_upload_content(
     patience_s: float = request.app.state.settings.db_pool_timeout_s
     slot_id = await anyio.to_thread.run_sync(_acquire_upload_slot, session, owner_id)
     try:
-        chunks = request_body_chunks(request, timeouts_of(request))
+        chunks = request_body_chunks(request, timeouts_of(request), declared_length(request))
         receive = partial(receive_content, pool_patience_s=patience_s)
         view = await anyio.to_thread.run_sync(
             receive, session, storage, owner_id, upload_id, chunks
         )
     except FilesError as error:
         raise _upload_problem(error) from None
+    except TransferTooSlowError:
+        raise ApiProblem(ProblemCode.REQUEST_TIMEOUT, _TOO_SLOW_DETAIL) from None
     except TransferTimeoutError:
         raise ApiProblem(
             ProblemCode.REQUEST_TIMEOUT,

@@ -6,6 +6,7 @@ antes e depois da transferência (3.2).
 """
 
 import logging
+import math
 import unicodedata
 from collections.abc import AsyncIterator, Callable, Iterator
 from dataclasses import dataclass
@@ -65,16 +66,43 @@ class TransferTimeouts:
 
 
 class TransferTimeoutError(Exception):
-    """A transferência passou do prazo total, ficou parada ou ficou abaixo da vazão mínima."""
+    """A transferência passou do prazo total, ficou parada ou ficou abaixo da vazão exigida."""
 
 
-def is_below_min_rate(received: int, elapsed_s: float, timeouts: TransferTimeouts) -> bool:
-    """`True` se, passada a carência, a média do envio ficou abaixo da vazão mínima.
+class TransferTooSlowError(TransferTimeoutError):
+    """Passada a carência, a média do envio ficou abaixo da vazão exigida (`required_rate`)."""
 
-    Único lugar que decide a vazão exigida: quem mudar a regra muda só aqui.
+
+def declared_length(request: Request) -> int | None:
+    """O `Content-Length` da requisição em decimal, ou `None` se faltar ou não for inteiro ≥ 0.
+
+    Só dígitos ASCII valem: sinal, espaço, expoente e dígitos de outros alfabetos, que o `int`
+    aceitaria em parte, viram `None`, assim como um número longo demais para converter.
     """
-    past_grace = elapsed_s > timeouts.min_rate_grace.total_seconds()
-    return past_grace and received < timeouts.min_rate_bytes_per_s * elapsed_s
+    value = request.headers.get("content-length")
+    if value is None or not (value.isascii() and value.isdigit()):
+        return None
+    try:
+        return int(value)
+    except ValueError:  # acima do limite de dígitos da conversão de `int`
+        return None
+
+
+def required_rate(declared: int | None, timeouts: TransferTimeouts) -> int:
+    """Vazão média exigida do envio, em B/s: o piso ou a que termina o tamanho declarado no prazo.
+
+    Único lugar que decide a vazão exigida: quem mudar a regra muda só aqui. Sem tamanho
+    declarado (corpo `chunked` ou `Content-Length` inválido), vale só o piso.
+    """
+    if declared is None:
+        return timeouts.min_rate_bytes_per_s
+    by_size = math.ceil(declared / timeouts.total.total_seconds())
+    return max(timeouts.min_rate_bytes_per_s, by_size)
+
+
+def is_below_min_rate(received: int, elapsed_s: float, required: int, grace_s: float) -> bool:
+    """`True` se, passada a carência, a média do envio ficou abaixo da vazão exigida."""
+    return elapsed_s > grace_s and received < required * elapsed_s
 
 
 def transfer_limit_problem() -> ApiProblem:
@@ -97,24 +125,29 @@ def is_octet_stream(request: Request) -> bool:
     return media_type == OCTET_STREAM
 
 
-def request_body_chunks(request: Request, timeouts: TransferTimeouts) -> Iterator[bytes]:
+def request_body_chunks(
+    request: Request, timeouts: TransferTimeouts, declared: int | None
+) -> Iterator[bytes]:
     """Pedaços do corpo da requisição, para consumir numa worker thread do anyio.
 
     O serviço de upload é síncrono e recebe um iterável; cada pedaço é buscado no event loop
     com `from_thread.run`, sem acumular o corpo em memória. Estoura `TransferTimeoutError` se
-    um pedaço demorar mais que o prazo sem progresso, se o prazo total acabar ou se a média
-    ficar abaixo da vazão mínima.
+    um pedaço demorar mais que o prazo sem progresso ou se o prazo total acabar, e
+    `TransferTooSlowError` se a média ficar abaixo da vazão exigida para `declared`, o tamanho
+    declarado (`declared_length`): quem não terminaria no prazo é recusado logo na carência.
 
     A média é de relógio desde o início da leitura, e a espera pelo primeiro byte entra nela. O
     tempo do servidor entre os pedaços (gravação e hash) também conta: medida só pela espera, um
     cliente com pedaços minúsculos esconderia um envio lento atrás desse tempo e seguraria a vaga.
-    O custo é um envio bem na borda do piso, com o disco lento, poder levar 408. O relógio é lido
-    dentro de `next_chunk`, que já roda no event loop. O `b""` final só marca o fim do corpo, já
-    recebido inteiro, e não é cobrado.
+    O custo é um envio bem na borda da vazão exigida, com o disco lento, poder levar 408. O
+    relógio é lido dentro de `next_chunk`, que já roda no event loop. O `b""` final só marca o fim
+    do corpo, já recebido inteiro, e não é cobrado.
     """
     stream = request.stream()
     started = anyio.from_thread.run_sync(anyio.current_time)
     deadline = started + timeouts.total.total_seconds()
+    required = required_rate(declared, timeouts)
+    grace_s = timeouts.min_rate_grace.total_seconds()
     elapsed_s = 0.0
 
     async def next_chunk() -> bytes | None:
@@ -134,8 +167,8 @@ def request_body_chunks(request: Request, timeouts: TransferTimeouts) -> Iterato
         if not chunk:
             continue
         received += len(chunk)
-        if is_below_min_rate(received, elapsed_s, timeouts):
-            raise TransferTimeoutError("o envio ficou abaixo da vazão mínima")
+        if is_below_min_rate(received, elapsed_s, required, grace_s):
+            raise TransferTooSlowError("o envio ficou abaixo da vazão exigida")
         yield chunk
 
 
