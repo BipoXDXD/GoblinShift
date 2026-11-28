@@ -118,10 +118,17 @@ def create_app(
                 # trocada pela do `dispose`.
                 logger.exception("liberação do banco falhou: conexões podem ter ficado abertas")
             finally:
-                # Por último: depois do encerramento, o processador descarta em silêncio todo
-                # span novo. O que rodar antes daqui na parada ainda entra no lote, inclusive a
-                # janela final de saturação, relatada ao sair do `async with` acima.
-                running.state.tracing.shut_down()
+                try:
+                    # O pool HTTP do login (`auth_login.install`); o httpcore blinda o
+                    # fechamento contra o cancelamento da parada.
+                    await running.state.login_transport.aclose()
+                except Exception:
+                    logger.exception("liberação do pool HTTP do login falhou")
+                finally:
+                    # Por último: depois do encerramento, o processador descarta em silêncio
+                    # todo span novo. O que rodar antes daqui na parada ainda entra no lote,
+                    # inclusive a janela final de saturação, relatada ao sair do `async with`.
+                    running.state.tracing.shut_down()
 
     app = _GoblinShiftAPI(
         title="GoblinShift",

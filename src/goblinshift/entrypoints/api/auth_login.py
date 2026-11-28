@@ -39,7 +39,7 @@ from authlib.integrations.starlette_client import (  # type: ignore[import-untyp
 )
 from fastapi import APIRouter, FastAPI, Request
 from fastapi.responses import RedirectResponse, Response
-from httpx2 import AsyncHTTPTransport, HTTPError, HTTPStatusError
+from httpx2 import AsyncBaseTransport, AsyncHTTPTransport, HTTPError, HTTPStatusError
 from joserfc.errors import JoseError
 from sqlalchemy.orm import Session, sessionmaker
 from starlette.concurrency import run_in_threadpool
@@ -126,21 +126,25 @@ LoginProviders = dict[ProviderName, LoginProvider]
 
 
 def install(app: FastAPI, web: WebIdentityConfig) -> None:
-    """Registra os provedores ligados na configuração em `app.state`; chamado pelo `create_app`."""
+    """Registra os provedores ligados na configuração em `app.state`; chamado pelo `create_app`.
+
+    O pool HTTP dos provedores fica em `app.state.login_transport`, e o lifespan o fecha na parada.
+    """
     cache = PostgresLoginStateCache(app.state.session_factory)
-    app.state.login_providers = build_login_providers(web, cache)
+    app.state.login_transport = AsyncHTTPTransport()
+    app.state.login_providers = build_login_providers(
+        web, cache, transport=app.state.login_transport
+    )
 
 
 def build_login_providers(
-    web: WebIdentityConfig, cache: PostgresLoginStateCache, *, transport: Any = None
+    web: WebIdentityConfig, cache: PostgresLoginStateCache, *, transport: AsyncBaseTransport
 ) -> LoginProviders:
-    """Clientes do Authlib para os provedores configurados; `transport` existe para os testes."""
+    """Clientes do Authlib para os provedores configurados, todos sobre `transport` com teto."""
     oauth = OAuth(cache=cache)
     http = {
         "timeout": web.oauth_http_timeout_s,
-        "transport": CappedTransport(
-            transport or AsyncHTTPTransport(), MAX_PROVIDER_RESPONSE_BYTES
-        ),
+        "transport": CappedTransport(transport, MAX_PROVIDER_RESPONSE_BYTES),
     }
     providers: LoginProviders = {}
     if web.google is not None:
