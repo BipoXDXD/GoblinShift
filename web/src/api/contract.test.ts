@@ -17,7 +17,7 @@ describe("contrato gerado de POST /runs", () => {
   it("fixa a versão de cada variante como literal", () => {
     expectTypeOf<Variant<"csv-janitor">["recipe_version"]>().toEqualTypeOf<1 | 2>();
     expectTypeOf<Variant<"image-forge">["recipe_version"]>().toEqualTypeOf<1>();
-    expectTypeOf<Variant<"downloads-detox">["recipe_version"]>().toEqualTypeOf<1>();
+    expectTypeOf<Variant<"downloads-detox">["recipe_version"]>().toEqualTypeOf<1 | 2>();
     expectTypeOf<Variant<"pdf-press">["recipe_version"]>().toEqualTypeOf<1>();
     expectTypeOf<Variant<"media-mill">["recipe_version"]>().toEqualTypeOf<1>();
   });

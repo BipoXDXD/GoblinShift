@@ -39,6 +39,8 @@ from goblinshift.processing.recipe import (
 
 RECIPE_ID = "downloads-detox"
 VERSION = 1
+# A v2 aceita também PDF, WebP e GIF; os parâmetros são os mesmos (ADR 067).
+VERSION_2 = 2
 MIB = 1024 * 1024
 MAX_INPUTS = 100
 # Teto do conteúdo de saída (1.7). Publicado no catálogo para a aceitação impor quando as cotas

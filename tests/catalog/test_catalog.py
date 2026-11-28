@@ -19,6 +19,7 @@ from goblinshift.catalog.csv_janitor_v1 import CsvJanitorV1Parameters
 from goblinshift.catalog.versions import (
     COMMON_MAX_INPUT_BYTES,
     CSV_JANITOR_V2_MERGE_DEADLINE,
+    DOWNLOADS_DETOX_V2_MERGE_DEADLINE,
     sunset_after_merge,
 )
 from goblinshift.files.limits import MAX_FILE_BYTES
@@ -249,6 +250,7 @@ def test_catalogo_lista_as_receitas_implementadas() -> None:
         ("csv-janitor", 2),
         ("image-forge", 1),
         ("downloads-detox", 1),
+        ("downloads-detox", 2),
         ("pdf-press", 1),
         ("media-mill", 1),
     }
@@ -268,7 +270,7 @@ def test_image_forge_publica_os_limites_de_1_7() -> None:
 
 
 def test_downloads_detox_publica_o_teto_do_lote_abaixo_do_teto_de_saidas() -> None:
-    version = CATALOG.get_version("downloads-detox", 1)
+    version = CATALOG.get_version("downloads-detox", 2)
 
     assert version.status is VersionStatus.CURRENT
     assert version.limits == {
@@ -449,3 +451,26 @@ def test_csv_janitor_v2_recusa_opcao_nova_invalida_no_campo(raw: Any, location: 
         CATALOG.resolve("csv-janitor", 2, raw)
 
     assert [".".join(field.location) for field in error.value.errors] == [location]
+
+
+def test_sunset_da_detox_v1_segue_a_regra_a_partir_do_prazo_de_merge() -> None:
+    # Prazo de merge da onda (31/12): Sunset em 2027-04-01, sem ler o relógio.
+    v1 = CATALOG.get_version("downloads-detox", 1)
+
+    assert date(2026, 12, 31) == DOWNLOADS_DETOX_V2_MERGE_DEADLINE
+    assert v1.sunset_at == sunset_after_merge(DOWNLOADS_DETOX_V2_MERGE_DEADLINE)
+    assert v1.sunset_at == datetime(2027, 4, 1, tzinfo=UTC)
+
+
+def test_detox_v1_fica_deprecated_e_v2_e_a_atual_com_os_mesmos_limites() -> None:
+    v1 = CATALOG.get_version("downloads-detox", 1)
+    v2 = CATALOG.get_version("downloads-detox", 2)
+
+    assert v1.status is VersionStatus.DEPRECATED
+    assert v2.status is VersionStatus.CURRENT
+    assert v2.sunset_at is None
+    assert v2.limits == v1.limits
+
+
+def test_detox_v2_resolve_os_mesmos_defaults_da_v1() -> None:
+    assert CATALOG.resolve("downloads-detox", 2, {}) == CATALOG.resolve("downloads-detox", 1, {})

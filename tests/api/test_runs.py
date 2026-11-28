@@ -1307,6 +1307,7 @@ def test_openapi_publica_a_variante_do_catalogo(client: TestClient) -> None:
         ("csv-janitor", 2),
         ("image-forge", 1),
         ("downloads-detox", 1),
+        ("downloads-detox", 2),
         ("pdf-press", 1),
         ("media-mill", 1),
     ]

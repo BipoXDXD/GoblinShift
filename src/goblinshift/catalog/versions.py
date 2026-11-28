@@ -23,6 +23,7 @@ from pydantic import BaseModel, ValidationError
 from goblinshift.catalog.csv_janitor_v1 import CsvJanitorV1Parameters
 from goblinshift.catalog.csv_janitor_v2 import CsvJanitorV2Parameters
 from goblinshift.catalog.downloads_detox_v1 import DownloadsDetoxV1Parameters
+from goblinshift.catalog.downloads_detox_v2 import DownloadsDetoxV2Parameters
 from goblinshift.catalog.image_forge_v1 import ImageForgeV1Parameters
 from goblinshift.catalog.media_mill_v1 import MediaMillV1Parameters
 from goblinshift.catalog.pdf_press_v1 import PdfPressV1Parameters, upload_references
@@ -219,16 +220,32 @@ IMAGE_FORGE_V1 = RecipeVersion(
 
 # O teto do lote fica abaixo dos 480 MiB de conteúdo de saída (1.7): o Detox copia cada entrada
 # aceita. A aceitação o impõe (`max_total_input_bytes` → 422) antes de reservar o teto de saída.
+_DOWNLOADS_DETOX_LIMITS: Mapping[str, int] = {
+    "max_inputs": downloads_detox.MAX_INPUTS,
+    "max_input_bytes": COMMON_MAX_INPUT_BYTES,
+    "max_total_input_bytes": downloads_detox.MAX_TOTAL_INPUT_BYTES,
+}
+
+# Prazo de merge das v2 desta onda (ADR 067): o Sunset da v1 sai em 2027-04-01.
+DOWNLOADS_DETOX_V2_MERGE_DEADLINE = date(2026, 12, 31)
+DOWNLOADS_DETOX_V1_SUNSET = sunset_after_merge(DOWNLOADS_DETOX_V2_MERGE_DEADLINE)
+
 DOWNLOADS_DETOX_V1 = RecipeVersion(
     recipe_id=downloads_detox.RECIPE_ID,
     version=downloads_detox.VERSION,
-    status=VersionStatus.CURRENT,
+    status=VersionStatus.DEPRECATED,
     parameters_model=DownloadsDetoxV1Parameters,
-    limits={
-        "max_inputs": downloads_detox.MAX_INPUTS,
-        "max_input_bytes": COMMON_MAX_INPUT_BYTES,
-        "max_total_input_bytes": downloads_detox.MAX_TOTAL_INPUT_BYTES,
-    },
+    limits=_DOWNLOADS_DETOX_LIMITS,
+    sunset_at=DOWNLOADS_DETOX_V1_SUNSET,
+)
+
+# Mesmo schema e mesmos defaults da v1; a semântica nova (PDF, WebP e GIF) mora no registro.
+DOWNLOADS_DETOX_V2 = RecipeVersion(
+    recipe_id=downloads_detox.RECIPE_ID,
+    version=downloads_detox.VERSION_2,
+    status=VersionStatus.CURRENT,
+    parameters_model=DownloadsDetoxV2Parameters,
+    limits=_DOWNLOADS_DETOX_LIMITS,
 )
 
 _MEDIA_LIMITS = media_mill.Limits()
@@ -278,6 +295,7 @@ CATALOG = Catalog(
         CSV_JANITOR_V2,
         IMAGE_FORGE_V1,
         DOWNLOADS_DETOX_V1,
+        DOWNLOADS_DETOX_V2,
         PDF_PRESS_V1,
         MEDIA_MILL_V1,
     ]

@@ -2645,6 +2645,60 @@
                       {
                         "properties": {
                           "recipe_id": {
+                            "const": "downloads-detox"
+                          },
+                          "recipe_version": {
+                            "const": 2
+                          },
+                          "parameters": {
+                            "properties": {
+                              "deduplicate": {
+                                "type": "boolean",
+                                "title": "Deduplicate",
+                                "default": true
+                              },
+                              "group_by": {
+                                "type": "string",
+                                "enum": [
+                                  "kind",
+                                  "none"
+                                ],
+                                "title": "GroupBy",
+                                "default": "kind"
+                              },
+                              "name_mode": {
+                                "type": "string",
+                                "enum": [
+                                  "preserve",
+                                  "indexed"
+                                ],
+                                "title": "NameMode",
+                                "default": "preserve"
+                              },
+                              "name_prefix": {
+                                "type": "string",
+                                "maxLength": 40,
+                                "minLength": 1,
+                                "title": "Name Prefix",
+                                "default": "file"
+                              }
+                            },
+                            "additionalProperties": false,
+                            "type": "object",
+                            "title": "DownloadsDetoxV2Parameters"
+                          }
+                        },
+                        "type": "object",
+                        "required": [
+                          "recipe_id",
+                          "recipe_version",
+                          "parameters"
+                        ],
+                        "title": "downloads-detox v2"
+                      },
+                      {
+                        "properties": {
+                          "recipe_id": {
                             "const": "pdf-press"
                           },
                           "recipe_version": {
@@ -3751,6 +3805,60 @@
                         ]
                       },
                       {
+                        "title": "downloads-detox v2",
+                        "type": "object",
+                        "properties": {
+                          "recipe_id": {
+                            "const": "downloads-detox"
+                          },
+                          "recipe_version": {
+                            "const": 2
+                          },
+                          "parameters": {
+                            "additionalProperties": false,
+                            "properties": {
+                              "deduplicate": {
+                                "default": true,
+                                "title": "Deduplicate",
+                                "type": "boolean"
+                              },
+                              "group_by": {
+                                "enum": [
+                                  "kind",
+                                  "none"
+                                ],
+                                "title": "GroupBy",
+                                "type": "string",
+                                "default": "kind"
+                              },
+                              "name_mode": {
+                                "enum": [
+                                  "preserve",
+                                  "indexed"
+                                ],
+                                "title": "NameMode",
+                                "type": "string",
+                                "default": "preserve"
+                              },
+                              "name_prefix": {
+                                "default": "file",
+                                "maxLength": 40,
+                                "minLength": 1,
+                                "title": "Name Prefix",
+                                "type": "string"
+                              }
+                            },
+                            "title": "DownloadsDetoxV2Parameters",
+                            "type": "object"
+                          }
+                        },
+                        "required": [
+                          "recipe_id",
+                          "recipe_version",
+                          "parameters"
+                        ]
+                      },
+                      {
                         "title": "pdf-press v1",
                         "type": "object",
                         "properties": {
@@ -4712,6 +4820,60 @@
                               }
                             },
                             "title": "DownloadsDetoxV1Parameters",
+                            "type": "object"
+                          }
+                        },
+                        "required": [
+                          "recipe_id",
+                          "recipe_version",
+                          "parameters"
+                        ]
+                      },
+                      {
+                        "title": "downloads-detox v2",
+                        "type": "object",
+                        "properties": {
+                          "recipe_id": {
+                            "const": "downloads-detox"
+                          },
+                          "recipe_version": {
+                            "const": 2
+                          },
+                          "parameters": {
+                            "additionalProperties": false,
+                            "properties": {
+                              "deduplicate": {
+                                "default": true,
+                                "title": "Deduplicate",
+                                "type": "boolean"
+                              },
+                              "group_by": {
+                                "enum": [
+                                  "kind",
+                                  "none"
+                                ],
+                                "title": "GroupBy",
+                                "type": "string",
+                                "default": "kind"
+                              },
+                              "name_mode": {
+                                "enum": [
+                                  "preserve",
+                                  "indexed"
+                                ],
+                                "title": "NameMode",
+                                "type": "string",
+                                "default": "preserve"
+                              },
+                              "name_prefix": {
+                                "default": "file",
+                                "maxLength": 40,
+                                "minLength": 1,
+                                "title": "Name Prefix",
+                                "type": "string"
+                              }
+                            },
+                            "title": "DownloadsDetoxV2Parameters",
                             "type": "object"
                           }
                         },

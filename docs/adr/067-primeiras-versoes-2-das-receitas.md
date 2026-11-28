@@ -36,6 +36,30 @@ escolhida aqui vale para as próximas (Downloads Detox e PDF Press).
   grava como v2: é a migração a pedido do usuário, com a mesma semântica, porque os defaults dos
   campos novos reproduzem a v1.
 
+### Downloads Detox v2
+
+A v2 do Detox muda só a semântica, sem mudar o schema: aceita também PDF, WebP e GIF (lacuna 5
+da pesquisa), e as mesmas entradas que a v1 recusava com `UNSUPPORTED_FORMAT` passam a ser
+copiadas. Por isso é uma versão nova, mesmo com os mesmos parâmetros.
+
+- **Modelo.** `DownloadsDetoxV2Parameters` herda de `DownloadsDetoxV1Parameters` e troca só o
+  título, para o contrato distinguir as variantes. Schema e defaults são os da v1, e o snapshot
+  `downloads-detox-v2.json` os congela à parte.
+- **Parser.** O mesmo `params_from_mapping` nas duas versões: não há opção nova a recusar.
+- **Receita.** `DownloadsDetox(accepted=...)`. A diferença entre as versões é o conjunto de
+  formatos aceitos (`V1_FORMATS` ou `V2_FORMATS`), passado no registro. Extensão e assinatura de
+  formato fora do conjunto não são reconhecidas, e a mensagem de recusa da v1 fica idêntica.
+- **Assinaturas.** Só no primeiro bloco lido, sem abrir nem decodificar: `%PDF-`, `GIF87a` ou
+  `GIF89a`, e RIFF com a forma `WEBP` (o RIFF de WAV e AVI não passa).
+- **Pasta.** PDF é do tipo `document` e vai para `documents/` (`OutputGroup.DOCUMENTS`); a coleta
+  do worker deriva a lista fechada de `OutputGroup`, então executor e worker saem do mesmo commit.
+- **PDF opaco.** Como o ZIP, o PDF é copiado sem inspeção. O item leva uma nota, e o relatório da
+  versão que aceita PDF declara que JavaScript, anexos e formulários só são recusados pelo PDF
+  Press. O relatório da v1 não ganha chave nova.
+- **`Sunset`.** Prazo de merge das v2 desta onda (`DOWNLOADS_DETOX_V2_MERGE_DEADLINE`,
+  2026-12-31), o que dá 2027-04-01T00:00:00Z pela mesma `sunset_after_merge`.
+- **Bancada.** `reusableVersions: [1]`, como no CSV Janitor.
+
 ## Alternativas descartadas
 
 - **Copiar o modelo inteiro na v2:** duplica os validadores, e uma correção numa cópia esquece

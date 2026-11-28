@@ -3,9 +3,15 @@
 import pytest
 from pydantic import ValidationError
 
+from goblinshift.catalog import CATALOG
 from goblinshift.catalog.downloads_detox_v1 import DownloadsDetoxV1Parameters
+from goblinshift.catalog.downloads_detox_v2 import DownloadsDetoxV2Parameters
 from goblinshift.catalog.versions import RecipeVersion, VersionStatus
 from goblinshift.processing.downloads_detox import NameMode, Params, params_from_mapping
+from goblinshift.processing.downloads_detox.recipe import REJECTION_CODE
+from goblinshift.processing.recipe import ItemOk, ItemRejected
+from tests.downloads_detox import samples
+from tests.downloads_detox.conftest import Workspace
 
 
 def version() -> RecipeVersion:
@@ -103,3 +109,46 @@ def test_schema_publica_limites_do_prefixo() -> None:
     prefix = schema["properties"]["name_prefix"]
     assert (prefix["minLength"], prefix["maxLength"], prefix["default"]) == (1, 40, "file")
     assert schema["additionalProperties"] is False
+
+
+# --- Versão 2: o mesmo schema, com semântica nova (formatos aceitos) --------------------------
+
+
+def test_registro_da_detox_v2_aceita_pdf(work: Workspace) -> None:
+    work.add("a.pdf", samples.pdf())
+
+    report = work.run_registered(2, {})
+
+    [item] = report.items
+    assert isinstance(item, ItemOk)
+    assert item.outputs == ("documents/a.pdf",)
+
+
+def test_registro_da_detox_v1_continua_recusando_pdf(work: Workspace) -> None:
+    work.add("a.pdf", samples.pdf())
+
+    report = work.run_registered(1, {})
+
+    [item] = report.items
+    assert isinstance(item, ItemRejected)
+    assert item.code == REJECTION_CODE == "UNSUPPORTED_FORMAT"
+
+
+def test_modelo_da_v2_tem_o_schema_da_v1_com_outro_titulo() -> None:
+    v1 = DownloadsDetoxV1Parameters.model_json_schema()
+    v2 = DownloadsDetoxV2Parameters.model_json_schema()
+
+    assert v2.pop("title") == "DownloadsDetoxV2Parameters"
+    assert v1.pop("title") == "DownloadsDetoxV1Parameters"
+    assert v2 == v1
+
+
+def test_v2_recusa_com_preserve_outro_name_prefix() -> None:
+    with pytest.raises(ValidationError):
+        DownloadsDetoxV2Parameters.model_validate({"name_prefix": "doc"})
+
+
+def test_detox_v1_deprecated_e_v2_atual_com_os_mesmos_defaults() -> None:
+    assert CATALOG.resolve("downloads-detox", 2, {}) == CATALOG.resolve("downloads-detox", 1, {})
+    assert CATALOG.get_version("downloads-detox", 1).status is VersionStatus.DEPRECATED
+    assert CATALOG.get_version("downloads-detox", 2).status is VersionStatus.CURRENT

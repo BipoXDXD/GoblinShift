@@ -5,10 +5,12 @@ from pathlib import Path
 
 import pytest
 
+from goblinshift.catalog import CATALOG
 from goblinshift.processing.downloads_detox import Params
 from goblinshift.processing.downloads_detox.recipe import RECIPE_ID, DownloadsDetox
 from goblinshift.processing.output_dir import RESERVED_NAMES, FileSystemOutputDir
 from goblinshift.processing.recipe import InputFile, Report
+from goblinshift.processing.registry import RECIPES
 
 # Os nomes que o executor reserva na raiz para o Detox (etapa 0, 2.3).
 DETOX_RESERVED_NAMES = (*RESERVED_NAMES, f"{RECIPE_ID}.zip")
@@ -44,6 +46,12 @@ class Workspace:
     def run(self, params: Params | None = None, recipe: DownloadsDetox | None = None) -> Report:
         out = FileSystemOutputDir(self.out_dir, reserved_names=DETOX_RESERVED_NAMES)
         return (recipe or DownloadsDetox()).run(params or Params(), self.inputs, out, self.progress)
+
+    def run_registered(self, version: int, raw_params: dict[str, object]) -> Report:
+        """Roda a versão pelo registro, como o executor: parâmetros resolvidos pelo catálogo."""
+        out = FileSystemOutputDir(self.out_dir, reserved_names=DETOX_RESERVED_NAMES)
+        resolved = CATALOG.resolve(RECIPE_ID, version, raw_params)
+        return RECIPES[RECIPE_ID, version].execute(resolved, self.inputs, out, self.progress)
 
     def output_paths(self) -> list[str]:
         return sorted(

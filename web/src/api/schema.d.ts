@@ -2962,6 +2962,36 @@ export interface operations {
                     };
                 } | {
                     /** @constant */
+                    recipe_id: "downloads-detox";
+                    /** @constant */
+                    recipe_version: 2;
+                    /** DownloadsDetoxV2Parameters */
+                    parameters: {
+                        /**
+                         * Deduplicate
+                         * @default true
+                         */
+                        deduplicate?: boolean;
+                        /**
+                         * GroupBy
+                         * @default kind
+                         * @enum {string}
+                         */
+                        group_by?: "kind" | "none";
+                        /**
+                         * NameMode
+                         * @default preserve
+                         * @enum {string}
+                         */
+                        name_mode?: "preserve" | "indexed";
+                        /**
+                         * Name Prefix
+                         * @default file
+                         */
+                        name_prefix?: string;
+                    };
+                } | {
+                    /** @constant */
                     recipe_id: "pdf-press";
                     /** @constant */
                     recipe_version: 1;
@@ -3386,6 +3416,36 @@ export interface operations {
                     /** @constant */
                     recipe_version: 1;
                     /** DownloadsDetoxV1Parameters */
+                    parameters: {
+                        /**
+                         * Deduplicate
+                         * @default true
+                         */
+                        deduplicate?: boolean;
+                        /**
+                         * GroupBy
+                         * @default kind
+                         * @enum {string}
+                         */
+                        group_by?: "kind" | "none";
+                        /**
+                         * NameMode
+                         * @default preserve
+                         * @enum {string}
+                         */
+                        name_mode?: "preserve" | "indexed";
+                        /**
+                         * Name Prefix
+                         * @default file
+                         */
+                        name_prefix?: string;
+                    };
+                } | {
+                    /** @constant */
+                    recipe_id: "downloads-detox";
+                    /** @constant */
+                    recipe_version: 2;
+                    /** DownloadsDetoxV2Parameters */
                     parameters: {
                         /**
                          * Deduplicate
@@ -3984,6 +4044,36 @@ export interface operations {
                     /** @constant */
                     recipe_version: 1;
                     /** DownloadsDetoxV1Parameters */
+                    parameters: {
+                        /**
+                         * Deduplicate
+                         * @default true
+                         */
+                        deduplicate?: boolean;
+                        /**
+                         * GroupBy
+                         * @default kind
+                         * @enum {string}
+                         */
+                        group_by?: "kind" | "none";
+                        /**
+                         * NameMode
+                         * @default preserve
+                         * @enum {string}
+                         */
+                        name_mode?: "preserve" | "indexed";
+                        /**
+                         * Name Prefix
+                         * @default file
+                         */
+                        name_prefix?: string;
+                    };
+                } | {
+                    /** @constant */
+                    recipe_id: "downloads-detox";
+                    /** @constant */
+                    recipe_version: 2;
+                    /** DownloadsDetoxV2Parameters */
                     parameters: {
                         /**
                          * Deduplicate
