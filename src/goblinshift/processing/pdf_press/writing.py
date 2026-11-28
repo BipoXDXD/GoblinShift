@@ -11,8 +11,9 @@ páginas; a entrada aberta não muda. O `/Info` do trailer e o XMP do catálogo 
 chegam aqui: o documento nasce de `pikepdf.new()`, com trailer e catálogo próprios.
 
 Na v2 (ADR 070):
-- rotação: cada página planejada com `rotation` é girada de forma relativa, somada ao `/Rotate`
-  que ela já tinha, inclusive o herdado da árvore de páginas, que o qpdf resolve ao copiar;
+- rotação: cada página planejada com `rotation` é girada de forma relativa ao `/Rotate` da
+  origem, inclusive o herdado da árvore de páginas; a cópia recebe o valor absoluto, para que
+  a mesma página repetida não herde a rotação de outra cópia;
 - `strip_annotation_metadata`: tira autor (`/T`) e datas (`/M`, `/CreationDate`) de cada
   anotação das páginas e do `/Popup` dela; o texto da nota (`/Contents`) fica. Sem a opção, a
   anotação fica como está. As URIs dos links ficam como estão;
@@ -70,9 +71,9 @@ class DocumentWriter:
         """Grava `planned` em `sink`; `sources` são as entradas abertas, pela posição."""
         with pikepdf.new() as composed:
             for page in planned.pages:
-                composed.pages.append(sources[page.position].pdf.pages[page.page_number - 1])
-                if page.rotation:
-                    composed.pages[-1].rotate(page.rotation, relative=True)
+                origin = sources[page.position].pdf.pages[page.page_number - 1]
+                composed.pages.append(origin)
+                _set_rotation(composed.pages[-1], _inherited_rotation(origin) + page.rotation)
             _drop_private_metadata(composed)
             if self._strip_annotation_metadata:
                 _drop_annotation_metadata(composed)
@@ -86,6 +87,34 @@ class DocumentWriter:
             self.recompression += self._recompressor.recompress(composed)
             _save(composed, written, version, pikepdf.ObjectStreamMode.generate)
             return WrittenDocument(uncompressed.count, written.count)
+
+
+def _set_rotation(copy: pikepdf.Page, degrees: int) -> None:
+    """Grava na cópia a rotação absoluta, calculada da origem, nunca do objeto copiado.
+
+    A mesma página de origem repetida sai do cache do qpdf como cópia rasa, com o `/Rotate` que
+    a cópia anterior recebeu; por isso cada cópia recebe o valor absoluto. Quando a cópia já tem a
+    rotação certa (sempre na v1, que não gira), o dicionário não é tocado e os bytes não mudam.
+    """
+    absolute = degrees % 360
+    if _inherited_rotation(copy) != absolute:
+        copy.obj.Rotate = absolute
+
+
+def _inherited_rotation(page: pikepdf.Page) -> int:
+    """O `/Rotate` efetivo da página: o próprio ou o herdado do nó `/Pages` mais próximo."""
+    node: pikepdf.Object | None = page.obj
+    visited: set[tuple[int, int]] = set()
+    while isinstance(node, pikepdf.Dictionary):
+        if node.is_indirect:
+            if node.objgen in visited:
+                break
+            visited.add(node.objgen)
+        rotate = node.get("/Rotate")
+        if rotate is not None:
+            return int(rotate) % 360
+        node = node.get("/Parent")
+    return 0
 
 
 def _save(

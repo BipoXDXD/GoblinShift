@@ -431,6 +431,44 @@ def test_rotacao_de_270_sobre_90_volta_a_zero(work: Workspace) -> None:
     assert rotations(work.read("merged.pdf")) in ([0], [None])
 
 
+@pytest.mark.parametrize(
+    ("inherited", "ranges", "expected"),
+    [
+        # Intervalos sobrepostos com rotações diferentes: a página 2 sai duas vezes.
+        (None, ((1, 2, 90), (2, 2, 0)), [90, 90, None]),
+        (None, ((1, 1, 90), (1, 1, 0)), [90, None]),
+        # A mesma rotação repetida não acumula.
+        (None, ((1, 1, 90), (1, 1, 90)), [90, 90]),
+        (None, ((1, 1, 0), (1, 1, 180)), [None, 180]),
+        # Com /Rotate herdado da árvore, cada cópia parte da rotação da origem.
+        (90, ((1, 1, 90), (1, 1, 0), (1, 1, 90)), [180, 90, 180]),
+        (90, ((1, 1, 0), (1, 1, 270)), [90, None]),
+    ],
+)
+def test_repeticao_com_rotacoes_diferentes(
+    work: Workspace,
+    inherited: int | None,
+    ranges: tuple[tuple[int, int, int], ...],
+    expected: list[int | None],
+) -> None:
+    mutate = None if inherited is None else samples.inherited_rotation(inherited)
+    work.add("a.pdf", samples.document("a", pages=2, mutate=mutate), UPLOAD_A)
+
+    work.run(
+        Params(
+            Operation.SELECT,
+            select=tuple(PageRange(UPLOAD_A, first, last, turn) for first, last, turn in ranges),
+        )
+    )
+
+    data = work.read("selection.pdf")
+    # 0 explícito e ausência são a mesma rotação.
+    assert [turn or None for turn in rotations(data)] == expected
+    assert samples.markers(data) == [
+        f"a:{page}" for first, last, _ in ranges for page in range(first, last + 1)
+    ]
+
+
 def test_split_girado_gira_cada_parte(work: Workspace) -> None:
     work.add("a.pdf", samples.document("a", pages=2))
 
