@@ -671,6 +671,15 @@ export const TEXT = {
       noPages: "Adicione ao menos uma página.",
       tooManyPages: (max: number) => `Escolha no máximo ${String(max)} páginas.`,
     },
+    ranges: {
+      empty: "Informe as páginas, como 1-3, 7, 10-.",
+      invalidPart: (part: string) =>
+        `“${part}” não é uma página nem um intervalo. Use 7, 1-3 ou 10-.`,
+      startsAtOne: "As páginas começam em 1.",
+      beyondLimit: (page: number, max: number) =>
+        `A página ${String(page)} passa do limite de ${String(max)}.`,
+      reversed: (part: string) => `No intervalo ${part}, o fim vem antes do início.`,
+    },
   },
   mediaMill: {
     title: "Media Mill",
