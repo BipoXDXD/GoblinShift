@@ -85,6 +85,7 @@ from goblinshift.identity.users import (
     ExternalIdentity,
     LoginRefusal,
     LoginRefused,
+    find_login_account,
     resolve_login,
 )
 
@@ -136,6 +137,7 @@ __all__ = [
     "csrf_pair_matches",
     "csrf_token_matches",
     "find_account",
+    "find_login_account",
     "generate_key",
     "issue_csrf_token",
     "issue_key",

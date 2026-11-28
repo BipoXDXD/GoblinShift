@@ -115,7 +115,7 @@ web_session = Table(
 )
 
 # Cache do Authlib (`state`, `nonce`, `code_verifier`) durante o login, com TTL de 10 min (3.6).
-# O cookie `__Secure-gs_login` leva só o marcador; o conteúdo nunca sai do servidor (ADR 025).
+# O cookie `__Host-gs_login` leva só o marcador; o conteúdo nunca sai do servidor (ADR 025).
 login_state = Table(
     "login_state",
     metadata,
