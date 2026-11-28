@@ -1015,8 +1015,10 @@ def test_write_exclusive_fecha_o_fd_se_o_fdopen_falha(
     opened: list[int] = []
     real_open = os.open
 
-    def recording_open(*args: object, **kwargs: object) -> int:
-        fd = real_open(*args, **kwargs)  # type: ignore[arg-type]
+    def recording_open(
+        path: str | os.PathLike[str], flags: int, mode: int = 0o777, *, dir_fd: int | None = None
+    ) -> int:
+        fd = real_open(path, flags, mode, dir_fd=dir_fd)
         opened.append(fd)
         return fd
 

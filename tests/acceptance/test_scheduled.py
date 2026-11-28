@@ -7,6 +7,7 @@ tmp_path e o `flock` é o de verdade.
 """
 
 import configparser
+import errno
 import os
 import re
 import shutil
@@ -48,7 +49,7 @@ LONG_AFTER_BOOT_S = 99999
 # Prazo de quem espera um estado que já deveria ter chegado (não é margem para a corrida).
 WAIT_DEADLINE_S = 10
 # Campo `MAJ:MIN:INODE` de uma linha de /proc/locks (maior e menor em hexadecimal).
-PROC_LOCKS_FILE = re.compile(r"^[0-9a-f]+:[0-9a-f]+:(\d+)$")
+PROC_LOCKS_FILE = re.compile(r"^([0-9a-f]+):([0-9a-f]+):(\d+)$")
 
 FAKE_DOCKER = """#!/bin/sh
 # O marcador do primeiro `start` lento nasce antes do registro: o teste sinaliza assim que vê a
@@ -314,15 +315,12 @@ def test_sigterm_entre_comandos_nao_comeca_a_aceitacao(fakes: Path, tmp_path: Pa
     fifo = tmp_path / "stop.fifo"
     os.mkfifo(fifo)
 
-    def release_stop() -> None:
-        fifo.write_text("\n")
-
     code, calls = interrupted(
         fakes,
         reached="docker stop",
         group=False,
         FAKE_STOP_FIFO=str(fifo),
-        after_signal=release_stop,
+        after_signal=lambda: write_to_fifo(fifo),
     )
 
     assert code == SIGTERM_EXIT
@@ -462,16 +460,41 @@ def test_trava_ausente_nao_para_o_worker(fakes: Path) -> None:
 
 def flock_waiter_on(path: Path) -> bool:
     """Há alguém bloqueado à espera de um `flock` em `path` (linha `->` de /proc/locks)?"""
-    inode = path.stat().st_ino
+    info = path.stat()
+    wanted = (os.major(info.st_dev), os.minor(info.st_dev), info.st_ino)
     for line in Path("/proc/locks").read_text().splitlines():
         fields = line.split()
         if "->" not in fields:
             continue
         for field in fields:
             match = PROC_LOCKS_FILE.match(field)
-            if match and int(match.group(1)) == inode:
+            if match and _lock_file_id(match) == wanted:
                 return True
     return False
+
+
+def _lock_file_id(match: re.Match[str]) -> tuple[int, int, int]:
+    major, minor, inode = match.groups()
+    return int(major, 16), int(minor, 16), int(inode)
+
+
+def write_to_fifo(fifo: Path) -> None:
+    """Escreve uma linha no FIFO assim que houver leitor; sem leitor no prazo, falha sem travar."""
+
+    def written() -> bool:
+        try:
+            fd = os.open(fifo, os.O_WRONLY | os.O_NONBLOCK)
+        except OSError as error:
+            if error.errno != errno.ENXIO:  # ENXIO: ninguém abriu o FIFO para ler ainda
+                raise
+            return False
+        try:
+            os.write(fd, b"\n")
+        finally:
+            os.close(fd)
+        return True
+
+    wait_until(written, "o leitor do FIFO aparecer")
 
 
 def wait_until(condition: Callable[[], bool], what: str) -> None:
