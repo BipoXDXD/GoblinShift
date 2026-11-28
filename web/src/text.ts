@@ -129,7 +129,7 @@ export const TEXT = {
       "image-forge":
         "Reduz e converte imagens em lote, mantendo a proporção, e gera miniaturas se você quiser.",
       "downloads-detox":
-        "Organiza uma pasta bagunçada: tira os repetidos, separa imagens, PDFs e outros por tipo e renomeia em ordem.",
+        "Organiza uma pasta bagunçada: tira os repetidos, separa por tipo, inclusive PDF, WebP e GIF, e renomeia em ordem.",
       "pdf-press":
         "Junta, separa ou escolhe páginas de PDFs, com o mapa de cada página, sem abrir o arquivo no navegador.",
       "media-mill":
