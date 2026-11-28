@@ -3,9 +3,10 @@ import type { ReactElement } from "react";
 
 import { formatDateTime } from "../format";
 import { TEXT } from "../text";
-import { remainingLabel, remainingMinutes } from "./retention";
+import { remainingLabel } from "./retention";
 
 const T = TEXT.retention;
+const MINUTES_PER_HOUR = 60;
 
 interface RetentionBadgeProps {
   /** Quando os resultados são apagados (ISO 8601). */
@@ -25,9 +26,10 @@ export function RetentionBadge({ expiresAt, nowMs }: RetentionBadgeProps): React
     return null;
   }
   const tone = remaining.urgent ? "bg-warning-bg text-warning-fg" : "bg-info-bg text-info-fg";
+  // Em minutos só abaixo de 1 h: com 60 min (arredondados), "em 1 h".
   const left =
-    remaining.hours <= 1
-      ? T.inMinutes(remainingMinutes(expiresAt, nowMs))
+    remaining.minutes < MINUTES_PER_HOUR
+      ? T.inMinutes(remaining.minutes)
       : T.inHours(remaining.hours);
   return (
     <p className={`inline-flex items-center gap-2 rounded-full px-3 py-1 text-sm ${tone}`}>

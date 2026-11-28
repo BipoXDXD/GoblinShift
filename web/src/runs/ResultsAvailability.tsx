@@ -28,9 +28,10 @@ interface ResultsAvailabilityProps {
 
 /**
  * Os downloads só enquanto há algo para baixar, com o prazo em destaque e "Apagar agora"
- * secundária acima deles (D5); o vermelho fica só na confirmação (RUI regra 4). A disponibilidade de cada referência vem do próprio /results (fonte única): sem
- * nenhuma disponível, a seção mostra o estado vazio com o motivo; com alguma, quem chama mostra
- * cada arquivo com o link ou com o motivo de não ter.
+ * secundária acima deles (D5); o vermelho fica só na confirmação (RUI regra 4). A
+ * disponibilidade de cada referência vem do próprio /results (fonte única): sem nenhuma
+ * disponível, a seção mostra o estado vazio com o motivo; com alguma, quem chama mostra cada
+ * arquivo com o link ou com o motivo de não ter.
  */
 export function ResultsAvailability({
   runId,

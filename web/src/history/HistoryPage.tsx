@@ -13,6 +13,7 @@ import { Link, useSearchParams } from "react-router";
 import { useApiClient } from "../api/ApiClientContext";
 import { ApiError } from "../api/response";
 import { PATHS, runPath } from "../app/paths";
+import { useNow } from "../app/useNow";
 import { GoblinIllustration } from "../art/GoblinIllustration";
 import { FocusHeading } from "../components/a11y/FocusHeading";
 import { ANNOUNCE_DELAY_MS, LiveRegion } from "../components/a11y/LiveRegion";
@@ -34,7 +35,6 @@ import {
 } from "./filters";
 import { RunHistoryExtras } from "./RunHistoryExtras";
 import { RunList as RunRows } from "./RunList";
-import { useNow } from "./useNow";
 
 const T = TEXT.history;
 /** A disponibilidade dos resultados ("até", "expirados") é refeita a cada minuto. */

@@ -43,6 +43,18 @@ describe("RetentionBadge", () => {
     expect(screen.getByText(/apagado automaticamente em 25 min$/)).toBeVisible();
   });
 
+  it("com exatamente 1 h, conta em horas", () => {
+    render(<RetentionBadge expiresAt={iso(HOUR)} nowMs={NOW} />);
+
+    expect(screen.getByText(/apagado automaticamente em 1 h$/)).toBeVisible();
+  });
+
+  it("com 59 min, conta em minutos", () => {
+    render(<RetentionBadge expiresAt={iso(59 * MINUTE)} nowMs={NOW} />);
+
+    expect(screen.getByText(/apagado automaticamente em 59 min$/)).toBeVisible();
+  });
+
   it("vencido, não mostra nada", () => {
     const { container } = render(<RetentionBadge expiresAt={iso(-MINUTE)} nowMs={NOW} />);
 

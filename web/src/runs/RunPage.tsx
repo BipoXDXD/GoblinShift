@@ -14,8 +14,8 @@ import { z } from "zod";
 
 import { useApiClient } from "../api/ApiClientContext";
 import { NotFoundPage } from "../app/NotFoundPage";
-import { useNow } from "../history/useNow";
 import { workbenchPath } from "../app/paths";
+import { useNow } from "../app/useNow";
 import { GoblinIllustration, type GoblinState } from "../art/GoblinIllustration";
 import { FocusHeading } from "../components/a11y/FocusHeading";
 import { LiveRegion } from "../components/a11y/LiveRegion";
