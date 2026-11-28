@@ -48,12 +48,30 @@ describe("constantes espelham os tipos gerados", () => {
 });
 
 describe("parseDownloadsDetox", () => {
+  it("monta o comando v2", () => {
+    const draft = parseDownloadsDetox(indexed("foto"), SETTINGS);
+
+    expect(draft).toEqual({
+      ok: true,
+      command: {
+        recipe_id: "downloads-detox",
+        recipe_version: 2,
+        parameters: {
+          deduplicate: true,
+          group_by: "kind",
+          name_mode: "indexed",
+          name_prefix: "foto",
+        },
+      },
+    });
+  });
+
   it("com nomes preservados, o prefixo não vai (a API o recusa nesse modo)", () => {
     expect(parseDownloadsDetox(values({ name_prefix: "qualquer/coisa" }), SETTINGS)).toEqual({
       ok: true,
       command: {
         recipe_id: "downloads-detox",
-        recipe_version: 1,
+        recipe_version: 2,
         parameters: { deduplicate: true, group_by: "kind", name_mode: "preserve" },
       },
     });

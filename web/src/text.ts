@@ -129,7 +129,7 @@ export const TEXT = {
       "image-forge":
         "Reduz e converte imagens em lote, mantendo a proporção, e gera miniaturas se você quiser.",
       "downloads-detox":
-        "Organiza uma pasta bagunçada: tira os repetidos, separa por tipo e renomeia em ordem.",
+        "Organiza uma pasta bagunçada: tira os repetidos, separa imagens, PDFs e outros por tipo e renomeia em ordem.",
       "pdf-press":
         "Junta, separa ou escolhe páginas de PDFs, com o mapa de cada página, sem abrir o arquivo no navegador.",
       "media-mill":
@@ -610,9 +610,10 @@ export const TEXT = {
     deduplicateHint: "Arquivos com o mesmo conteúdo ficam uma vez só, na primeira ocorrência.",
     groupBy: "Organização em pastas",
     groupByOptions: {
-      kind: "Separar por tipo (imagens, tabelas, textos e arquivos compactados)",
+      kind: "Separar por tipo (imagens, documentos, tabelas, textos e arquivos compactados)",
       none: "Tudo numa pasta só",
     },
+    acceptedHint: "Aceita JPEG, PNG, WebP, GIF, PDF, CSV, TXT e ZIP, reconhecidos pelo conteúdo.",
     nameMode: "Nomes dos arquivos",
     nameModes: {
       preserve: "Manter os nomes originais",

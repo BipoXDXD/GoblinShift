@@ -118,7 +118,8 @@ const RECIPES: { readonly [K in RecipeId]: RecipeModule<K> } = {
   },
   "downloads-detox": {
     id: "downloads-detox",
-    version: 1,
+    version: 2,
+    reusableVersions: [1],
     title: RECIPE_TITLES["downloads-detox"],
     // Aceita tipos variados e classifica pelo conteúdo (1.4); recusa o que não reconhece.
     accept: null,

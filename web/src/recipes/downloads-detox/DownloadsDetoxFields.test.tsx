@@ -3,6 +3,7 @@ import userEvent from "@testing-library/user-event";
 import { describe, expect, it, vi } from "vitest";
 
 import { axeViolations } from "../../test/axe";
+import { TEXT } from "../../text";
 import type { RecipeDraft } from "../types";
 import { DownloadsDetoxFields } from "./DownloadsDetoxFields";
 import type { DownloadsDetoxSettings } from "./schema";
@@ -37,6 +38,22 @@ const prefix = () => screen.queryByRole("textbox", { name: "Prefixo da numeraç�
 const nameMode = () => screen.getByRole("combobox", { name: "Nomes dos arquivos" });
 
 describe("DownloadsDetoxFields", () => {
+  it("a opção por tipo cita documentos", () => {
+    setup();
+
+    const option = screen.getByRole("option", { name: TEXT.downloadsDetox.groupByOptions.kind });
+    expect(option).toHaveTextContent("documentos");
+  });
+
+  it("descreve as pastas com os tipos aceitos", () => {
+    setup();
+
+    expect(
+      screen.getByRole("combobox", { name: "Organização em pastas" }),
+    ).toHaveAccessibleDescription(TEXT.downloadsDetox.acceptedHint);
+    expect(TEXT.downloadsDetox.acceptedHint).toMatch(/PDF/);
+  });
+
   it("mostra os defaults do catálogo, sem o prefixo enquanto os nomes são preservados", () => {
     setup();
 
@@ -57,7 +74,7 @@ describe("DownloadsDetoxFields", () => {
       ok: true,
       command: {
         recipe_id: "downloads-detox",
-        recipe_version: 1,
+        recipe_version: 2,
         parameters: {
           deduplicate: true,
           group_by: "kind",

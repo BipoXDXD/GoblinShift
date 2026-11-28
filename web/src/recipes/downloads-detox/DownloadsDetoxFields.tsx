@@ -15,7 +15,7 @@ import {
 const T = TEXT.downloadsDetox;
 
 /**
- * Formulário do Downloads Detox v1, escrito à mão (2.2), com defaults e limites do catálogo. O
+ * Formulário do Downloads Detox v2, escrito à mão (2.2), com defaults e limites do catálogo. O
  * prefixo só aparece com a numeração, o único modo em que ele vale.
  */
 export function DownloadsDetoxFields({
@@ -53,7 +53,12 @@ export function DownloadsDetoxFields({
           />
         )}
       </Field>
-      <Field id={fieldId("group_by")} label={T.groupBy} error={errorOf("group_by")}>
+      <Field
+        id={fieldId("group_by")}
+        label={T.groupBy}
+        description={T.acceptedHint}
+        error={errorOf("group_by")}
+      >
         {(control) => (
           <select
             {...control}

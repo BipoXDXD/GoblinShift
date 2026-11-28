@@ -21,7 +21,12 @@ import { escapeIsBlocked, forceClose } from "../test/dialog";
 import { recordDescriptionOnFocus } from "../test/focus";
 import { renderRoutes } from "../test/renderRoutes";
 
-await preloadRoutes("/", "/bancada/csv-janitor", "/bancada/image-forge");
+await preloadRoutes(
+  "/",
+  "/bancada/csv-janitor",
+  "/bancada/image-forge",
+  "/bancada/downloads-detox",
+);
 
 type Handler = (request: Request) => Response | Promise<Response> | null;
 
@@ -386,6 +391,29 @@ describe("Bancada aberta com um preset", () => {
     // Os campos da v2 ficam nos defaults dela.
     expect(screen.getByLabelText("Codificação dos arquivos de entrada")).toHaveValue("utf-8");
     expect(screen.getByLabelText("Colunas com espaços internos juntados")).toHaveValue("");
+  });
+
+  it("preset Detox v1 abre na Bancada v2 com o prefixo", async () => {
+    setup(`/bancada/downloads-detox?preset=${PRESET_ID}`, {
+      [`GET /api/v1/presets/${PRESET_ID}`]: () =>
+        jsonResponse(
+          presetBody({
+            recipe_id: "downloads-detox",
+            recipe_version: 1,
+            parameters: {
+              deduplicate: false,
+              group_by: "none",
+              name_mode: "indexed",
+              name_prefix: "foto",
+            },
+          }),
+        ),
+    });
+
+    expect(await screen.findByText("Parâmetros do preset Clientes do mês.")).toBeVisible();
+    expect(screen.getByRole("textbox", { name: "Prefixo da numeração" })).toHaveValue("foto");
+    expect(screen.getByRole("combobox", { name: "Organização em pastas" })).toHaveValue("none");
+    expect(screen.getByRole("checkbox", { name: "Remover arquivos repetidos" })).not.toBeChecked();
   });
 
   it("anuncia a origem numa região viva que já existia antes de o preset chegar", async () => {

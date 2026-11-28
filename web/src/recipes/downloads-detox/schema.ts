@@ -2,11 +2,12 @@ import { z } from "zod";
 
 import { formIssue, type FormField } from "../../components/a11y/ErrorSummary";
 import { TEXT } from "../../text";
-import type { RecipeDraft, RecipeParameters } from "../types";
+import type { RecipeDraft, RecipeParametersAt } from "../types";
 
-// Formulário da variante downloads-detox v1. Tipos e opções vêm do código gerado da spec; defaults
-// e limites, que o tipo não carrega, vêm de GET /catalog em tempo de execução (settings.ts).
-type Parameters = RecipeParameters<"downloads-detox">;
+// Formulário da variante downloads-detox v2, com os parâmetros da v1 (só a semântica mudou: aceita
+// também PDF, WebP e GIF). Tipos e opções vêm do código gerado da spec; defaults e limites, que o
+// tipo não carrega, vêm de GET /catalog em tempo de execução (settings.ts).
+type Parameters = RecipeParametersAt<"downloads-detox", 2>;
 type GroupBy = NonNullable<Parameters["group_by"]>;
 type NameMode = NonNullable<Parameters["name_mode"]>;
 
@@ -87,7 +88,7 @@ export function parseDownloadsDetox(
   }
   return {
     ok: true,
-    command: { recipe_id: "downloads-detox", recipe_version: 1, parameters: result.data },
+    command: { recipe_id: "downloads-detox", recipe_version: 2, parameters: result.data },
   };
 }
 

@@ -107,6 +107,24 @@ export const CATALOG_BODY = {
       versions: [
         {
           version: 1,
+          status: "deprecated",
+          sunset_at: "2027-04-01T00:00:00Z",
+          limits: { max_inputs: 100, max_input_bytes: 33554432, max_total_input_bytes: 503316480 },
+          defaults: {
+            deduplicate: true,
+            group_by: "kind",
+            name_mode: "preserve",
+            name_prefix: "file",
+          },
+          parameters_schema: {
+            type: "object",
+            properties: {
+              name_prefix: { type: "string", minLength: 1, maxLength: 40, default: "file" },
+            },
+          },
+        },
+        {
+          version: 2,
           status: "current",
           limits: { max_inputs: 100, max_input_bytes: 33554432, max_total_input_bytes: 503316480 },
           defaults: {
