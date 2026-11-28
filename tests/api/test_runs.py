@@ -62,6 +62,7 @@ RUN_KEYS = {
     "error",
     "parameters",
     "preset_id",
+    "preset_revision",
     "results_expire_at",
 }
 DETAIL_KEYS = RUN_KEYS | {"summary", "items"}

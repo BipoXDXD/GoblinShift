@@ -14,7 +14,7 @@ O `ETag` é a revisão entre aspas (`"3"`), documentado assim para a SPA derivá
 
 import re
 from datetime import UTC, datetime
-from typing import Annotated, Any
+from typing import Annotated, Any, Literal, overload
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, Request, Response
@@ -115,11 +115,11 @@ def _command_openapi(*, with_if_match: bool) -> dict[str, Any]:
         }
     }
     if with_if_match:
-        extra["parameters"] = [_if_match_parameter()]
+        extra["parameters"] = [if_match_parameter()]
     return extra
 
 
-def _if_match_parameter() -> dict[str, Any]:
+def if_match_parameter() -> dict[str, Any]:
     return {
         "name": _IF_MATCH_HEADER,
         "in": "header",
@@ -212,7 +212,7 @@ def replace_preset_route(
     except PresetNotFoundError:
         raise _not_found() from None
     except StaleRevisionError:
-        raise _stale() from None
+        raise stale_preset() from None
     except PresetNameTakenError:
         raise _name_taken() from None
     return _respond(response, replaced)
@@ -223,7 +223,7 @@ def replace_preset_route(
     status_code=204,
     operation_id="deletePreset",
     responses=problem_responses(400, 404, 412, 428),
-    openapi_extra={"parameters": [_if_match_parameter()]},
+    openapi_extra={"parameters": [if_match_parameter()]},
 )
 def delete_preset_route(
     principal: WritePresets, session: DbSession, request: Request, preset_id: UUID
@@ -235,7 +235,7 @@ def delete_preset_route(
     except PresetNotFoundError:
         raise _not_found() from None
     except StaleRevisionError:
-        raise _stale() from None
+        raise stale_preset() from None
     return Response(status_code=204)
 
 
@@ -253,9 +253,22 @@ def _parse(command: PresetCommand) -> PresetDraft:
 
 
 def _expected_revision(request: Request) -> int:
-    """Revisão do `If-Match`: um ETag forte desta API; outra forma não casa com a atual."""
+    return parse_if_match_revision(request, required=True)
+
+
+@overload
+def parse_if_match_revision(request: Request, *, required: Literal[True]) -> int: ...
+@overload
+def parse_if_match_revision(request: Request, *, required: bool) -> int | None: ...
+def parse_if_match_revision(request: Request, *, required: bool) -> int | None:
+    """Revisão do `If-Match`: um ETag forte desta API; outra forma não casa com a atual.
+
+    Ausente ou `*`: 428 quando `required`, senão `None` (vale a revisão atual). Forma inválida: 400.
+    """
     raw = request.headers.get(_IF_MATCH_HEADER, "").strip()
     if raw in {"", "*"}:
+        if not required:
+            return None
         raise ApiProblem(
             ProblemCode.PRECONDITION_REQUIRED,
             'Envie If-Match com o ETag lido do preset (por exemplo, "1").',
@@ -294,7 +307,7 @@ def _not_found() -> ApiProblem:
     return ApiProblem(ProblemCode.NOT_FOUND, "Preset não encontrado.")
 
 
-def _stale() -> ApiProblem:
+def stale_preset() -> ApiProblem:
     return ApiProblem(
         ProblemCode.PRECONDITION_FAILED,
         "O preset mudou desde a leitura; leia de novo e use o ETag atual em If-Match.",

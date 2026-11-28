@@ -43,6 +43,11 @@ from goblinshift.entrypoints.api.json_command import (
     body_validation_error,
     json_command,
 )
+from goblinshift.entrypoints.api.presets import (
+    if_match_parameter,
+    parse_if_match_revision,
+    stale_preset,
+)
 from goblinshift.entrypoints.api.problems import (
     ApiProblem,
     ProblemCode,
@@ -182,6 +187,9 @@ class RunResponse(BaseModel):
     parameters: dict[str, Any] | None
     # Preset de origem, se houve; nulo também quando o preset foi excluído.
     preset_id: UUID | None
+    # Revisão do preset cujos parâmetros a Run usou; nula sem preset e nas Runs antigas. Fica
+    # mesmo depois de excluir o preset.
+    preset_revision: int | None
     # Vencimento do primeiro resultado ainda disponível; nulo se não há resultado disponível
     # (antes da publicação, sem saídas, excluídos ou vencidos).
     results_expire_at: datetime | None
@@ -419,8 +427,18 @@ def _preset_run_openapi() -> dict[str, Any]:
         "additionalProperties": False,
     }
     idempotency_key = idempotency_key_parameter(required=True)
+    required_if_match = if_match_parameter()
+    etag_pattern = required_if_match["schema"]["pattern"].removeprefix("^").removesuffix("$")
+    if_match = {
+        **required_if_match,
+        # Opcional aqui: ausente ou `*` roda a revisão atual do preset.
+        "required": False,
+        "description": 'ETag da leitura do preset (`"3"`); de outra revisão → 412. Ausente ou '
+        "`*`: roda a revisão atual.",
+        "schema": {"type": "string", "pattern": rf"^(\*|{etag_pattern})$"},
+    }
     return {
-        "parameters": [idempotency_key],
+        "parameters": [idempotency_key, if_match],
         "requestBody": {"required": True, "content": {JSON_MEDIA_TYPE: {"schema": schema}}},
     }
 
@@ -429,7 +447,7 @@ def _preset_run_openapi() -> dict[str, Any]:
     "/presets/{preset_id}/runs",
     status_code=202,
     operation_id="createRunFromPreset",
-    responses=_problem(400, 404, 409, 413, 415, 429, 503),
+    responses=_problem(400, 404, 409, 412, 413, 415, 429, 503),
     openapi_extra=_preset_run_openapi(),
 )
 def create_run_from_preset(
@@ -444,9 +462,11 @@ def create_run_from_preset(
     """Nova execução com a receita, a versão e os parâmetros guardados no preset (1.1).
 
     Exige também `presets:read`, porque a configuração do preset passa a aparecer na execução.
-    A Run guarda o `preset_id`; editar ou excluir o preset depois não a altera.
+    A Run guarda o `preset_id` e a revisão usada; editar ou excluir o preset depois não a altera.
+    `If-Match` opcional: com o ETag de outra revisão, 412 sem criar a Run.
     """
     idempotency_key = parse_idempotency_header(request)
+    expected_revision = parse_if_match_revision(request, required=False)
     inputs = tuple(command.input_upload_ids)
     try:
         # O replay vem antes de ler o preset: editado ou excluído depois da primeira chamada, o
@@ -463,12 +483,15 @@ def create_run_from_preset(
         raise _preset_not_found() from None
     if replay is not None:
         return _respond_accepted(principal.owner_id, replay, session, request, response)
+    if expected_revision is not None and source.revision != expected_revision:
+        raise stale_preset()
     run_command = RunCommand(
         recipe_id=source.recipe_id,
         recipe_version=source.recipe_version,
         input_upload_ids=inputs,
         parameters=source.parameters,
         preset_id=source.id,
+        preset_revision=source.revision,
     )
     return _accept(principal.owner_id, run_command, idempotency_key, session, request, response)
 
@@ -796,6 +819,7 @@ def _run_response(view: RunView) -> RunResponse:
         error=error,
         parameters=view.parameters,
         preset_id=view.preset_id,
+        preset_revision=view.preset_revision,
         results_expire_at=(
             _utc(view.results_expire_at) if view.results_expire_at is not None else None
         ),

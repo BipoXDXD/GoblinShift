@@ -125,6 +125,7 @@ export function runBody(overrides: Record<string, unknown> = {}): Record<string,
     error: null,
     parameters: {},
     preset_id: null,
+    preset_revision: null,
     results_expire_at: null,
     // Só no detalhe (GET /runs/{id}); as listas ignoram.
     summary: null,

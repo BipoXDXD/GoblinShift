@@ -15,7 +15,7 @@ from goblinshift.files.storage import FileStorage
 from goblinshift.identity import Scope
 from goblinshift.runs.tables import run
 from tests.api.support import assert_problem
-from tests.api.test_runs import RUN_KEYS
+from tests.api.test_runs import RUN_KEYS, body
 from tests.identity.support import ALL_SCOPES, new_key
 from tests.runs.support import count_rows, new_owner, ready_inputs
 
@@ -59,11 +59,16 @@ def run_preset(
     preset_id: str,
     upload_ids: list[uuid.UUID],
     key: str | None = None,
+    headers: dict[str, str] | None = None,
 ) -> httpx.Response:
     return client.post(
         f"{PRESETS}/{preset_id}/runs",
         json={"input_upload_ids": [str(u) for u in upload_ids]},
-        headers={**account.headers, "Idempotency-Key": key or str(uuid.uuid4())},
+        headers={
+            **account.headers,
+            "Idempotency-Key": key or str(uuid.uuid4()),
+            **(headers or {}),
+        },
     )
 
 
@@ -390,3 +395,107 @@ def test_mesma_chave_com_outras_entradas_no_mesmo_preset_e_outro_comando(
     )
 
     assert_problem(other, 422, "IDEMPOTENCY_KEY_REUSED")
+
+
+def _edit_preset(client: TestClient, account: Account, preset_id: str, if_match: str) -> None:
+    edited = client.put(
+        f"{PRESETS}/{preset_id}",
+        json={
+            "name": f"e-{uuid.uuid4()}",
+            "recipe_id": "csv-janitor",
+            "recipe_version": 1,
+            "parameters": {"trim_columns": ["b"]},
+        },
+        headers={**account.headers, "If-Match": if_match},
+    )
+    assert edited.status_code == 200, edited.text
+
+
+def test_if_match_da_revisao_lida_cria_a_run_com_essa_revisao(
+    client: TestClient, factory: sessionmaker[Session], storage: FileStorage
+) -> None:
+    account = Account(factory)
+    preset = create_preset(client, account, trim_columns=["a"])
+    _edit_preset(client, account, preset["id"], '"1"')
+
+    response = run_preset(
+        client,
+        account,
+        preset["id"],
+        ready_inputs(factory, storage, account.id),
+        headers={"If-Match": '"2"'},
+    )
+
+    assert response.status_code == 202, response.text
+    assert response.json()["preset_revision"] == 2
+    detail = client.get(response.headers["location"], headers=account.headers)
+    assert detail.json()["preset_revision"] == 2
+    assert stored_run(factory, response.json()["id"]).parameters["trim_columns"] == ["b"]
+
+
+def test_if_match_de_revisao_antiga_responde_412_sem_criar_run(
+    client: TestClient, factory: sessionmaker[Session], storage: FileStorage
+) -> None:
+    account = Account(factory)
+    preset = create_preset(client, account, trim_columns=["a"])
+    _edit_preset(client, account, preset["id"], '"1"')
+    inputs = ready_inputs(factory, storage, account.id)
+    before = count_rows(factory)
+
+    response = run_preset(client, account, preset["id"], inputs, headers={"If-Match": '"1"'})
+
+    assert_problem(response, 412, "PRECONDITION_FAILED")
+    assert count_rows(factory) == before
+
+
+@pytest.mark.parametrize("header", [None, "*"], ids=["sem-if-match", "asterisco"])
+def test_sem_if_match_roda_a_revisao_atual_e_a_grava(
+    client: TestClient, factory: sessionmaker[Session], storage: FileStorage, header: str | None
+) -> None:
+    account = Account(factory)
+    preset = create_preset(client, account, trim_columns=["a"])
+    extra = {} if header is None else {"If-Match": header}
+
+    response = run_preset(
+        client, account, preset["id"], ready_inputs(factory, storage, account.id), headers=extra
+    )
+
+    assert response.status_code == 202, response.text
+    assert response.json()["preset_revision"] == 1
+
+
+@pytest.mark.parametrize(
+    "header",
+    ['W/"1"', '"1", "2"', "1", 'W/"x', "abc", '"' + "9" * 40 + '"'],
+    ids=["fraco", "lista", "sem-aspas", "fraco-truncado", "texto", "40-digitos"],
+)
+def test_if_match_fora_da_forma_responde_400(
+    client: TestClient, factory: sessionmaker[Session], storage: FileStorage, header: str
+) -> None:
+    account = Account(factory)
+    preset = create_preset(client, account)
+    inputs = ready_inputs(factory, storage, account.id)
+    before = count_rows(factory)
+
+    response = run_preset(client, account, preset["id"], inputs, headers={"If-Match": header})
+
+    assert response.status_code == 400, response.text
+    assert count_rows(factory) == before
+
+
+def test_run_sem_preset_tem_revisao_nula(
+    client: TestClient, factory: sessionmaker[Session], storage: FileStorage
+) -> None:
+    account = Account(factory)
+    inputs = ready_inputs(factory, storage, account.id)
+
+    response = client.post(
+        "/api/v1/runs",
+        json=body(inputs),
+        headers={**account.headers, "Idempotency-Key": str(uuid.uuid4())},
+    )
+
+    assert response.status_code == 202, response.text
+    assert response.json()["preset_revision"] is None
+    detail = client.get(response.headers["location"], headers=account.headers)
+    assert detail.json()["preset_revision"] is None

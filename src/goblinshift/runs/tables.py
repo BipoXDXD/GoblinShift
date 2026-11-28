@@ -52,6 +52,9 @@ run = Table(
     Column("summary", JSONB),
     # Preset de origem, só para o histórico: excluir o preset anula a coluna e não muda a Run.
     Column("preset_id", Uuid),
+    # Revisão do preset cujos parâmetros a Run copiou; nula sem preset ou em Run anterior à 0033.
+    # Fica mesmo se o preset for excluído: é a configuração usada, não um vínculo.
+    Column("preset_revision", Integer),
     Column("created_at", DateTime(timezone=True), nullable=False, server_default=func.now()),
     Column("started_at", DateTime(timezone=True)),
     Column("finished_at", DateTime(timezone=True)),

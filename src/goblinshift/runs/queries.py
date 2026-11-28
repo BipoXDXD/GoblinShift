@@ -62,6 +62,7 @@ class RunView:
     # Nulos depois da retenção de 30 dias (1.7).
     parameters: dict[str, Any] | None
     preset_id: UUID | None
+    preset_revision: int | None
     # Quando o primeiro resultado ainda disponível vence; nulo sem resultado disponível.
     results_expire_at: datetime | None
 
@@ -308,6 +309,7 @@ def _select_views() -> Select[Any]:
         run.c.error_code,
         run.c.parameters,
         run.c.preset_id,
+        run.c.preset_revision,
         _results_expire_at().label("results_expire_at"),
         _physical_attempts().label("attempt"),
         _count_inputs(run_input.c.outcome.is_not(None)).label("processed"),
@@ -402,6 +404,7 @@ def _view(row: Row[Any]) -> RunView:
         error_code=row.error_code,
         parameters=row.parameters,
         preset_id=row.preset_id,
+        preset_revision=row.preset_revision,
         results_expire_at=row.results_expire_at,
     )
 

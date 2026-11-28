@@ -293,7 +293,8 @@ export interface paths {
          * @description Nova execução com a receita, a versão e os parâmetros guardados no preset (1.1).
          *
          *     Exige também `presets:read`, porque a configuração do preset passa a aparecer na execução.
-         *     A Run guarda o `preset_id`; editar ou excluir o preset depois não a altera.
+         *     A Run guarda o `preset_id` e a revisão usada; editar ou excluir o preset depois não a altera.
+         *     `If-Match` opcional: com o ETag de outra revisão, 412 sem criar a Run.
          */
         post: operations["createRunFromPreset"];
         delete?: never;
@@ -410,6 +411,8 @@ export interface components {
             } | null;
             /** Preset Id */
             preset_id: string | null;
+            /** Preset Revision */
+            preset_revision: number | null;
             /** Results Expire At */
             results_expire_at: string | null;
             /**
@@ -959,6 +962,8 @@ export interface components {
             } | null;
             /** Preset Id */
             preset_id: string | null;
+            /** Preset Revision */
+            preset_revision: number | null;
             /** Results Expire At */
             results_expire_at: string | null;
             summary: components["schemas"]["RunSummaryResponse"] | null;
@@ -1045,6 +1050,8 @@ export interface components {
             } | null;
             /** Preset Id */
             preset_id: string | null;
+            /** Preset Revision */
+            preset_revision: number | null;
             /** Results Expire At */
             results_expire_at: string | null;
         };
@@ -3984,6 +3991,8 @@ export interface operations {
             query?: never;
             header: {
                 "Idempotency-Key": string;
+                /** @description ETag da leitura do preset (`"3"`); de outra revisão → 412. Ausente ou `*`: roda a revisão atual. */
+                "If-Match"?: string;
             };
             path: {
                 preset_id: string;
@@ -4046,6 +4055,15 @@ export interface operations {
             };
             /** @description Conflict */
             409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description Precondition Failed */
+            412: {
                 headers: {
                     [name: string]: unknown;
                 };

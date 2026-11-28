@@ -4513,7 +4513,7 @@
           "runs"
         ],
         "summary": "Create Run From Preset",
-        "description": "Nova execução com a receita, a versão e os parâmetros guardados no preset (1.1).\n\nExige também `presets:read`, porque a configuração do preset passa a aparecer na execução.\nA Run guarda o `preset_id`; editar ou excluir o preset depois não a altera.",
+        "description": "Nova execução com a receita, a versão e os parâmetros guardados no preset (1.1).\n\nExige também `presets:read`, porque a configuração do preset passa a aparecer na execução.\nA Run guarda o `preset_id` e a revisão usada; editar ou excluir o preset depois não a altera.\n`If-Match` opcional: com o ETag de outra revisão, 412 sem criar a Run.",
         "operationId": "createRunFromPreset",
         "parameters": [
           {
@@ -4533,6 +4533,16 @@
             "schema": {
               "type": "string",
               "pattern": "^[A-Za-z0-9_-]{16,64}$"
+            }
+          },
+          {
+            "name": "If-Match",
+            "in": "header",
+            "required": false,
+            "description": "ETag da leitura do preset (`\"3\"`); de outra revisão → 412. Ausente ou `*`: roda a revisão atual.",
+            "schema": {
+              "type": "string",
+              "pattern": "^(\\*|\"([1-9][0-9]{0,8})\")$"
             }
           }
         ],
@@ -4656,6 +4666,16 @@
               }
             },
             "description": "Conflict"
+          },
+          "412": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Precondition Failed"
           },
           "413": {
             "content": {
@@ -5300,6 +5320,17 @@
             ],
             "title": "Preset Id"
           },
+          "preset_revision": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Preset Revision"
+          },
           "results_expire_at": {
             "anyOf": [
               {
@@ -5333,6 +5364,7 @@
           "error",
           "parameters",
           "preset_id",
+          "preset_revision",
           "results_expire_at",
           "idempotency_expires_at"
         ],
@@ -6600,6 +6632,17 @@
             ],
             "title": "Preset Id"
           },
+          "preset_revision": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Preset Revision"
+          },
           "results_expire_at": {
             "anyOf": [
               {
@@ -6645,6 +6688,7 @@
           "error",
           "parameters",
           "preset_id",
+          "preset_revision",
           "results_expire_at",
           "summary",
           "items"
@@ -6910,6 +6954,17 @@
             ],
             "title": "Preset Id"
           },
+          "preset_revision": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Preset Revision"
+          },
           "results_expire_at": {
             "anyOf": [
               {
@@ -6938,6 +6993,7 @@
           "error",
           "parameters",
           "preset_id",
+          "preset_revision",
           "results_expire_at"
         ],
         "title": "RunResponse"

@@ -32,6 +32,7 @@ function run(status: RunStatus, phase: RunPhase | null = null): RunDetail {
     error: null,
     parameters: {},
     preset_id: null,
+    preset_revision: null,
     results_expire_at: null,
     summary: null,
     items: [],

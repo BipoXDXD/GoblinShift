@@ -33,6 +33,7 @@ export const runSchema = z.object({
   error: z.object({ code: z.string(), message: z.string() }).nullable(),
   parameters: z.record(z.string(), z.unknown()).nullable(),
   preset_id: z.uuid().nullable(),
+  preset_revision: z.number().int().nullable(),
   results_expire_at: z.iso.datetime({ offset: true }).nullable(),
 });
 

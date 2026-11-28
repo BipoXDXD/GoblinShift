@@ -159,6 +159,8 @@ class RunCommand:
     parameters: object
     # Preset de origem (`POST /presets/{id}/runs`), já lido da conta; só fica registrado na Run.
     preset_id: UUID | None = None
+    # Revisão do preset de onde vieram os parâmetros; só fica registrada na Run.
+    preset_revision: int | None = None
 
 
 @dataclass(frozen=True)
@@ -169,6 +171,7 @@ class ValidatedRun:
     input_upload_ids: tuple[UUID, ...]
     parameters: dict[str, object]
     preset_id: UUID | None = None
+    preset_revision: int | None = None
 
     @property
     def command_hash(self) -> bytes:
@@ -267,7 +270,13 @@ def validate_run(command: RunCommand) -> ValidatedRun:
         ) from None
     _check_input_shape(command.input_upload_ids, recipe.limits["max_inputs"])
     _check_upload_references(recipe, parameters, command.input_upload_ids)
-    return ValidatedRun(recipe, command.input_upload_ids, parameters, command.preset_id)
+    return ValidatedRun(
+        recipe,
+        command.input_upload_ids,
+        parameters,
+        command.preset_id,
+        command.preset_revision,
+    )
 
 
 def accept_run(
@@ -479,6 +488,7 @@ def _insert_run(
             parameters=validated.parameters,
             limits=dict(recipe.limits),
             preset_id=validated.preset_id,
+            preset_revision=validated.preset_revision,
             status=Status.QUEUED,
             queue_expires_at=func.now() + QUEUE_WINDOW,
             traceparent=traceparent,
