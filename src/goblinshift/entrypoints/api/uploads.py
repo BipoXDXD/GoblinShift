@@ -39,6 +39,8 @@ from goblinshift.entrypoints.api.transfers import (
     OCTET_STREAM,
     OCTET_STREAM_BODY,
     TransferTimeoutError,
+    TransferTooSlowError,
+    declared_length,
     is_octet_stream,
     request_body_chunks,
     timeouts_of,
@@ -224,13 +226,18 @@ async def put_upload_content(
     patience_s: float = request.app.state.settings.db_pool_timeout_s
     slot_id = await anyio.to_thread.run_sync(_acquire_upload_slot, session, owner_id)
     try:
-        chunks = request_body_chunks(request, timeouts_of(request))
+        chunks = request_body_chunks(request, timeouts_of(request), declared_length(request))
         receive = partial(receive_content, pool_patience_s=patience_s)
         view = await anyio.to_thread.run_sync(
             receive, session, storage, owner_id, upload_id, chunks
         )
     except FilesError as error:
         raise _upload_problem(error) from None
+    except TransferTooSlowError:
+        raise ApiProblem(
+            ProblemCode.REQUEST_TIMEOUT,
+            "A conexão está lenta demais para enviar este arquivo em 10 minutos; o upload falhou.",
+        ) from None
     except TransferTimeoutError:
         raise ApiProblem(
             ProblemCode.REQUEST_TIMEOUT,

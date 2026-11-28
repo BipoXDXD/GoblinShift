@@ -38,6 +38,7 @@ pytestmark = [pytest.mark.integration, pytest.mark.anyio]
 
 WAIT_LIMIT_S = 10
 ME = "/api/v1/me"
+SLOW_DETAIL = "A conexão está lenta demais para enviar este arquivo em 10 minutos; o upload falhou."
 
 
 @pytest.fixture
@@ -216,7 +217,8 @@ async def test_envio_abaixo_do_piso_recebe_408_antes_do_prazo_total_e_libera_a_v
     with anyio.fail_after(WAIT_LIMIT_S):
         response = await put_content(async_client, auth, item, trickle(b"x" * 100, 0.05))
 
-    assert_problem(response, 408, "REQUEST_TIMEOUT")
+    body = assert_problem(response, 408, "REQUEST_TIMEOUT")
+    assert body["detail"] == SLOW_DETAIL
     assert state_of(sync_client, auth, item) == "failed"
     assert await anyio.to_thread.run_sync(slot_count, factory) == 0
     assert reserved_bytes(sync_client, auth) == 0
@@ -242,6 +244,64 @@ async def test_envio_lento_mas_acima_do_piso_passa(
     with anyio.fail_after(WAIT_LIMIT_S):
         response = await put_content(async_client, auth, item, trickle(content, 0.05))
 
+    assert response.status_code == 200, response.text
+    assert response.json()["sha256"] == hashlib.sha256(content).hexdigest()
+
+
+async def test_envio_que_nao_termina_no_prazo_recebe_408_na_carencia(
+    app: FastAPI,
+    async_client: httpx.AsyncClient,
+    sync_client: TestClient,
+    factory: sessionmaker[Session],
+) -> None:
+    # Content-Length 4000 em 4 s exige 1000 B/s; o piso é 10 B/s e chegam 100 B/s. Só o termo
+    # pelo tamanho declarado recusa o envio, e logo depois da carência, não no prazo total.
+    app.state.transfer_timeouts = TransferTimeouts(
+        total=timedelta(seconds=4),
+        idle=timedelta(seconds=WAIT_LIMIT_S),
+        min_rate_bytes_per_s=10,
+        min_rate_grace=timedelta(milliseconds=200),
+    )
+    _, auth = new_account(factory)
+    content = b"x" * 4000
+    item = create_upload(sync_client, auth, size=len(content))
+
+    with anyio.fail_after(1.0):
+        response = await async_client.put(
+            item["content"]["url"],
+            content=trickle(content, 0.01),
+            headers={**auth, **OCTET_STREAM, "Content-Length": str(len(content))},
+        )
+
+    body = assert_problem(response, 408, "REQUEST_TIMEOUT")
+    assert body["detail"] == SLOW_DETAIL
+    assert state_of(sync_client, auth, item) == "failed"
+    assert await anyio.to_thread.run_sync(slot_count, factory) == 0
+
+
+async def test_envio_sem_content_length_usa_so_o_piso(
+    app: FastAPI,
+    async_client: httpx.AsyncClient,
+    sync_client: TestClient,
+    factory: sessionmaker[Session],
+) -> None:
+    # Corpo chunked: sem tamanho declarado, vale só o piso, sem 500 e sem recusa imediata.
+    app.state.transfer_timeouts = TransferTimeouts(
+        total=timedelta(seconds=4),
+        idle=timedelta(seconds=WAIT_LIMIT_S),
+        min_rate_bytes_per_s=10,
+        min_rate_grace=timedelta(milliseconds=200),
+    )
+    _, auth = new_account(factory)
+    content = b"0123456789abcdefghij"
+    item = create_upload(sync_client, auth, size=len(content))
+
+    # 20 B/s por 1 s, o dobro do piso.
+    with anyio.fail_after(WAIT_LIMIT_S):
+        response = await put_content(async_client, auth, item, trickle(content, 0.05))
+
+    assert "content-length" not in response.request.headers
+    assert response.request.headers["transfer-encoding"] == "chunked"
     assert response.status_code == 200, response.text
     assert response.json()["sha256"] == hashlib.sha256(content).hexdigest()
 

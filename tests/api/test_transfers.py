@@ -1,4 +1,4 @@
-"""Peças HTTP das transferências, sem banco: nome do anexo, piso de vazão e fim do download."""
+"""Peças HTTP das transferências, sem banco: nome do anexo, vazão exigida e fim do download."""
 
 import io
 import time
@@ -16,9 +16,12 @@ from goblinshift.entrypoints.api.transfers import (
     DownloadResponse,
     TransferTimeoutError,
     TransferTimeouts,
+    TransferTooSlowError,
     content_disposition,
+    declared_length,
     is_below_min_rate,
     request_body_chunks,
+    required_rate,
 )
 
 GENEROUS = TransferTimeouts(total=timedelta(seconds=10), idle=timedelta(seconds=10))
@@ -50,24 +53,51 @@ def test_nome_do_anexo_segue_a_rfc_6266(name: str, expected: str) -> None:
     assert content_disposition(name) == expected
 
 
-FLOOR_1000_AFTER_2S = TransferTimeouts(
-    min_rate_bytes_per_s=1000, min_rate_grace=timedelta(seconds=2)
-)
-
-
 @pytest.mark.parametrize(
     ("received", "elapsed_s", "below"),
     [
         (0, 2.0, False),  # na carência, nem o envio parado é cobrado
         (0, 2.001, True),
-        (3000, 3.0, False),  # exatamente no piso
+        (3000, 3.0, False),  # exatamente na vazão exigida
         (2999, 3.0, True),
     ],
 )
-def test_piso_de_vazao_vale_so_depois_da_carencia(
+def test_vazao_exigida_vale_so_depois_da_carencia(
     received: int, elapsed_s: float, below: bool
 ) -> None:
-    assert is_below_min_rate(received, elapsed_s, FLOOR_1000_AFTER_2S) is below
+    assert is_below_min_rate(received, elapsed_s, required=1000, grace_s=2.0) is below
+
+
+T = TransferTimeouts(
+    total=timedelta(seconds=10), min_rate_bytes_per_s=1000, min_rate_grace=timedelta(seconds=2)
+)
+
+
+@pytest.mark.parametrize(
+    ("declared", "rate"), [(None, 1000), (5000, 1000), (20000, 2000), (20001, 2001)]
+)
+def test_vazao_exigida_cresce_com_o_tamanho_declarado(declared: int | None, rate: int) -> None:
+    assert required_rate(declared, T) == rate
+
+
+def test_vazao_exigida_para_50_mib_termina_em_10_minutos() -> None:
+    # A conta da D2: 52.428.800 B / 600 s, arredondada para cima (≈ 85,3 KiB/s).
+    assert required_rate(50 * 1024 * 1024, TransferTimeouts()) == 87_382
+
+
+def request_with(content_length: str | None) -> Request:
+    headers = [] if content_length is None else [(b"content-length", content_length.encode())]
+    return Request({**HTTP_SCOPE, "headers": headers})
+
+
+@pytest.mark.parametrize("header", [None, "", "abc", "-1", "1e3", " 12", "+5", "²", "9" * 5000])
+def test_content_length_ausente_ou_invalido_vira_none(header: str | None) -> None:
+    assert declared_length(request_with(header)) is None
+
+
+@pytest.mark.parametrize(("header", "length"), [("0", 0), ("4000", 4000), ("007", 7)])
+def test_content_length_decimal_e_lido(header: str, length: int) -> None:
+    assert declared_length(request_with(header)) == length
 
 
 class StreamedRequest:
@@ -91,14 +121,17 @@ class StreamedRequest:
 
 
 async def consume(
-    request: StreamedRequest, timeouts: TransferTimeouts, work_per_chunk_s: float
+    request: StreamedRequest,
+    timeouts: TransferTimeouts,
+    work_per_chunk_s: float,
+    declared: int | None = None,
 ) -> int:
     """Lê o corpo numa worker thread, como `receive_content`, gastando `work_per_chunk_s` em cada
     pedaço (gravação e hash do servidor)."""
 
     def read() -> int:
         received = 0
-        for chunk in request_body_chunks(cast(Request, request), timeouts):
+        for chunk in request_body_chunks(cast(Request, request), timeouts, declared):
             time.sleep(work_per_chunk_s)
             received += len(chunk)
         return received
@@ -119,8 +152,24 @@ async def test_piso_de_vazao_conta_pelo_relogio_e_nao_so_pela_espera_do_cliente(
     )
     request = StreamedRequest([b"x"] * 100, pause_s=0.001, pause_before_end_s=0)
 
-    with pytest.raises(TransferTimeoutError, match="vazão"):
+    with pytest.raises(TransferTooSlowError, match="vazão"):
         await consume(request, timeouts, work_per_chunk_s=0.01)
+
+
+@pytest.mark.anyio
+async def test_envio_que_nao_termina_o_tamanho_declarado_no_prazo_e_recusado() -> None:
+    # Piso de 10 B/s e 100 B/s chegando: só o tamanho declarado (2000 B em 1 s exigem 2000 B/s)
+    # recusa o envio depois da carência.
+    timeouts = TransferTimeouts(
+        total=timedelta(seconds=1),
+        idle=timedelta(seconds=10),
+        min_rate_bytes_per_s=10,
+        min_rate_grace=timedelta(milliseconds=50),
+    )
+    request = StreamedRequest([b"x"] * 20, pause_s=0.01, pause_before_end_s=0)
+
+    with pytest.raises(TransferTooSlowError):
+        await consume(request, timeouts, work_per_chunk_s=0, declared=2000)
 
 
 @pytest.mark.anyio
