@@ -66,7 +66,7 @@ class PdfPress:
             opened = self._inspect_all(inputs, progress, stack)
             documents = [_described(entry, opened[entry.position]) for entry in inputs]
             plan = plan_documents(params, documents, self._limits)
-            writer = DocumentWriter()
+            writer = DocumentWriter(strip_annotation_metadata=params.strip_metadata)
             written = [(_write(writer, planned, opened, out), planned) for planned in plan]
             versions = {position: source.pdf_version for position, source in opened.items()}
         page_map = out.create(PAGE_MAP_NAME, OutputRole.CONTENT, inputs[0].position)

@@ -7,8 +7,15 @@ link não arrasta para a saída uma página que a pessoa não escolheu.
 
 O documento novo também sai sem XMP (`/Metadata`), `/PieceInfo` e `/LastModified` em qualquer
 dicionário ou stream copiado, de página ou de XObject, inclusive de recurso compartilhado entre
-páginas; a entrada aberta não muda. O `/T` de anotações e as URIs ficam como estão (decisão
-pendente).
+páginas; a entrada aberta não muda. O `/Info` do trailer e o XMP do catálogo das entradas nunca
+chegam aqui: o documento nasce de `pikepdf.new()`, com trailer e catálogo próprios.
+
+Na v2 (ADR 070):
+- rotação: cada página planejada com `rotation` é girada de forma relativa, somada ao `/Rotate`
+  que ela já tinha, inclusive o herdado da árvore de páginas, que o qpdf resolve ao copiar;
+- `strip_annotation_metadata`: tira autor (`/T`) e datas (`/M`, `/CreationDate`) de cada
+  anotação das páginas e do `/Popup` dela; o texto da nota (`/Contents`) fica. Sem a opção, a
+  anotação fica como está. As URIs dos links ficam como estão.
 
 Opções de gravação:
 - `stream_decode_level=none`: os streams vão como estão, sem descomprimir; uma bomba de
@@ -27,10 +34,14 @@ from goblinshift.processing.pdf_press.composition import PlannedDocument
 from goblinshift.processing.pdf_press.inspection import InspectedDocument
 
 _PRIVATE_METADATA_KEYS = ("/Metadata", "/PieceInfo", "/LastModified")
+_ANNOTATION_METADATA_KEYS = ("/T", "/M", "/CreationDate")
 
 
 class DocumentWriter:
     """Grava os documentos planejados de uma execução; uma instância por execução."""
+
+    def __init__(self, *, strip_annotation_metadata: bool) -> None:
+        self._strip_annotation_metadata = strip_annotation_metadata
 
     def write(
         self, planned: PlannedDocument, sources: Mapping[int, InspectedDocument], sink: BinaryIO
@@ -39,7 +50,11 @@ class DocumentWriter:
         with pikepdf.new() as composed:
             for page in planned.pages:
                 composed.pages.append(sources[page.position].pdf.pages[page.page_number - 1])
+                if page.rotation:
+                    composed.pages[-1].rotate(page.rotation, relative=True)
             _drop_private_metadata(composed)
+            if self._strip_annotation_metadata:
+                _drop_annotation_metadata(composed)
             composed.save(
                 sink,
                 min_version=_highest_version(planned, sources),
@@ -72,6 +87,22 @@ def _drop_private_metadata(pdf: pikepdf.Pdf) -> None:
             if key in node:
                 del node[key]
         pending.extend(node.values())
+
+
+def _drop_annotation_metadata(pdf: pikepdf.Pdf) -> None:
+    """Apaga autor e datas de cada anotação das páginas de `pdf` e do `/Popup` dela."""
+    for page in pdf.pages:
+        for annotation in page.obj.get("/Annots", pikepdf.Array()):
+            if not isinstance(annotation, pikepdf.Dictionary):
+                continue
+            popup = annotation.get("/Popup")
+            targets = [annotation]
+            if isinstance(popup, pikepdf.Dictionary):
+                targets.append(popup)
+            for target in targets:
+                for key in _ANNOTATION_METADATA_KEYS:
+                    if key in target:
+                        del target[key]
 
 
 def _highest_version(planned: PlannedDocument, sources: Mapping[int, InspectedDocument]) -> str:

@@ -1,5 +1,6 @@
 """Receita pdf-press sobre o contrato de 3.2 (docs/GoblinShiftPlan.md, 1.5 e 1.7; ADR 035)."""
 
+import hashlib
 import io
 import json
 
@@ -366,3 +367,102 @@ def test_preview_do_select_segue_a_ordem_e_as_repeticoes(work: Workspace) -> Non
         {"input_position": 0, "page_number": 2},
         {"input_position": 1, "page_number": 1},
     ]
+
+
+# --- v2: rotação relativa e anotações sem autor nem datas (ADR 070) ----------------------------
+
+# Saída do merge v1 de document("a", 2) + document("b", 1), calculada com o código da main antes
+# da rotação e do strip_metadata: a v1 tem de continuar gerando exatamente estes bytes.
+V1_SAMPLE_SHA256 = "bc4336b6e64f69abfb934eb02c9e050ee427fc294e360014741dc4018cbd8ff6"
+ANNOTATION_METADATA = ("/T", "/M", "/CreationDate")
+
+
+def rotations(data: bytes) -> list[int | None]:
+    with pikepdf.open(io.BytesIO(data)) as pdf:
+        return [None if "/Rotate" not in page.obj else int(page.obj.Rotate) for page in pdf.pages]
+
+
+def annotation_keys(data: bytes) -> list[set[str]]:
+    """As chaves de cada anotação da primeira página, na ordem de `/Annots`."""
+    with pikepdf.open(io.BytesIO(data)) as pdf:
+        return [set(annotation.keys()) for annotation in pdf.pages[0].obj.Annots]
+
+
+def test_v1_continua_gerando_os_mesmos_bytes(work: Workspace) -> None:
+    work.add("a.pdf", samples.document("a", pages=2))
+    work.add("b.pdf", samples.document("b", pages=1))
+
+    work.run()
+
+    assert hashlib.sha256(work.read("merged.pdf")).hexdigest() == V1_SAMPLE_SHA256
+
+
+def test_rotacao_gira_so_as_paginas_pedidas(work: Workspace) -> None:
+    work.add("a.pdf", samples.document("a", pages=2), UPLOAD_A)
+
+    work.run(
+        Params(Operation.SELECT, select=(PageRange(UPLOAD_A, 1, 1, 90), PageRange(UPLOAD_A, 2, 2)))
+    )
+
+    assert rotations(work.read("selection.pdf")) == [90, None]
+
+
+def test_rotacao_soma_a_rotacao_herdada(work: Workspace) -> None:
+    work.add("a.pdf", samples.document("a", pages=2, mutate=samples.inherited_rotation(90)))
+
+    work.run(Params(rotation=90))
+
+    assert rotations(work.read("merged.pdf")) == [180, 180]
+
+
+def test_rotacao_de_270_sobre_90_volta_a_zero(work: Workspace) -> None:
+    work.add("a.pdf", samples.document("a", mutate=samples.inherited_rotation(90)))
+
+    work.run(Params(rotation=270))
+
+    assert rotations(work.read("merged.pdf")) in ([0], [None])
+
+
+def test_split_girado_gira_cada_parte(work: Workspace) -> None:
+    work.add("a.pdf", samples.document("a", pages=2))
+
+    work.run(Params(Operation.SPLIT, rotation=180))
+
+    assert rotations(work.read("a-p001.pdf")) == [180]
+    assert rotations(work.read("a-p002.pdf")) == [180]
+
+
+def test_strip_metadata_tira_autor_e_datas_das_anotacoes(work: Workspace) -> None:
+    work.add("a.pdf", samples.document("a", mutate=samples.markup_annotation_with_author()))
+
+    work.run(Params(strip_metadata=True))
+
+    note, popup = annotation_keys(work.read("merged.pdf"))
+    assert not note & set(ANNOTATION_METADATA)
+    assert not popup & set(ANNOTATION_METADATA)
+    assert "/Contents" in note
+    with pikepdf.open(work.out_dir / "merged.pdf") as pdf:
+        assert str(pdf.pages[0].obj.Annots[0].Contents) == "Nota"
+
+
+def test_sem_strip_metadata_a_anotacao_fica_como_esta(work: Workspace) -> None:
+    work.add("a.pdf", samples.document("a", mutate=samples.markup_annotation_with_author()))
+
+    work.run()
+
+    note, popup = annotation_keys(work.read("merged.pdf"))
+    assert set(ANNOTATION_METADATA) <= note
+    assert {"/T", "/M"} <= popup
+
+
+@pytest.mark.parametrize("strip_metadata", [False, True])
+def test_documento_composto_nunca_traz_info_nem_xmp_do_catalogo(
+    work: Workspace, strip_metadata: bool
+) -> None:
+    work.add("a.pdf", samples.document("a", mutate=samples.document_info_and_catalog_xmp))
+
+    work.run(Params(strip_metadata=strip_metadata))
+
+    with pikepdf.open(work.out_dir / "merged.pdf") as pdf:
+        assert "/Info" not in pdf.trailer
+        assert "/Metadata" not in pdf.Root

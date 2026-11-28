@@ -239,6 +239,57 @@ def _xmp(pdf: pikepdf.Pdf) -> pikepdf.Stream:
     return pdf.make_stream(b"<x:xmpmeta/>", Type=Name.Metadata, Subtype=Name.XML)
 
 
+# --- rotação e metadados de anotação (ADR 070) ----------------------------------------------
+
+_ANNOTATION_DATE = String("D:20261121000000Z")
+
+
+def inherited_rotation(degrees: int) -> Mutation:
+    """`/Rotate` no nó `/Pages`: as páginas herdam a rotação sem trazê-la no próprio dicionário."""
+
+    def mutate(pdf: pikepdf.Pdf) -> None:
+        pdf.Root.Pages.Rotate = degrees
+
+    return mutate
+
+
+def markup_annotation_with_author() -> Mutation:
+    """Nota (`/Text`) com autor, datas e texto, e o `/Popup` dela também com autor e data."""
+
+    def mutate(pdf: pikepdf.Pdf) -> None:
+        note = pdf.make_indirect(
+            Dictionary(
+                Type=Name.Annot,
+                Subtype=Name.Text,
+                Rect=[0, 0, 9, 9],
+                T=String("Ana"),
+                M=_ANNOTATION_DATE,
+                CreationDate=_ANNOTATION_DATE,
+                Contents=String("Nota"),
+            )
+        )
+        popup = pdf.make_indirect(
+            Dictionary(
+                Type=Name.Annot,
+                Subtype=Name.Popup,
+                Rect=[0, 0, 9, 9],
+                Parent=note,
+                T=String("Ana"),
+                M=_ANNOTATION_DATE,
+            )
+        )
+        note.Popup = popup
+        pdf.pages[0].obj.Annots = Array([note, popup])
+
+    return mutate
+
+
+def document_info_and_catalog_xmp(pdf: pikepdf.Pdf) -> None:
+    """`/Info` com autor no trailer e XMP no catálogo: nada disso pode chegar à saída."""
+    pdf.trailer.Info = pdf.make_indirect(Dictionary(Author=String("Ana"), Title=String("T")))
+    pdf.Root.Metadata = _xmp(pdf)
+
+
 # --- bytes estragados -------------------------------------------------------------------------
 
 
