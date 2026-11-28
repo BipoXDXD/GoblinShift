@@ -17,9 +17,10 @@ O AAC tem encoder nativo no FFmpeg, LGPL. MP3 e Opus pedem bibliotecas externas:
 | Biblioteca | Versão | SHA-256 | Origem oficial | Segunda origem |
 |---|---|---|---|---|
 | LAME | 3.100 | `ddfe36ca…b1da1e` | SourceForge (`lame-3.100.tar.gz`) | Debian, `lame_3.100.orig.tar.gz`, com o mesmo hash |
-| Opus | 1.6.1 (2026-01-15, a última estável) | `6ffcb593…2411a1`, igual ao `SHA256SUMS.txt` da Xiph | `downloads.xiph.org` (`opus-1.6.1.tar.gz`) | Debian, `opus_1.6.1.orig.tar.xz`: `001ac615…6cba1` |
+| Opus | 1.6.1 (2026-01-15, a última estável) | `6ffcb593…2411a1`, igual ao `SHA256SUMS.txt` da Xiph | `downloads.xiph.org` (`opus-1.6.1.tar.gz`) | Debian, `opus_1.6.1.orig.tar.xz`: `001ac615…cd6ba1` |
 
-- O Debian republica o Opus como `.tar.xz`. O conteúdo é idêntico ao da Xiph (conferido com `diff -r` ao fixar a versão), mas o hash é outro. Por isso o Opus tem dois `ARG` de SHA-256, um por origem, e cada download é conferido pelo seu.
+- A segunda origem só entra quando o **download** da primeira falha. O SHA-256 é conferido depois, venha o arquivo de onde vier, e um hash que não confere derruba o build, sem tentar a outra origem.
+- O Debian republica o Opus como `.tar.xz`. O conteúdo é idêntico ao da Xiph (conferido com `diff -r` ao fixar a versão), mas o hash é outro. Por isso o Opus tem dois `ARG` de SHA-256, e o arquivo baixado tem de conferir com um dos dois. A âncora pública do hash do Debian é o `Checksums-Sha256` do `.dsc` assinado do pacote: <https://deb.debian.org/debian/pool/main/o/opus/opus_1.6.1-1.dsc>.
 - Os dois entram com `--disable-shared --enable-static --prefix=/opt/codecs`. O FFmpeg liga contra os `.a`, com `PKG_CONFIG_PATH=/opt/codecs/lib/pkgconfig`, `--pkg-config-flags=--static`, `--extra-cflags=-I/opt/codecs/include` e `--extra-ldflags=-L/opt/codecs/lib`. `/opt/codecs` fica no estágio de build.
 - Do LAME, só a biblioteca de codificação: `--disable-frontend --disable-decoder --disable-analyzer-hooks`. O decoder de MP3 embutido (mpg123) nem é compilado. Do Opus, `--disable-doc --disable-extra-programs`, sem DRED, deep PLC nem OSCE (o padrão do `configure`).
 - O texto das licenças vai para `/usr/local/share/doc/ffmpeg/lame/` e `/usr/local/share/doc/ffmpeg/opus/`, dentro da pasta que a imagem e o worker de desenvolvimento já copiam.
@@ -49,11 +50,11 @@ Protocolos, demuxers, decoders e parsers não mudam: os muxers novos são só de
 ## Consequências
 
 - **Trivy:** como o FFmpeg, o LAME e o Opus não aparecem no scanner, porque estão dentro do binário. As CVEs se acompanham pelas versões dos `ARG LAME_VERSION` e `ARG OPUS_VERSION`. O LAME 3.100 é de 2017 e é a última versão publicada. Frontend e decoder ficam fora do build, o que tira do binário a parte do LAME que lê arquivos.
-- **Tamanho:** a estimativa é de cerca de +1 MiB na imagem (os `.a` têm 0,35 MiB do LAME e 1,9 MiB do Opus antes de ligar; o binário só leva os objetos usados), e o orçamento é de **+3 MiB**. Medição em amd64 com `docker image inspect -f '{{.Size}}'`, antes e depois: *pendente, feita pelo CI do PR* (o implementador não constrói imagem). Acima do orçamento, a decisão volta ao dono.
-- **Build:** sem cache, cerca de 1 min a mais (LAME e Opus antes do FFmpeg). Com cache, nada muda, porque os dois ficam em camadas próprias antes do download do FFmpeg.
+- **Tamanho:** a estimativa é de cerca de +1 MiB na imagem (os `.a` têm 0,35 MiB do LAME e 1,9 MiB do Opus antes de ligar; o binário só leva os objetos usados), e o orçamento é de **+3 MiB**. Medido no CI do PR #574: <preenchido antes do merge>. O job `gvisor` escreve no resumo do run o `docker image inspect --format '{{.Size}}'` da imagem amd64 que os testes constroem. Acima do orçamento, a decisão volta ao dono.
+- **Build:** sem cache, cerca de 1 min a mais (LAME e Opus antes do FFmpeg). Cada `ARG` fica logo antes do `RUN` que o usa. Subir o Opus refaz o Opus e o FFmpeg; subir o FFmpeg não refaz o apt, o LAME nem o Opus. Com o cache quente e nada mudado, o build não muda.
 - **Licenças:** o `NOTICE` cita o LAME (LGPL 2 ou posterior) e o Opus (BSD-3). O binário continua LGPL 2.1 ou posterior.
 
 ## Como verificar
 
-- `uv run pytest tests/test_executor_ffmpeg_configure.py tests/test_compose_dev_ffmpeg.py`: o `configure` sem `--enable-gpl`, `--enable-nonfree` nem `--enable-version3`; LAME e Opus fixados por versão e SHA-256 e estáticos; a lista exata de encoders e muxers; o worker de desenvolvimento copiando os mesmos arquivos. Rodam em qualquer lugar.
+- `uv run pytest tests/test_executor_ffmpeg_configure.py tests/test_compose_dev_ffmpeg.py`: o `configure` sem `--enable-gpl`, `--enable-nonfree` nem `--enable-version3`; LAME e Opus fixados por versão e SHA-256 e estáticos; todo download conferido pelo SHA-256 depois de todas as origens; a lista exata de encoders e muxers; o worker de desenvolvimento copiando os mesmos arquivos. Rodam em qualquer lugar.
 - `uv run pytest -m executor_image -k ffmpeg` (job `gvisor` da CI): os encoders e muxers do binário, `ffmpeg -L` com a LGPL, o `-buildconf` sem `--enable-gpl` e o `ldd` sem `mp3lame`, `opus` nem `not found`.

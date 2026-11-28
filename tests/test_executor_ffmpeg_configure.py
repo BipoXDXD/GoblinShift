@@ -78,3 +78,20 @@ def test_ffmpeg_so_habilita_os_encoders_e_muxers_das_receitas() -> None:
     }
     assert _enabled(options, "muxer") == {"wav", "flac", "image2", "mp3", "ipod", "opus"}
     assert "asetpts" in _enabled(options, "filter")
+
+
+def _runs(stage: str) -> list[str]:
+    """Cada instrução `RUN` do estágio, com as continuações de linha."""
+    return re.findall(r"^RUN (.*?)(?<!\\)\n", stage, re.MULTILINE | re.DOTALL)
+
+
+def test_todo_download_e_conferido_pelo_sha256_depois_de_todas_as_origens() -> None:
+    # A segunda origem só entra quando o download falha: um hash que não confere derruba o
+    # build, em vez de cair na outra origem.
+    downloads = [run for run in _runs(_ffmpeg_stage()) if "curl -" in run]
+
+    assert len(downloads) == 3, "FFmpeg, LAME e Opus"
+    for run in downloads:
+        last_curl = run.rindex("curl -")
+        assert "sha256sum -c" in run[last_curl:], run
+        assert "sha256sum" not in run[:last_curl], run

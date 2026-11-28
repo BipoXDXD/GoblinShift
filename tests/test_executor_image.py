@@ -487,7 +487,9 @@ def test_ffmpeg_continua_lgpl(image: str) -> None:
 
     assert result.returncode == 0, result.stderr
     assert "GNU Lesser General Public License" in result.stdout
-    conf = run_tool(image, "ffmpeg", "-hide_banner", "-buildconf").stdout
+    buildconf = run_tool(image, "ffmpeg", "-hide_banner", "-buildconf")
+    assert buildconf.returncode == 0, buildconf.stderr
+    conf = buildconf.stdout
     assert "--enable-libmp3lame" in conf
     assert "--enable-gpl" not in conf
     assert "--enable-nonfree" not in conf

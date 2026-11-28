@@ -414,6 +414,18 @@ jobs:
         # Sem nenhum teste selecionado o pytest sai com 5 e o job falha de propósito: os testes
         # executor_image sempre existem, então zero testes indica um seletor quebrado.
         run: uv run pytest -m "(executor_ctl or executor_image) and not needs_root" -q --fail-on-skip
+      - name: Tamanho da imagem do executor (amd64)
+        # O job executor-image grava o índice OCI sem carregá-lo no Docker; aqui a imagem que os
+        # testes construíram (amd64, mesmo Dockerfile) está no Docker do runner. Orçamento do
+        # ADR 063: +3 MiB.
+        run: |
+          mapfile -t imagens < <(docker image ls --filter 'reference=goblinshift-executor:test-*' --format '{{.Repository}}:{{.Tag}}')
+          if [ "${#imagens[@]}" -ne 1 ]; then
+            echo "esperava uma imagem do executor, achei ${#imagens[@]}" >&2
+            exit 1
+          fi
+          tamanho=$(docker image inspect --format '{{.Size}}' "${imagens[0]}")
+          echo "Imagem do executor (amd64, ${imagens[0]}): ${tamanho} bytes" >>"$GITHUB_STEP_SUMMARY"
 
   e2e-gvisor:
     name: Jornadas reais sob gVisor (Playwright)
