@@ -8,7 +8,7 @@ não recebem novos projetos.
 
 ## Executar
 
-Em `web/`, com Node 24:
+Em `web/`, com Node 26:
 
 ```sh
 npm ci

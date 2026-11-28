@@ -5,7 +5,7 @@
   "version": "0.0.0",
   "type": "module",
   "engines": {
-    "node": ">=24.15 <25"
+    "node": ">=26.13 <27"
   },
   "dependencies": {
     "@fontsource-variable/atkinson-hyperlegible-mono": "5.3.0",
@@ -30,7 +30,7 @@
     "@testing-library/react": "16.3.3",
     "@testing-library/user-event": "14.6.13",
     "@types/culori": "4.0.1",
-    "@types/node": "24.19.2",
+    "@types/node": "26.6.11",
     "@types/react": "19.3.0",
     "@types/react-dom": "19.3.0",
     "@types/three": "0.187.0",

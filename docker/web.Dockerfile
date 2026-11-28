@@ -2,7 +2,7 @@
 # o build e a configuração que o serve juntos, para os dois nunca divergirem num deploy.
 #
 # Bases fixadas pelo digest do índice multiplataforma (amd64 na VPS e na CI, arm64 no Mac).
-FROM node:24.22.2-trixie-slim@sha256:0820eaa85e07d0490446dd01d14707e17e6108a36988cf374899cd057eb3812d AS build
+FROM node:26.13.0-trixie-slim@sha256:5adad64f9a1fca2d51972caa65983634c8a774eb300d72b20f7f2a0f60368072 AS build
 WORKDIR /web
 COPY web/package.json web/package-lock.json ./
 COPY web/vendor/picomatch-4.0.7-backport4.tgz ./vendor/
