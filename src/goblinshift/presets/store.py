@@ -18,6 +18,7 @@ from uuid import UUID
 from sqlalchemy import Row, Select, delete, exists, func, insert, select, update
 from sqlalchemy.orm import Session
 
+from goblinshift import identity
 from goblinshift.presets.drafts import PresetDraft
 from goblinshift.presets.tables import preset
 
@@ -64,6 +65,8 @@ class Preset:
 
 
 def create_preset(session: Session, owner_id: UUID, draft: PresetDraft) -> Preset:
+    """Cria na revisão 1; conta bloqueada ou com exclusão pedida levanta `UnknownAccountError`."""
+    identity.lock_active_account(session, owner_id)
     _lock_owner(session, owner_id)
     count: int = session.execute(
         select(func.count()).select_from(preset).where(preset.c.owner_id == owner_id)

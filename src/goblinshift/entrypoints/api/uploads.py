@@ -78,6 +78,7 @@ from goblinshift.files.uploads import (
     receive_content,
     request_deletion,
 )
+from goblinshift.identity import UnknownAccountError, lock_active_account
 from goblinshift.platform.db import retry_on_pool_timeout
 
 router = APIRouter(tags=["uploads"])
@@ -180,7 +181,15 @@ def create_uploads(
     key = parse_idempotency_header(request)
     try:
         with session.begin():
+            # `files` não importa `identity` (camadas irmãs): a conta é reconferida aqui, na
+            # mesma transação, antes de qualquer intenção ou reserva.
+            lock_active_account(session, owner_id)
             views, replayed = _create_batch(session, owner_id, items, key)
+    except UnknownAccountError:
+        # Bloqueio ou exclusão chegou depois da autenticação: a credencial deixou de valer.
+        raise ApiProblem(
+            ProblemCode.AUTHENTICATION_REQUIRED, "A sessão não vale mais para esta conta."
+        ) from None
     except InvalidUploadRequestError as error:
         raise _invalid_request(error) from None
     except UploadRequestKeyReusedError:

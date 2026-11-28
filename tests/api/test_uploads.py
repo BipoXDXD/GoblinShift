@@ -2,19 +2,19 @@
 
 import hashlib
 import uuid
-from datetime import timedelta
+from datetime import UTC, datetime, timedelta
 from typing import Any
 
 import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
-from sqlalchemy import func, update
+from sqlalchemy import func, select, update
 from sqlalchemy.orm import Session, sessionmaker
 
 from goblinshift.files.retention import NAME_AFTER, anonymize_deleted_uploads, expire_unused_uploads
 from goblinshift.files.states import TransferDirection
 from goblinshift.files.tables import upload
-from goblinshift.identity import Scope
+from goblinshift.identity import Scope, block_account
 from goblinshift.platform.db import unit_of_work
 from goblinshift.runs.store import db_now
 from tests.api.files_support import (
@@ -30,6 +30,7 @@ from tests.api.files_support import (
     upload_storage_key,
     without_request_identity,
 )
+from tests.api.simulated_session import SimulatedSessions
 from tests.api.support import assert_problem
 from tests.identity.support import new_key, new_user
 
@@ -60,6 +61,34 @@ def expire_upload(factory: sessionmaker[Session], upload_id: str) -> None:
             .where(upload.c.id == uuid.UUID(upload_id))
             .values(expires_at=func.now() - timedelta(seconds=1))
         )
+
+
+# --- Conta que deixou de valer depois da autenticação ------------------------------------------
+
+
+@pytest.mark.parametrize("idem_key", [None, "lote-da-conta-bloqueada"])
+def test_post_uploads_de_conta_bloqueada_depois_da_autenticacao_da_401_sem_linhas(
+    app: FastAPI, client: TestClient, factory: sessionmaker[Session], idem_key: str | None
+) -> None:
+    owner = new_user(factory)
+    now = datetime.now(UTC)
+    # A sessão já foi aceita quando o bloqueio chega: a corrida entre a autenticação e a rota.
+    SimulatedSessions(app, now).sign_in(owner)
+    with unit_of_work(factory) as session:
+        assert block_account(session, owner, now)
+    headers = {} if idem_key is None else {"Idempotency-Key": idem_key}
+
+    response = client.post(
+        UPLOADS, json={"items": [{"name": "dados.csv", "size": 3}]}, headers=headers
+    )
+
+    problem = assert_problem(response, 401, "AUTHENTICATION_REQUIRED")
+    assert problem["detail"] == "A sessão não vale mais para esta conta."
+    with factory() as session:
+        created = session.execute(
+            select(func.count()).select_from(upload).where(upload.c.owner_id == owner)
+        ).scalar_one()
+    assert created == 0
 
 
 # --- Fluxo completo ---------------------------------------------------------------------------
