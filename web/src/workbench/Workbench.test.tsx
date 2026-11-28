@@ -881,7 +881,7 @@ describe("Bancada", () => {
       );
     });
     expect(
-      screen.getAllByRole("status").some((region) => region.textContent?.includes("Ajuste pronto")),
+      screen.getAllByRole("status").some((region) => region.textContent.includes("Ajuste pronto")),
     ).toBe(false);
     expect(screen.getByRole("radio", { name: "Preencher e cortar o centro" })).toBeChecked();
   });

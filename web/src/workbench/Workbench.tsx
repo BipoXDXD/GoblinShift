@@ -57,7 +57,6 @@ const FILES_FIELD: FormField = { fieldId: FILES_FIELD_ID, label: TEXT.workbench.
 /** O último ajuste pronto aplicado; `count` remonta os campos também ao reaplicar o mesmo. */
 interface AppliedPreset {
   readonly key: string;
-  readonly name: string;
   readonly count: number;
 }
 
