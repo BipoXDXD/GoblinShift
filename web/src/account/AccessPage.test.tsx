@@ -1,6 +1,6 @@
 import { screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 
 import { apiKeyBody, KEY_ID, meBody, SECOND_KEY_ID } from "../test/account";
 import { appRoutes, preloadRoutes } from "../test/appRoutes";
@@ -98,6 +98,51 @@ describe("Acesso: sessão", () => {
     setup();
 
     expect(within(await section("Sessão")).getByText("Você entrou como Ana.")).toBeVisible();
+  });
+
+  describe("identificador da conta", () => {
+    const ACCOUNT = "019a0000-0000-7000-8000-0000000000aa";
+
+    function setupAccount() {
+      return setup({ "GET /api/v1/me": () => jsonResponse(meBody({ id: ACCOUNT })) });
+    }
+
+    it("mostra o identificador da conta", async () => {
+      setupAccount();
+
+      const session = await section("Sessão");
+      expect(within(session).getByText(ACCOUNT)).toBeVisible();
+      expect(within(session).getByRole("term")).toHaveTextContent("Identificador da conta");
+      expect(
+        within(session).getByText(
+          "Informe este identificador ao escrever para privacidade@goblinshift.dev.",
+        ),
+      ).toBeVisible();
+    });
+
+    it("copia o identificador e anuncia", async () => {
+      const { user } = setupAccount();
+      const session = await section("Sessão");
+
+      await user.click(within(session).getByRole("button", { name: "Copiar identificador" }));
+
+      expect(await navigator.clipboard.readText()).toBe(ACCOUNT);
+      expect(within(session).getByRole("status")).toHaveTextContent("Identificador copiado.");
+    });
+
+    it("anuncia a falha quando o clipboard recusa", async () => {
+      const { user } = setupAccount();
+      const session = await section("Sessão");
+      vi.spyOn(navigator.clipboard, "writeText").mockRejectedValue(new Error("negado"));
+
+      await user.click(within(session).getByRole("button", { name: "Copiar identificador" }));
+
+      await waitFor(() => {
+        expect(within(session).getByRole("status")).toHaveTextContent(
+          "Não foi possível copiar. Selecione o identificador e copie à mão.",
+        );
+      });
+    });
   });
 
   it("Sair encerra a sessão com o CSRF e volta à Oficina sem os dados da conta", async () => {
