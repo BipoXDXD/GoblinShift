@@ -64,9 +64,9 @@ export function CompletionAlertToggle({
           }}
         >
           {on ? (
-            <BellRing aria-hidden="true" className="size-5" />
+            <BellRing aria-hidden="true" className="size-4" />
           ) : (
-            <Bell aria-hidden="true" className="size-5" />
+            <Bell aria-hidden="true" className="size-4" />
           )}
           {on ? T.toggleOn : T.toggleOff}
         </Button>
