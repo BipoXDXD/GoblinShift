@@ -100,7 +100,7 @@ export function Layout({ now, notice }: LayoutProps): ReactElement {
         id={MAIN_ID}
         className="mx-auto min-h-svh w-full max-w-5xl flex-1 px-4 py-8 md:px-8 md:py-12"
       >
-        <LoginFailedAlert />
+        <LoginProblemAlert />
         <CanonicalPath />
       </main>
       {/* Links públicos para textos legais e créditos. */}
@@ -203,19 +203,19 @@ function TermsGate(): ReactElement {
  * título, a leitura seguiria para baixo sem passar pela mensagem, e a mudança de foco pode cortar o
  * anúncio do `role="alert"`. O `h1` respeita a marca e não o rouba depois.
  */
-function LoginFailedAlert(): ReactElement | null {
+function LoginProblemAlert(): ReactElement | null {
   const [params] = useSearchParams();
   const error = params.get(LOGIN_ERROR_PARAM);
   if (error === LOGIN_FAILED) {
-    return <LoginFailedMessage message={TEXT.account.signIn.failed} />;
+    return <LoginProblemMessage message={TEXT.account.signIn.failed} />;
   }
   if (error === LOGIN_REAUTH_STALE) {
-    return <LoginFailedMessage message={TEXT.account.signIn.reauthStale} />;
+    return <LoginProblemMessage message={TEXT.account.signIn.reauthStale} />;
   }
   return null;
 }
 
-function LoginFailedMessage({ message }: { readonly message: string }): ReactElement {
+function LoginProblemMessage({ message }: { readonly message: string }): ReactElement {
   const { hash } = useLocation();
   const alert = useRef<HTMLDivElement>(null);
   useEffect(() => {
