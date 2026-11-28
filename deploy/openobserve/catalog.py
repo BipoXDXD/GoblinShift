@@ -151,6 +151,8 @@ CAUSE_COLUMNS: tuple[str, ...] = (
     "alert_executor_start_failed",
     "alert_input_tampered",
     "alert_google_auth_time_missing",
+    "alert_login_state_cap",
+    "alert_login_failure_audit_cap",
     "api_saturation_rejected",
 )
 
@@ -288,6 +290,17 @@ SPAN_CAUSES: tuple[_SpanCause, ...] = (
         "causa-sem-reserva",
         "Upload ou publicação sem reserva de capacidade: a operação seguiu e a reconciliação adota "
         "o objeto, mas isso só cabe a registros antigos. Veja o runbook.",
+        period_minutes=10,
+        silence_minutes=180,
+        destination=DestinationKey.WARNING,
+    ),
+    _SpanCause(
+        "causa-login-anonimo-no-teto",
+        "Login sem autenticação no teto da aplicação. O teto global de estados de login vivos "
+        "recusou inícios novos (login_state_cap): enquanto durar, ninguém consegue começar um "
+        "login, e quem já estava no provedor termina. Ou o teto de LOGIN_FAILED sem conta por "
+        "minuto deixou recusas só no log (login_failure_audit_cap). Veja o runbook em "
+        "deploy/openobserve/README.md.",
         period_minutes=10,
         silence_minutes=180,
         destination=DestinationKey.WARNING,
