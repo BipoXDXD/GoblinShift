@@ -5,7 +5,7 @@ import io
 
 import pytest
 
-from goblinshift.processing.csv_janitor import Limits
+from goblinshift.processing.csv_janitor import Limits, Params
 from goblinshift.processing.csv_janitor.params import Delimiter
 from goblinshift.processing.csv_janitor.preview import (
     PREVIEW_MAX_BYTES,
@@ -13,6 +13,7 @@ from goblinshift.processing.csv_janitor.preview import (
     table_preview,
 )
 from goblinshift.processing.csv_janitor.writing import serialize_record
+from tests.csv_janitor.support import cleaned
 
 
 def table(records: int, *, value: str = "x", delimiter: str = ",") -> bytes:
@@ -91,3 +92,9 @@ def test_saida_que_os_limites_rejeitam_nao_tem_amostra() -> None:
     content = table(2)
 
     assert table_preview(content, Delimiter.COMMA, Limits(table_bytes=len(content) - 1)) is None
+
+
+def test_amostra_da_saida_com_bom_nao_traz_bom_no_cabecalho() -> None:
+    content = cleaned("a\r\n1\r\n", Params(output_bom=True)).content
+
+    assert table_preview(content, Delimiter.COMMA, Limits()) == b"a\r\n1\r\n"

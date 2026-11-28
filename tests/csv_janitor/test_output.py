@@ -2,9 +2,16 @@
 
 import pytest
 
-from goblinshift.processing.csv_janitor import Delimiter, FormulaGuard, Params, WarningCode
+from goblinshift.processing.csv_janitor import (
+    Delimiter,
+    FormulaGuard,
+    Limits,
+    Params,
+    RejectionCode,
+    WarningCode,
+)
 from goblinshift.processing.csv_janitor.janitor import shortened_column_name
-from tests.csv_janitor.support import cleaned, output
+from tests.csv_janitor.support import cleaned, output, rejected
 
 
 def test_saida_usa_crlf_sem_bom() -> None:
@@ -128,3 +135,28 @@ def test_aviso_de_formula_corta_cada_nome_de_coluna_em_120_caracteres() -> None:
 def test_nome_de_coluna_so_de_espacos_continua_vazio_depois_do_corte() -> None:
     # Vazio é rótulo próprio na tela (runs/formula_cells.py); reticências o transformariam em nome.
     assert shortened_column_name(" " * 500) == " " * 120
+
+
+def test_bom_na_saida_vem_antes_do_cabecalho_protegido() -> None:
+    params = Params(output_bom=True, formula_guard=FormulaGuard.TAB_PREFIX)
+
+    result = cleaned("=cmd\r\n1\r\n", params)
+
+    assert result.content.startswith(b'\xef\xbb\xbf"\t=cmd"\r\n')
+    assert result.formula_header == ("=cmd",)
+
+
+def test_bom_repetido_na_entrada_sai_como_um_bom_so() -> None:
+    content = cleaned("\ufeff\ufeffa\r\n1\r\n", Params(output_bom=True)).content
+
+    assert content == b"\xef\xbb\xbfa\r\n1\r\n"
+
+
+def test_bom_conta_no_teto_da_tabela_de_saida() -> None:
+    table = "a\r\n1\r\n"
+    limits = Limits(table_bytes=len(table))
+    assert cleaned(table, Params(), limits).content == table.encode()
+
+    rejection = rejected(table, Params(output_bom=True), limits)
+
+    assert rejection.code is RejectionCode.FIELD_LIMIT_EXCEEDED

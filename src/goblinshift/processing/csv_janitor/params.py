@@ -91,9 +91,12 @@ class Params:
     output_columns: tuple[str, ...] | None = None
     formula_guard: FormulaGuard = FormulaGuard.NONE
     input_encoding: InputEncoding = InputEncoding.UTF_8
+    output_bom: bool = False
+    collapse_whitespace_columns: tuple[str, ...] = ()
 
     def __post_init__(self) -> None:
         _require_distinct("trim_columns", self.trim_columns)
+        _require_distinct("collapse_whitespace_columns", self.collapse_whitespace_columns)
         _require_distinct("case_rules", [rule.column for rule in self.case_rules])
         _require_distinct("deduplicate_by", self.deduplicate_by)
         if len(self.filters) > MAX_FILTERS:
@@ -110,6 +113,7 @@ class Params:
         """Colunas citadas pela configuração, sem repetição, na ordem em que aparecem."""
         referenced = [
             *self.trim_columns,
+            *self.collapse_whitespace_columns,
             *(rule.column for rule in self.case_rules),
             *(f.column for f in self.filters),
             *self.deduplicate_by,

@@ -8,10 +8,12 @@ from goblinshift.processing.csv_janitor import (
     Counts,
     Filter,
     FilterOp,
+    InvalidParametersError,
     Params,
+    RejectionCode,
     WarningCode,
 )
-from tests.csv_janitor.support import cleaned, output
+from tests.csv_janitor.support import cleaned, output, rejected
 
 
 def test_campos_sao_sempre_texto_sem_inferencia() -> None:
@@ -153,3 +155,33 @@ def test_filtro_que_remove_tudo_gera_so_o_cabecalho_com_aviso() -> None:
 
     assert result.content == b"a,b\r\n"
     assert [w.code for w in result.warnings] == [WarningCode.ALL_RECORDS_FILTERED]
+
+
+def test_collapse_junta_espacos_internos_e_preserva_quebra_de_linha() -> None:
+    params = Params(collapse_whitespace_columns=("a",))
+    table = 'a,b\r\n"x \t  y\r\nz",  k  \r\n'
+
+    assert output(table, params) == 'a,b\r\n"x y\r\nz",  k  \r\n'
+
+
+def test_collapse_troca_espaco_unicode_por_espaco_simples() -> None:
+    params = Params(collapse_whitespace_columns=("a",))
+
+    assert output("a\r\nx\u00a0\u2003y\r\n", params) == "a\r\nx y\r\n"
+
+
+def test_collapse_e_trim_juntos_deixam_um_espaco_entre_palavras() -> None:
+    params = Params(trim_columns=("a",), collapse_whitespace_columns=("a",))
+
+    assert output("a\r\n  Ana   Maria  \r\n", params) == "a\r\nAna Maria\r\n"
+
+
+def test_collapse_de_coluna_inexistente_rejeita_a_tabela() -> None:
+    rejection = rejected("a\r\n1\r\n", Params(collapse_whitespace_columns=("z",)))
+
+    assert rejection.code is RejectionCode.CSV_STRUCTURE_INVALID
+
+
+def test_collapse_repetido_e_recusado_na_configuracao() -> None:
+    with pytest.raises(InvalidParametersError, match="collapse_whitespace_columns"):
+        Params(collapse_whitespace_columns=("a", "a"))
