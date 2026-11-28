@@ -31,11 +31,11 @@ from goblinshift.processing.csv_janitor import Limits
 from goblinshift.processing.csv_janitor import recipe as csv_janitor
 
 MIB = 1024 * 1024
-# 1.7: "arquivo comum, 32 MiB". Toda versão declara `max_input_bytes` e a aceitação o aplica a cada
-# entrada pelo tamanho guardado, nunca pelo nome: o envio dá 256 MiB a um nome terminado em .mp4,
-# e só a versão que declara esse teto (Media Mill) aceita a entrada maior (ADR 036). O teste do
-# catálogo confere que o valor é o mesmo `MAX_FILE_BYTES` de `files.limits`.
-COMMON_MAX_INPUT_BYTES = 32 * MIB
+# 1.7: teto do arquivo comum (ADR 062). Toda versão declara `max_input_bytes` e a aceitação o
+# aplica a cada entrada pelo tamanho guardado, nunca pelo nome: o envio dá 256 MiB a um nome
+# terminado em .mp4, e só a versão que declara esse teto (Media Mill) aceita a entrada maior
+# (ADR 036). O teste do catálogo confere que o valor é o mesmo `MAX_FILE_BYTES` de `files.limits`.
+COMMON_MAX_INPUT_BYTES = 50 * MIB
 
 
 class VersionStatus(StrEnum):
@@ -160,6 +160,8 @@ class Catalog:
         return recipe_version.resolve(raw_params)
 
 
+_TABLE_LIMITS = Limits()
+
 CSV_JANITOR_V1 = RecipeVersion(
     recipe_id=csv_janitor.RECIPE_ID,
     version=csv_janitor.VERSION,
@@ -167,8 +169,10 @@ CSV_JANITOR_V1 = RecipeVersion(
     parameters_model=CsvJanitorV1Parameters,
     limits={
         "max_inputs": csv_janitor.MAX_TABLES,
-        "max_input_bytes": COMMON_MAX_INPUT_BYTES,
-        **dataclasses.asdict(Limits()),
+        # O teto da tabela, que o executor aplica (D8, ADR 062): limite operacional, fora da
+        # versão. Com o comum, um CSV acima dele subia inteiro para ser rejeitado na execução.
+        "max_input_bytes": _TABLE_LIMITS.table_bytes,
+        **dataclasses.asdict(_TABLE_LIMITS),
     },
 )
 
@@ -204,7 +208,7 @@ DOWNLOADS_DETOX_V1 = RecipeVersion(
 
 _MEDIA_LIMITS = media_mill.Limits()
 
-# `max_input_bytes` sobe o teto por arquivo de 32 MiB para os 256 MiB de vídeo (1.7, ADR 036).
+# `max_input_bytes` sobe o teto por arquivo do comum para os 256 MiB de vídeo (1.7, ADR 036).
 MEDIA_MILL_V1 = RecipeVersion(
     recipe_id=media_mill.RECIPE_ID,
     version=media_mill.VERSION,
@@ -233,7 +237,7 @@ PDF_PRESS_V1 = RecipeVersion(
     parameters_model=PdfPressV1Parameters,
     limits={
         "max_inputs": pdf_press.MAX_INPUTS,
-        # PDF é arquivo comum para o envio (32 MiB); o lote soma até 256 MiB.
+        # PDF é arquivo comum para o envio (teto comum); o lote soma até 256 MiB.
         "max_input_bytes": COMMON_MAX_INPUT_BYTES,
         "max_total_input_bytes": pdf_press.MAX_TOTAL_INPUT_BYTES,
         "max_input_pages": pdf_press.MAX_INPUT_PAGES,

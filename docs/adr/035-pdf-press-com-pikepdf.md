@@ -1,6 +1,6 @@
 # ADR 035. PDF Press com pikepdf/qpdf no executor, falha da execução inteira e mapa de páginas
 
-- **Estado:** proposto no PR do PDF Press (2026-10-15), pendente de revisão do usuário
+- **Estado:** aceito no merge do PR #78 (2026-10-16); antes: proposto no PR do PDF Press (2026-10-15), pendente de revisão do usuário
 - **Plano:** [1.5](../GoblinShiftPlan.md#s1-5), [1.6](../GoblinShiftPlan.md#s1-6), [1.7](../GoblinShiftPlan.md#s1-7), [2.2](../GoblinShiftPlan.md#s2-2), [3.6](../GoblinShiftPlan.md#s3-6); [D13](../GoblinShiftReferencias.md#d-3)
 - **Relacionado:** [ADR 004](004-container-gvisor-por-tentativa.md), [ADR 018](018-pillow-na-imagem-do-executor.md), [ADR 019](019-layout-de-out-pacote-e-papeis.md), [ADR 021](021-digest-da-imagem-em-context-json.md)
 

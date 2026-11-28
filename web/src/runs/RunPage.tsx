@@ -32,7 +32,9 @@ import { formatDateTime } from "../format";
 import { findRecipe } from "../recipes/registry";
 import { TEXT } from "../text";
 import type { Run, RunStatus } from "./api";
+import { useCompletionAlert } from "./alerts";
 import { CancelRun } from "./CancelRun";
+import { CompletionAlertToggle } from "./CompletionAlertToggle";
 import type { ResultReference, RunResults as RunResultsData } from "./commands";
 import { artifactDownloadPath, getRunResults } from "./commands";
 import { unavailableReason } from "./availability";
@@ -42,6 +44,7 @@ import {
   type DownloadFailureCode,
 } from "./downloadFailure";
 import { DownloadFailureNotice } from "./DownloadFailureNotice";
+import { isTerminalStatus } from "./polling";
 import { ResultPreview } from "./preview/ResultPreview";
 import { ResultsAvailability } from "./ResultsAvailability";
 import { RunItems } from "./RunItems";
@@ -81,12 +84,18 @@ function RunView({ runId }: { readonly runId: string }): ReactElement {
   const { query, announcement, acknowledge, failure } = useRunPolling(runId);
   const [downloadFailure, dismissDownloadFailure] = useDownloadFailure();
   const run = query.data;
+  useCompletionAlert(run);
+  const header = useRef<HTMLDivElement>(null);
+  // O título é o alvo estável quando o Avisar quando terminar some com o foco nele.
+  const focusTitle = useCallback(() => {
+    header.current?.querySelector("h1")?.focus();
+  }, []);
   // O convite para entrar (ou aceitar os termos) não é alerta; anunciado aqui, uma vez só.
   const showsGuidance = failure !== null && isGuidance(failure);
   const guidanceText = failure === null ? null : guidanceAnnouncement(failure);
   return (
     <div className="mx-auto flex w-full max-w-3xl flex-col gap-8">
-      <div className="flex flex-col gap-2">
+      <div ref={header} className="flex flex-col gap-2">
         {run !== undefined && <BackToWorkbench recipeId={run.recipe_id} />}
         <FocusHeading>{T.title}</FocusHeading>
       </div>
@@ -106,7 +115,13 @@ function RunView({ runId }: { readonly runId: string }): ReactElement {
               // ação some e os dados já carregados ficam. Os resultados só aparecem no estado
               // terminal, em que o polling já parou e não há 401 dele.
               showsGuidance ? null : (
-                <CancelRun runId={run.id} status={run.status} onAnnounced={acknowledge} />
+                <div className="flex flex-wrap items-start gap-3">
+                  <CancelRun runId={run.id} status={run.status} onAnnounced={acknowledge} />
+                  <CompletionAlertToggle
+                    finished={isTerminalStatus(run.status)}
+                    onLeave={focusTitle}
+                  />
+                </div>
               )
             }
           />

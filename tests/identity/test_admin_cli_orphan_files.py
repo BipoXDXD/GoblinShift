@@ -30,6 +30,11 @@ ONE_HOUR = 3600
 LONG_AGO = 1_000_000  # 1970-01-12T13:46:40+00:00
 
 
+def k(label: str) -> str:
+    """Chave de upload no formato da aplicação (`uploads/<32 hex>`), legível no teste."""
+    return f"uploads/{label.encode().hex().ljust(32, '0')}"
+
+
 @pytest.fixture(autouse=True)
 def cli_environment(db_settings: Settings, engine: object) -> Iterator[None]:
     """A CLI lê as mesmas variáveis GS_* que a API; `engine` deixa o banco limpo."""
@@ -77,12 +82,12 @@ def test_lista_orfao_em_tsv_e_resume_em_stderr(
     capsys: pytest.CaptureFixture[str], factory: sessionmaker[Session], storage: FileStorage
 ) -> None:
     ready_upload(factory, storage, create_user(factory, "ana"))
-    put(storage, "uploads/solto", b"12345", mtime=LONG_AGO)
+    put(storage, k("solto"), b"12345", mtime=LONG_AGO)
 
     exit_code, out, err = run(capsys)
 
     assert exit_code == EXIT_OK
-    assert out == "uploads/solto\t5\t1970-01-12T13:46:40+00:00\tsem-linha\n"
+    assert out == f"{k('solto')}\t5\t1970-01-12T13:46:40+00:00\tsem-linha\n"
     assert "gs-admin: 1 órfãos sem linha, 5 bytes" in err
     assert "gs-admin: 0 marcados como removidos mas ainda presentes, 0 bytes" in err
 
@@ -119,23 +124,23 @@ def test_padrao_de_6_horas_poupa_arquivo_de_5h_e_lista_o_de_7h(
     capsys: pytest.CaptureFixture[str], storage: FileStorage
 ) -> None:
     now = time.time()
-    put(storage, "uploads/cinco", b"a", mtime=now - 5 * ONE_HOUR)
-    put(storage, "uploads/sete", b"a", mtime=now - 7 * ONE_HOUR)
+    put(storage, k("cinco"), b"a", mtime=now - 5 * ONE_HOUR)
+    put(storage, k("sete"), b"a", mtime=now - 7 * ONE_HOUR)
 
     exit_code, out, _ = run(capsys)
 
     assert exit_code == EXIT_OK
-    assert [line.split("\t")[0] for line in out.splitlines()] == ["uploads/sete"]
+    assert [line.split("\t")[0] for line in out.splitlines()] == [k("sete")]
 
 
 def test_min_age_hours_muda_o_corte(
     capsys: pytest.CaptureFixture[str], storage: FileStorage
 ) -> None:
-    put(storage, "uploads/de_5h", b"a", mtime=time.time() - 5 * ONE_HOUR)
+    put(storage, k("de_5h"), b"a", mtime=time.time() - 5 * ONE_HOUR)
 
     _, out, _ = run(capsys, "--min-age-hours", "4")
 
-    assert [line.split("\t")[0] for line in out.splitlines()] == ["uploads/de_5h"]
+    assert [line.split("\t")[0] for line in out.splitlines()] == [k("de_5h")]
 
 
 def test_min_age_hours_aceita_decimal_e_so_lista_o_mais_velho_que_o_corte(
@@ -143,22 +148,22 @@ def test_min_age_hours_aceita_decimal_e_so_lista_o_mais_velho_que_o_corte(
 ) -> None:
     now = 2_000_000_000.0
     half_hour = 30 * 60
-    put(storage, "uploads/um_segundo_alem", b"a", mtime=now - half_hour - 1)
-    put(storage, "uploads/no_corte", b"a", mtime=now - half_hour)
-    put(storage, "uploads/um_segundo_antes", b"a", mtime=now - half_hour + 1)
+    put(storage, k("um_segundo_alem"), b"a", mtime=now - half_hour - 1)
+    put(storage, k("no_corte"), b"a", mtime=now - half_hour)
+    put(storage, k("um_segundo_antes"), b"a", mtime=now - half_hour + 1)
 
     exit_code = main(["orphan-files", "--min-age-hours", "0.5"], clock=lambda: now)
     out = capsys.readouterr().out
 
     assert exit_code == EXIT_OK
-    assert [line.split("\t")[0] for line in out.splitlines()] == ["uploads/um_segundo_alem"]
+    assert [line.split("\t")[0] for line in out.splitlines()] == [k("um_segundo_alem")]
 
 
 def test_limit_trunca_a_listagem_e_avisa_sem_perder_o_total(
     capsys: pytest.CaptureFixture[str], storage: FileStorage
 ) -> None:
     for index in range(3):
-        put(storage, f"uploads/o{index}", b"xx", mtime=LONG_AGO)
+        put(storage, k(f"o{index}"), b"xx", mtime=LONG_AGO)
 
     exit_code, out, err = run(capsys, "--limit", "2")
 
@@ -178,7 +183,7 @@ def test_nome_fora_do_padrao_no_disco_nao_quebra_o_tsv(
     exit_code, out, _ = run(capsys)
 
     assert exit_code == EXIT_OK
-    assert out == "uploads/a.b-c\t1\t1970-01-12T13:46:40+00:00\tsem-linha\n"
+    assert out == "uploads/a.b-c\t1\t1970-01-12T13:46:40+00:00\tdesconhecido\n"
 
 
 def test_chave_com_controle_ou_nao_ascii_sai_escapada_numa_linha() -> None:
@@ -192,7 +197,7 @@ def test_storage_desmontado_sai_com_4_e_mensagem(
 ) -> None:
     root = tmp_path / "desmontado"
     monkeypatch.setenv("GS_STORAGE_ROOT", str(root))
-    put(FileStorage(root), "uploads/a", b"x", mtime=LONG_AGO)
+    put(FileStorage(root), k("a"), b"x", mtime=LONG_AGO)
 
     exit_code, out, err = run(capsys)
 
@@ -222,7 +227,7 @@ def test_somente_leitura(
     ready_upload(factory, storage, create_user(factory, "ana"))
     with unit_of_work(factory) as session:
         session.execute(update(stored_object).values(state=ObjectState.DELETED))
-    put(storage, "uploads/solto", b"x", mtime=LONG_AGO)
+    put(storage, k("solto"), b"x", mtime=LONG_AGO)
     for path in storage.root.joinpath("uploads").iterdir():
         os.utime(path, (LONG_AGO, LONG_AGO))
     before = (files_under(storage.root), row_summary(factory))
@@ -232,3 +237,158 @@ def test_somente_leitura(
     assert exit_code == EXIT_OK
     assert len(out.splitlines()) == 2
     assert (files_under(storage.root), row_summary(factory)) == before
+
+
+def test_delete_orphans_sem_yes_sai_com_2_e_nada_some(
+    capsys: pytest.CaptureFixture[str], storage: FileStorage
+) -> None:
+    put(storage, k("solto"), b"x", mtime=LONG_AGO)
+    before = files_under(storage.root)
+
+    exit_code, out, err = run(capsys, "--delete-orphans")
+
+    assert (exit_code, out) == (EXIT_USAGE, "")
+    assert err == "gs-admin: use --yes depois de conferir a lista\n"
+    assert files_under(storage.root) == before
+
+
+def test_yes_sem_delete_orphans_e_erro_de_uso(
+    capsys: pytest.CaptureFixture[str], storage: FileStorage
+) -> None:
+    put(storage, k("solto"), b"x", mtime=LONG_AGO)
+    before = files_under(storage.root)
+
+    exit_code, _, err = run(capsys, "--yes")
+
+    assert exit_code == EXIT_USAGE
+    assert err == "gs-admin: --yes só vale com --delete-orphans\n"
+    assert files_under(storage.root) == before
+
+
+def test_delete_orphans_com_yes_apaga_sem_linha_e_poupa_o_resto(
+    capsys: pytest.CaptureFixture[str], factory: sessionmaker[Session], storage: FileStorage
+) -> None:
+    ready_upload(factory, storage, create_user(factory, "ana"))
+    with unit_of_work(factory) as session:
+        session.execute(update(stored_object).values(state=ObjectState.DELETED))
+    for path in storage.root.joinpath("uploads").iterdir():
+        os.utime(path, (LONG_AGO, LONG_AGO))
+    [removed] = files_under(storage.root / "uploads")
+    put(storage, k("solto"), b"12345", mtime=LONG_AGO)
+    put(storage, k("recente"), b"x")
+
+    exit_code, out, err = run(capsys, "--delete-orphans", "--yes")
+
+    assert exit_code == EXIT_OK
+    assert out == f"{k('solto')}\t5\t1970-01-12T13:46:40+00:00\tapagado\n"
+    assert "gs-admin: 1 órfãos sem linha apagados, 5 bytes" in err
+    assert "gs-admin: 0 poupados porque mudaram depois da lista" in err
+    assert sorted(files_under(storage.root / "uploads")) == sorted(
+        [removed, k("recente").removeprefix("uploads/")]
+    )
+
+
+def test_delete_orphans_respeita_o_limit_na_cli(
+    capsys: pytest.CaptureFixture[str], storage: FileStorage
+) -> None:
+    for index in range(3):
+        put(storage, k(f"o{index}"), b"xx", mtime=LONG_AGO)
+
+    exit_code, out, err = run(capsys, "--delete-orphans", "--yes", "--limit", "2")
+
+    assert exit_code == EXIT_OK
+    assert len(out.splitlines()) == 2
+    assert len(files_under(storage.root / "uploads")) == 1
+    assert "gs-admin: chegou ao limite de 2 e sobrou órfão; rode de novo" in err
+
+
+def test_delete_orphans_com_storage_desmontado_sai_com_4(
+    capsys: pytest.CaptureFixture[str], tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    root = tmp_path / "desmontado"
+    monkeypatch.setenv("GS_STORAGE_ROOT", str(root))
+    put(FileStorage(root), k("a"), b"x", mtime=LONG_AGO)
+
+    exit_code, out, err = run(capsys, "--delete-orphans", "--yes")
+
+    assert (exit_code, out) == (EXIT_FAILURE, "")
+    assert err == "gs-admin: storage não montado; nada foi verificado\n"
+    assert root.joinpath(*k("a").split("/")).exists()
+
+
+def test_queda_no_meio_deixa_no_stdout_as_linhas_ja_apagadas(
+    capsys: pytest.CaptureFixture[str], storage: FileStorage, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    for index in range(4):
+        put(storage, k(f"o{index}"), b"x", mtime=LONG_AGO)
+    real_delete = FileStorage.delete
+    calls: list[str] = []
+
+    def delete_then_interrupt(self: FileStorage, key: str) -> None:
+        calls.append(key)
+        if len(calls) == 3:
+            raise KeyboardInterrupt
+        real_delete(self, key)
+
+    monkeypatch.setattr(FileStorage, "delete", delete_then_interrupt)
+
+    exit_code, out, err = run(capsys, "--delete-orphans", "--yes")
+
+    assert exit_code == 130
+    assert [line.split("\t")[0] for line in out.splitlines()] == calls[:2]
+    assert all(line.endswith("\tapagado") for line in out.splitlines())
+    assert "gs-admin: interrompido" in err
+
+
+def test_falha_ao_apagar_informa_a_chave_segue_e_sai_com_4(
+    capsys: pytest.CaptureFixture[str], storage: FileStorage, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    for name in ("a", "b", "c"):
+        put(storage, k(name), b"x", mtime=LONG_AGO)
+    real_delete = FileStorage.delete
+
+    def delete_failing_b(self: FileStorage, key: str) -> None:
+        if key == k("b"):
+            raise PermissionError(13, "Permission denied")
+        real_delete(self, key)
+
+    monkeypatch.setattr(FileStorage, "delete", delete_failing_b)
+
+    exit_code, out, err = run(capsys, "--delete-orphans", "--yes")
+
+    assert exit_code == EXIT_FAILURE
+    assert sorted(line.split("\t")[0] for line in out.splitlines()) == [k("a"), k("c")]
+    assert f"gs-admin: falhou: {k('b')}" in err
+    assert "gs-admin: 1 falharam ao apagar" in err
+    assert files_under(storage.root / "uploads") == [k("b").removeprefix("uploads/")]
+
+
+def test_desconhecido_e_listado_e_nunca_apagado(
+    capsys: pytest.CaptureFixture[str], storage: FileStorage
+) -> None:
+    put(storage, "restore-notes.txt", b"abc", mtime=LONG_AGO)
+    put(storage, "dump.sql", b"de", mtime=LONG_AGO)
+
+    _, out, err = run(capsys)
+    exit_code, deleted, _ = run(capsys, "--delete-orphans", "--yes")
+
+    assert sorted(line.split("\t")[3] for line in out.splitlines()) == ["desconhecido"] * 2
+    assert (
+        "gs-admin: 2 desconhecidos (nome fora dos formatos da aplicação; nunca apagados), 5 bytes"
+        in err
+    )
+    assert (exit_code, deleted) == (EXIT_OK, "")
+    assert (storage.root / "restore-notes.txt").exists()
+    assert (storage.root / "dump.sql").exists()
+
+
+def test_limite_exato_sem_sobra_nao_avisa(
+    capsys: pytest.CaptureFixture[str], storage: FileStorage
+) -> None:
+    for name in ("a", "b"):
+        put(storage, k(name), b"x", mtime=LONG_AGO)
+
+    exit_code, out, err = run(capsys, "--delete-orphans", "--yes", "--limit", "2")
+
+    assert (exit_code, len(out.splitlines())) == (EXIT_OK, 2)
+    assert "chegou ao limite" not in err

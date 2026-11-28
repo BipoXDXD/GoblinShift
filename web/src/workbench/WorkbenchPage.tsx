@@ -3,7 +3,7 @@ import { useCallback, useEffect, useState, type ReactElement, type ReactNode } f
 import { useSearchParams } from "react-router";
 
 import { useApiClient } from "../api/ApiClientContext";
-import { SAMPLE_PARAM } from "../app/paths";
+import { SAMPLE_PARAM, SHARED_PARAM } from "../app/paths";
 import {
   CATALOG_QUERY_KEY,
   findCatalogVersion,
@@ -62,6 +62,7 @@ export function WorkbenchPage({ recipeId, uploadServices }: WorkbenchPageProps):
       key={`${recipe.id}:${source?.kind ?? ""}:${source?.id ?? ""}`}
       recipe={recipe}
       source={source}
+      sharedId={search.get(SHARED_PARAM)}
       uploadServices={uploadServices}
       sampleRequested={sampleRequested}
       onSampleRequested={clearSampleRequest}
@@ -73,6 +74,8 @@ interface CatalogGateProps {
   readonly recipe: RecipeModule;
   /** Preset (`?preset=`) ou execução (`?execucao=`) que pré-preenche os parâmetros. */
   readonly source: SourceRef | null;
+  /** Compartilhamento (`?compartilhado=`) cujos arquivos a Bancada recebe ao abrir (ADR 064). */
+  readonly sharedId: string | null;
   readonly uploadServices: UploadServices;
   /** A URL pediu o arquivo de exemplo (`?exemplo=1`). */
   readonly sampleRequested: boolean;
@@ -90,6 +93,7 @@ interface CatalogGateProps {
 function CatalogGate({
   recipe,
   source,
+  sharedId,
   uploadServices,
   sampleRequested,
   onSampleRequested,
@@ -105,6 +109,7 @@ function CatalogGate({
   const { announcement, body } = gateBody({
     recipe,
     source,
+    sharedId,
     uploadServices,
     sampleRequested,
     onSampleRequested,
@@ -130,6 +135,7 @@ interface GateBodyInput extends CatalogGateProps {
 function gateBody({
   recipe,
   source,
+  sharedId,
   uploadServices,
   sampleRequested,
   onSampleRequested,
@@ -186,6 +192,7 @@ function gateBody({
         form={prefilled.form}
         notice={prefilled.notice}
         sourcePreset={prefilled.preset}
+        sharedId={sharedId}
         uploadServices={uploadServices}
         sampleRequested={sampleRequested}
         onSampleRequested={onSampleRequested}

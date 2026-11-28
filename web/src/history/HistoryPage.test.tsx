@@ -1,8 +1,9 @@
-import { InfiniteQueryObserver } from "@tanstack/react-query";
+import { defaultScheduler, InfiniteQueryObserver, notifyManager } from "@tanstack/react-query";
 import { act, fireEvent, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { describe, expect, it, onTestFinished, vi } from "vitest";
 
+import { createAppQueryClient } from "../app/queryClient";
 import { ANNOUNCE_DELAY_MS } from "../components/a11y/LiveRegion";
 import { untilFakeClock, installAnnounceClock } from "../test/announceClock";
 import { appRoutes, preloadRoutes } from "../test/appRoutes";
@@ -10,6 +11,7 @@ import { axeViolations } from "../test/axe";
 import { fakeApi, jsonResponse, problemResponse, runBody } from "../test/fakeApi";
 import { expectHeadingFocused } from "../test/focus";
 import { renderRoutes } from "../test/renderRoutes";
+import { meBody } from "../test/account";
 
 await preloadRoutes("/historico", "/execucoes/id");
 
@@ -35,6 +37,11 @@ function listCalls(requests: readonly Request[]): string[] {
     .map((request) => new URL(request.url))
     .filter((url) => url.pathname === "/api/v1/runs")
     .map((url) => `${url.pathname}${url.search}`);
+}
+
+/** Quantos GET /me a tela fez. */
+function meCalls(requests: readonly Request[]): number {
+  return requests.filter((request) => new URL(request.url).pathname === "/api/v1/me").length;
 }
 
 describe("Histórico", () => {
@@ -498,6 +505,95 @@ describe("Histórico", () => {
       "/auth/login/google?return_to=%2Fhistorico%3Festado%3Dfailed",
     );
     expect(screen.queryByRole("alert")).toBeNull();
+  });
+
+  // O QueryClient do app (useMe.ts, accountCache.ts): a sessão que acaba no meio da tela leva junto
+  // as execuções da conta anterior.
+  describe("401 numa leitura com a lista na tela", () => {
+    /** Com `meToo`, o /me também passa a dar 401 (a sessão acabou de verdade). */
+    function expireSession({ meToo = false } = {}) {
+      let expired = false;
+      const api = fakeApi({
+        "GET /api/v1/runs": () =>
+          expired
+            ? problemResponse(401, "AUTHENTICATION_REQUIRED")
+            : page([runBody({ id: RUN_A })]),
+        ...(meToo
+          ? {
+              "GET /api/v1/me": () =>
+                expired ? problemResponse(401, "AUTHENTICATION_REQUIRED") : jsonResponse(meBody()),
+            }
+          : {}),
+      });
+      const queryClient = createAppQueryClient();
+      renderRoutes({
+        routes: appRoutes(api.client),
+        path: "/historico",
+        client: api.client,
+        queryClient,
+      });
+      return {
+        api,
+        expire: async () => {
+          expired = true;
+          await act(() => queryClient.invalidateQueries({ queryKey: ["runs"] }));
+        },
+      };
+    }
+
+    it("401 numa leitura tira do DOM as execuções da conta anterior", async () => {
+      const { expire } = expireSession();
+      await screen.findByRole("link", { name: /^CSV Janitor, criada em / });
+
+      await expire();
+
+      await waitFor(() => {
+        expect(screen.queryByRole("link", { name: /^CSV Janitor, criada em / })).toBeNull();
+      });
+      expect(await screen.findByRole("region", { name: "Entre para continuar" })).toBeVisible();
+    });
+
+    it("não refaz a leitura em laço depois do 401", async () => {
+      const { api, expire } = expireSession();
+      await screen.findByRole("link", { name: /^CSV Janitor, criada em / });
+
+      await expire();
+      await screen.findByRole("region", { name: "Entre para continuar" });
+      // Dá tempo a um refetch em laço aparecer: o /me relido e o cache limpo não pedem a lista.
+      await act(() => new Promise((resolve) => setTimeout(resolve, 100)));
+
+      expect(listCalls(api.requests)).toEqual(["/api/v1/runs?limit=25", "/api/v1/runs?limit=25"]);
+    });
+
+    it("com o /me também em 401, o ciclo para e não cresce com o tempo", async () => {
+      const { api, expire } = expireSession({ meToo: true });
+      await screen.findByRole("link", { name: /^CSV Janitor, criada em / });
+      const before = { list: listCalls(api.requests).length, me: meCalls(api.requests) };
+      vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout", "setInterval", "Date"] });
+      notifyManager.setScheduler(queueMicrotask);
+      onTestFinished(() => {
+        notifyManager.setScheduler(defaultScheduler);
+        vi.useRealTimers();
+      });
+
+      await expire();
+      await untilFakeClock(() => {
+        expect(screen.getByRole("region", { name: "Entre para continuar" })).toBeVisible();
+      });
+      const counts: { list: number; me: number }[] = [];
+      // Bem além do staleTime do /me (30 s): nenhum pedido novo aparece só com o tempo.
+      for (let round = 0; round < 4; round += 1) {
+        await act(() => vi.advanceTimersByTimeAsync(31_000));
+        counts.push({
+          list: listCalls(api.requests).length - before.list,
+          me: meCalls(api.requests) - before.me,
+        });
+      }
+
+      // Depois do 401: a lista uma vez, o /me relido uma vez (dá `null`) e mais nada.
+      expect(counts).toEqual(Array.from({ length: 4 }, () => ({ list: 1, me: 1 })));
+      expect(screen.queryByRole("link", { name: /^CSV Janitor, criada em / })).toBeNull();
+    });
   });
 
   it("não tem violações do axe com lista e filtros", async () => {

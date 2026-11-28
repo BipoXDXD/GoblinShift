@@ -1,6 +1,6 @@
 # ADR 039. Contagem por coluna do aviso de fórmula no banco e na API
 
-- **Estado:** proposto (2026-10-16), pendente de revisão do usuário no PR
+- **Estado:** aceito no merge do PR #110 (2026-10-16); antes: proposto (2026-10-16), pendente de revisão do usuário no PR
 - **Plano:** [1.3](../GoblinShiftPlan.md#s1-3), [1.7](../GoblinShiftPlan.md#s1-7)
 - **Relacionado:** [ADR 019](019-layout-de-out-pacote-e-papeis.md), [ADR 037](037-previews-em-grupo-e-papel-proprios.md)
 

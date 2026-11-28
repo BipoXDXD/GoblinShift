@@ -198,6 +198,24 @@ export const SCREENS: readonly Screen[] = [
     },
     "Em andamento",
   ),
+  {
+    // O toggle ligado (D3): a escolha salva e a permissão dada, sem o diálogo do navegador.
+    name: "Execução em andamento com aviso",
+    open: async (page: Page, api: FakeApi): Promise<void> => {
+      await page.addInitScript(() => {
+        window.localStorage.setItem("gs-run-alerts", "on");
+        Object.defineProperty(Notification, "permission", { get: () => "granted" });
+      });
+      await new ExecucaoPage(page).open(
+        api.seedRun({
+          status: "running",
+          deadline_at: LATER,
+          progress: { phase: "processing", processed: 1, total: 3 },
+        }),
+      );
+      await expect(page.getByRole("button", { name: "Aviso ligado" })).toBeVisible();
+    },
+  },
   runScreen(
     "Execução concluída",
     { status: "succeeded", progress: { phase: null, processed: 2, total: 2 } },
@@ -394,6 +412,26 @@ export const SCREENS: readonly Screen[] = [
       // Só o pedido de recarregar: a primeira frase do alerta muda no #271.
       await expect(
         page.getByRole("alert").filter({ hasText: "Recarregue a página e tente de novo." }),
+      ).toBeVisible();
+    },
+  },
+  {
+    // Sem service worker no E2E (serviceWorkers: "block"), a caixa de entrada fica vazia: a
+    // página mostra o vencido com todas as receitas, o estado com mais conteúdo.
+    name: "Compartilhamento vencido",
+    open: async (page: Page): Promise<void> => {
+      await page.goto("/compartilhar?id=nao-existe");
+      await expect(
+        page.getByRole("list", { name: "Receitas para estes arquivos" }).getByRole("link"),
+      ).toHaveCount(5);
+    },
+  },
+  {
+    name: "Oficina com o compartilhamento indisponível",
+    open: async (page: Page): Promise<void> => {
+      await page.goto("/?compartilhamento=indisponivel");
+      await expect(
+        page.getByRole("status").filter({ hasText: "Os arquivos compartilhados não chegaram" }),
       ).toBeVisible();
     },
   },

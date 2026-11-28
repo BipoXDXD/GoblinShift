@@ -1,19 +1,18 @@
-import { ChevronRight } from "lucide-react";
-import { useId, type ReactElement } from "react";
-import { Link } from "react-router";
+import { useEffect, useId, useState, type ReactElement } from "react";
+import { Link, useNavigate, useSearchParams } from "react-router";
 
 import { FocusHeading } from "../components/a11y/FocusHeading";
 import { RecentRuns } from "../history/RecentRuns";
 import { OficinaHero } from "../oficina3d/OficinaHero";
 import { PresetsSection } from "../presets/PresetsSection";
+import { RecipeCard } from "../recipes/RecipeCard";
 import { RECIPE_LIST } from "../recipes/registry";
-import type { RecipeId } from "../recipes/types";
+import { ShareNotice } from "../share/ShareNotice";
 import { TEXT } from "../text";
 import { buttonClassName } from "../components/ui/Button";
-import { workbenchPath, workbenchSamplePath } from "./paths";
+import { SHARE_STATUS_PARAM, SHARE_UNAVAILABLE, workbenchPath, workbenchSamplePath } from "./paths";
 
 const T = TEXT.home;
-const SUMMARIES: Readonly<Record<RecipeId, string>> = T.summaries;
 /** Âncora da seção das receitas, alvo do "ou escolha uma receita" da abertura. */
 const RECIPES_ANCHOR = "receitas";
 
@@ -25,6 +24,7 @@ const RECIPES_ANCHOR = "receitas";
  */
 export function HomePage(): ReactElement {
   const recipesHeadingId = useId();
+  const shareUnavailable = useShareUnavailable();
   return (
     <div className="flex flex-col gap-12 md:gap-16">
       {/* A partir de 1024 px o palco é alto (480 px mais controles e seletor): o título sobe para o
@@ -34,6 +34,7 @@ export function HomePage(): ReactElement {
         <div className="flex max-w-prose flex-col gap-4">
           <FocusHeading size="hero">{T.title}</FocusHeading>
           <p className="text-lg text-fg-muted">{T.lead}</p>
+          {shareUnavailable && <ShareNotice role="status">{TEXT.share.unavailable}</ShareNotice>}
           {/* Antes da cena na ordem do DOM: no celular, a cena e os cartões ficam abaixo da dobra,
               e o primeiro uso fica a um clique. */}
           <div className="flex flex-wrap items-center gap-x-4 gap-y-2">
@@ -60,24 +61,7 @@ export function HomePage(): ReactElement {
         </h2>
         <ul className="grid gap-4 md:grid-cols-3 md:gap-6">
           {RECIPE_LIST.map((recipe) => (
-            <li
-              key={recipe.id}
-              className="relative flex flex-col gap-3 rounded-lg bg-surface p-6 shadow-card transition hover:shadow-float"
-            >
-              <h3 className="font-display text-xl font-semibold text-fg">{recipe.title}</h3>
-              <p className="flex-1 text-fg-muted">{SUMMARIES[recipe.id]}</p>
-              {/* O link cobre o cartão inteiro (card-link, base.css); o foco aparece no cartão. */}
-              <Link
-                to={workbenchPath(recipe.id)}
-                className="card-link inline-flex min-h-11 items-center gap-1 font-semibold"
-              >
-                {T.openWorkbench}
-                {/* O espaço fica fora do sr-only: fora do fluxo, o span perde o espaço inicial,
-                    e o nome acessível juntava as palavras ("Bancadada"). */}{" "}
-                <span className="sr-only">{T.openWorkbenchOf(recipe.title)}</span>
-                <ChevronRight aria-hidden="true" className="size-4" />
-              </Link>
-            </li>
+            <RecipeCard key={recipe.id} recipeId={recipe.id} to={workbenchPath(recipe.id)} />
           ))}
         </ul>
       </section>
@@ -85,4 +69,22 @@ export function HomePage(): ReactElement {
       <RecentRuns />
     </div>
   );
+}
+
+/**
+ * O "Compartilhar" do celular sem service worker cai em `/?compartilhamento=indisponivel` (Nginx,
+ * ADR 064). O aviso fica até sair da Oficina, e o parâmetro sai da URL: recarregar ou voltar não o
+ * repete. Ele vem depois do H1, que recebe o foco, como `status`: não interrompe a leitura.
+ */
+function useShareUnavailable(): boolean {
+  const [search] = useSearchParams();
+  const navigate = useNavigate();
+  const [unavailable] = useState(() => search.get(SHARE_STATUS_PARAM) === SHARE_UNAVAILABLE);
+  const inUrl = search.has(SHARE_STATUS_PARAM);
+  useEffect(() => {
+    if (inUrl) {
+      void navigate({ search: "" }, { replace: true });
+    }
+  }, [inUrl, navigate]);
+  return unavailable;
 }

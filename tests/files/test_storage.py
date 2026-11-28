@@ -27,7 +27,7 @@ from goblinshift.files.storage import (
 from tests.fifo_support import fail_if_blocked, make_fifo
 
 MIB = 1024 * 1024
-MAX_FILE_BYTES = 32 * MIB
+MAX_FILE_BYTES = 50 * MIB
 
 
 class ClientDisconnectedError(Exception):
@@ -75,7 +75,7 @@ def test_arquivo_vazio_e_valido(storage: FileStorage) -> None:
     assert storage.stat("uploads/vazio").size_bytes == 0
 
 
-def test_conteudo_com_exatamente_32_mib_cabe_no_limite(storage: FileStorage) -> None:
+def test_conteudo_no_teto_exato_cabe_no_limite(storage: FileStorage) -> None:
     _, size = storage.create_exclusive(
         "uploads/grande", repeated_chunks(MAX_FILE_BYTES), max_bytes=MAX_FILE_BYTES
     )
@@ -84,7 +84,7 @@ def test_conteudo_com_exatamente_32_mib_cabe_no_limite(storage: FileStorage) -> 
     assert storage.stat("uploads/grande").size_bytes == MAX_FILE_BYTES
 
 
-def test_um_byte_alem_de_32_mib_aborta_sem_deixar_arquivo(storage: FileStorage) -> None:
+def test_um_byte_alem_do_teto_aborta_sem_deixar_arquivo(storage: FileStorage) -> None:
     with pytest.raises(ContentTooLargeError):
         storage.create_exclusive(
             "uploads/grande", repeated_chunks(MAX_FILE_BYTES + 1), max_bytes=MAX_FILE_BYTES
