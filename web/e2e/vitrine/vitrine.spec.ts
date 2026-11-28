@@ -23,6 +23,7 @@ import { ExecucaoPage } from "../pages/ExecucaoPage";
 import { HistoricoPage } from "../pages/HistoricoPage";
 import { expect, test } from "../support/test";
 import {
+  cssImageUrls,
   FRAMES_DIR,
   VITRINE_CLOCK,
   VITRINE_DIR,
@@ -30,7 +31,7 @@ import {
   knownGoblins,
   renderManifest,
   type VitrineEntry,
-} from "./vitrine";
+} from "./vitrine.ts";
 
 const GOBLIN_ART_DIR = resolve(
   dirname(fileURLToPath(import.meta.url)),
@@ -138,12 +139,13 @@ async function viewportClip(page: Page): Promise<Clip> {
 }
 
 /**
- * URLs das imagens visíveis que cruzam a área: `currentSrc` de todo `img` e o `background-image`
- * computado dos demais elementos.
+ * URLs das imagens visíveis que cruzam a área: `currentSrc` de todo `img` e, de cada elemento e
+ * dos seus `::before` e `::after`, o `background-image` e o `content` computados.
  */
 async function imageUrlsIn(page: Page, clip: Clip): Promise<string[]> {
-  return page.evaluate((area) => {
-    const urls: string[] = [];
+  const found = await page.evaluate((area) => {
+    const sources: string[] = [];
+    const styles: string[] = [];
     const crosses = (element: Element): boolean => {
       const rect = element.getBoundingClientRect();
       const top = rect.top + window.scrollY;
@@ -168,18 +170,16 @@ async function imageUrlsIn(page: Page, clip: Clip): Promise<string[]> {
         continue;
       }
       if (element instanceof HTMLImageElement) {
-        urls.push(element.currentSrc || element.src);
+        sources.push(element.currentSrc || element.src);
       }
-      for (const match of getComputedStyle(element).backgroundImage.matchAll(
-        /url\(["']?([^"')]+)["']?\)/g,
-      )) {
-        if (match[1] !== undefined) {
-          urls.push(match[1]);
-        }
+      for (const pseudo of [null, "::before", "::after"]) {
+        const style = getComputedStyle(element, pseudo);
+        styles.push(style.backgroundImage, style.content);
       }
     }
-    return urls;
+    return { sources, styles };
   }, clip);
+  return [...found.sources, ...cssImageUrls(found.styles)];
 }
 
 /**

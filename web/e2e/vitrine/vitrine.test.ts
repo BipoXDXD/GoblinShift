@@ -5,6 +5,7 @@ import { describe, expect, it } from "vitest";
 
 import {
   assertVitrineEnv,
+  cssImageUrls,
   goblinsIn,
   knownGoblins,
   renderManifest,
@@ -72,6 +73,30 @@ describe("goblins", () => {
   it("as goblins restritas são Jade e Fagulha (D3 a) e existem na pasta de arte", () => {
     expect(RESTRICTED_GOBLINS).toEqual(["jade", "fagulha"]);
     expect(knownGoblins(GOBLIN_ART_DIR)).toEqual(expect.arrayContaining([...RESTRICTED_GOBLINS]));
+  });
+});
+
+describe("cssImageUrls", () => {
+  it("cssImageUrls lê cada url() de background-image e content, com ou sem aspas", () => {
+    expect(
+      cssImageUrls([
+        'url("http://127.0.0.1:4173/assets/jade-256w-A1.avif"), linear-gradient(red, blue)',
+        "url(/assets/fagulha-384w-B2.webp)",
+        "url('/assets/lua-256w-C3.webp')",
+        "none",
+        "normal",
+      ]),
+    ).toEqual([
+      "http://127.0.0.1:4173/assets/jade-256w-A1.avif",
+      "/assets/fagulha-384w-B2.webp",
+      "/assets/lua-256w-C3.webp",
+    ]);
+  });
+
+  it("cssImageUrls lê as opções de image-set()", () => {
+    expect(
+      cssImageUrls(['image-set(url("/a/nyx-1x-Q.avif") 1x, url("/a/nyx-2x-Q.avif") 2x)']),
+    ).toEqual(["/a/nyx-1x-Q.avif", "/a/nyx-2x-Q.avif"]);
   });
 });
 

@@ -8,6 +8,7 @@ concessão CC BY 4.0, `docs/art/LICENSE-ART.md`).
 
 import json
 import re
+import sys
 from pathlib import Path
 from typing import Any
 
@@ -22,6 +23,11 @@ PNG_MAX, GIF_MAX, DIR_MAX = 350 * 1024, 3 * 1024 * 1024, 6 * 1024 * 1024
 PNG_MAX_WIDTH, PNG_MAX_HEIGHT, GIF_WIDTH = 1280, 1600, 960
 RESTRICTED = {"jade", "fagulha"}  # D3 (a)
 PNG_SIGNATURE = b"\x89PNG\r\n\x1a\n"
+
+
+def vitrine_files() -> list[Path]:
+    """Os arquivos da pasta, sem os ocultos que o sistema cria (`.DS_Store` do Finder)."""
+    return [p for p in VITRINE.iterdir() if not p.name.startswith(".")]
 
 
 def manifest() -> dict[str, Any]:
@@ -40,7 +46,7 @@ def image_names() -> list[str]:
 
 
 def test_manifesto_e_pasta_batem() -> None:
-    files = {p.name for p in VITRINE.iterdir()} - {"vitrine.json"}
+    files = {p.name for p in vitrine_files()} - {"vitrine.json"}
     assert files == {e["arquivo"] for e in manifest()["imagens"]}
 
 
@@ -50,12 +56,23 @@ def test_manifesto_declara_a_pilha_local() -> None:
     assert re.fullmatch(r"[0-9a-f]{40}", data["commit"])
 
 
+def test_arquivo_oculto_fica_fora_da_conferencia(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    (tmp_path / ".DS_Store").write_bytes(b"\x00")
+    (tmp_path / "oficina.png").write_bytes(b"")
+    monkeypatch.setattr(sys.modules[__name__], "VITRINE", tmp_path)
+    assert [p.name for p in vitrine_files()] == ["oficina.png"]
+
+
 @pytest.mark.parametrize("name", image_names())
 def test_imagem_dentro_do_orcamento(name: str) -> None:
     data = (VITRINE / name).read_bytes()
     if name.endswith(".png"):
         assert len(data) <= PNG_MAX
         assert data[:8] == PNG_SIGNATURE
+        # O primeiro chunk é o IHDR (13 bytes): só nele os bytes de 16 a 24 são largura e altura.
+        assert data[8:16] == b"\x00\x00\x00\rIHDR"
         width = int.from_bytes(data[16:20], "big")
         height = int.from_bytes(data[20:24], "big")
         assert width <= PNG_MAX_WIDTH
@@ -69,7 +86,7 @@ def test_imagem_dentro_do_orcamento(name: str) -> None:
 
 
 def test_vitrine_inteira_dentro_do_orcamento() -> None:
-    assert sum(p.stat().st_size for p in VITRINE.iterdir()) <= DIR_MAX
+    assert sum(p.stat().st_size for p in vitrine_files()) <= DIR_MAX
 
 
 def test_nenhuma_imagem_mostra_goblin_restrita() -> None:

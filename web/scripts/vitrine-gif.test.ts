@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { gifArgs } from "./vitrine-gif";
+import { gifArgs } from "./vitrine-gif.ts";
 
 describe("gifArgs", () => {
   it("gifArgs monta um quadro a cada 1,5 s, 960 px e laço infinito", () => {

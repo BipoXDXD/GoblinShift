@@ -90,6 +90,18 @@ export function goblinsIn(urls: readonly string[], known: readonly string[]): st
     .sort();
 }
 
+const CSS_URL = /url\(\s*(["']?)([^"')]+)\1\s*\)/g;
+
+/**
+ * As URLs de valores computados de CSS (`background-image`, `content`, de elementos e de `::before`
+ * e `::after`): cada `url()`, inclusive dentro de `image-set()`.
+ */
+export function cssImageUrls(values: readonly string[]): string[] {
+  return values.flatMap((value) =>
+    [...value.matchAll(CSS_URL)].flatMap((match) => (match[2] === undefined ? [] : [match[2]])),
+  );
+}
+
 /** Manifesto sem horário e ordenado por arquivo, para sair igual entre rodadas. */
 export function renderManifest(entries: readonly VitrineEntry[], commit: string): string {
   if (!COMMIT_SHA.test(commit)) {
