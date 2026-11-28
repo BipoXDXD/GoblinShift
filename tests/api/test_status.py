@@ -68,9 +68,7 @@ def _numbers(value: Any) -> list[int | float]:
     return []
 
 
-def test_responde_sem_sessao_e_sem_cookie(
-    status_client: TestClient, read_calls: list[object]
-) -> None:
+def test_responde_sem_sessao_com_os_niveis_lidos(status_client: TestClient) -> None:
     response = status_client.get(STATUS)
 
     assert response.status_code == 200, response.text
@@ -80,7 +78,17 @@ def test_responde_sem_sessao_e_sem_cookie(
         "queue": "busy",
         "checked_at": "2026-11-28T12:30:00Z",
     }
-    assert "set-cookie" not in response.headers
+
+
+def test_nao_cria_cookie(status_client: TestClient) -> None:
+    assert "set-cookie" not in status_client.get(STATUS).headers
+
+
+def test_le_o_estado_uma_vez_por_pedido(
+    status_client: TestClient, read_calls: list[object]
+) -> None:
+    status_client.get(STATUS)
+
     assert len(read_calls) == 1
 
 

@@ -1,8 +1,13 @@
 """A declaração de acessibilidade acompanha o CI (Tarefa 16 do plano de paridade).
 
 `docs/acessibilidade.md` cita as specs que medem cada critério. Os testes amarram o texto ao
-código: spec renomeada ou removida, spec de acessibilidade nova sem citação ou tag do axe trocada
-reprovam a suíte, em vez de deixar a declaração prometer o que o CI não mede.
+código: spec citada renomeada ou removida, spec da lista `A11Y_SPECS` sem citação, axe que o
+`contrast.spec.ts` deixou de chamar ou tag do axe trocada reprovam a suíte, em vez de deixar a
+declaração prometer o que o CI não mede.
+
+A lista `A11Y_SPECS` é mantida à mão: o nome do arquivo não diz se a spec mede acessibilidade
+(várias outras citam a WCAG de passagem). Spec de acessibilidade nova só entra na declaração se
+alguém a puser na lista.
 """
 
 import re
@@ -13,7 +18,8 @@ STATEMENT = ROOT / "docs" / "acessibilidade.md"
 # As tags do axe ficam no apoio que o contrast.spec.ts usa (`expectNoWcagViolations`).
 AXE_SUPPORT = ROOT / "web" / "e2e" / "support" / "axe.ts"
 SPEC_PATH = re.compile(r"web/e2e/specs/[\w-]+\.spec\.ts")
-# As specs do CI que medem acessibilidade; nova spec do tipo entra aqui e na declaração.
+CONTRAST_SPEC = ROOT / "web" / "e2e" / "specs" / "contrast.spec.ts"
+# As specs do CI que medem acessibilidade, mantidas à mão (ver a docstring do módulo).
 A11Y_SPECS = {"contrast", "focus", "reflow", "text-spacing", "motion", "controls", "layout-shift"}
 
 
@@ -39,6 +45,17 @@ def test_toda_spec_de_acessibilidade_do_ci_esta_citada() -> None:
     expected = {f"web/e2e/specs/{name}.spec.ts" for name in A11Y_SPECS}
 
     assert expected - cited_specs(statement()) == set()
+
+
+def test_contrast_spec_mede_com_o_axe_das_tags_declaradas() -> None:
+    """A declaração diz que o `contrast.spec.ts` roda o axe com as tags: ele precisa chamar o
+    apoio, e o apoio precisa passar as tags ao axe."""
+    spec = CONTRAST_SPEC.read_text(encoding="utf-8")
+    support = AXE_SUPPORT.read_text(encoding="utf-8")
+
+    assert 'import { expectNoWcagViolations } from "../support/axe";' in spec
+    assert re.search(r"await expectNoWcagViolations\(page,", spec)
+    assert ".withTags(WCAG_22_AA)" in support
 
 
 def test_tags_do_axe_iguais_as_do_ci() -> None:
