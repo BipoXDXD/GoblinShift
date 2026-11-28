@@ -15,6 +15,7 @@ import { z } from "zod";
 import { useApiClient } from "../api/ApiClientContext";
 import { NotFoundPage } from "../app/NotFoundPage";
 import { workbenchPath } from "../app/paths";
+import { useNow } from "../app/useNow";
 import { GoblinIllustration, type GoblinState } from "../art/GoblinIllustration";
 import { FocusHeading } from "../components/a11y/FocusHeading";
 import { LiveRegion } from "../components/a11y/LiveRegion";
@@ -28,7 +29,6 @@ import { buttonClassName } from "../components/ui/Button";
 import { Card } from "../components/ui/Card";
 import { StatusBadge } from "../components/ui/StatusBadge";
 import { Steps } from "../components/ui/Steps";
-import { formatDateTime } from "../format";
 import { findRecipe } from "../recipes/registry";
 import { TEXT } from "../text";
 import type { Run, RunStatus } from "./api";
@@ -51,6 +51,8 @@ import { RunItems } from "./RunItems";
 import { useRunPolling } from "./useRunPolling";
 
 const T = TEXT.run;
+/** De quanto em quanto tempo o prazo dos resultados é recontado com a tela aberta. */
+const RETENTION_TICK_MS = 60_000;
 const runIdSchema = z.uuid();
 
 const SUCCEEDED: ReadonlySet<RunStatus> = new Set(["succeeded", "succeeded_with_warnings"]);
@@ -67,20 +69,29 @@ const GOBLIN_OF_STATUS: Readonly<Record<RunStatus, GoblinState | null>> = {
   canceled: null,
 };
 
-/** Rota de uma execução: o id da URL só vira consulta se for um UUID. */
-export function RunPage(): ReactElement {
+/**
+ * Rota de uma execução: o id da URL só vira consulta se for um UUID. `now` é o relógio do
+ * servidor (serverClock.ts), que dá o prazo dos resultados.
+ */
+export function RunPage({ now }: { readonly now: () => number }): ReactElement {
   const parsed = runIdSchema.safeParse(useParams()["runId"]);
   if (!parsed.success) {
     return <NotFoundPage />;
   }
-  return <RunView key={parsed.data} runId={parsed.data} />;
+  return <RunView key={parsed.data} runId={parsed.data} now={now} />;
 }
 
 /**
  * Execução e resultado na mesma rota (2.2): estado por polling que respeita o Retry-After,
  * mudanças anunciadas em `aria-live` e, ao concluir, os downloads.
  */
-function RunView({ runId }: { readonly runId: string }): ReactElement {
+function RunView({
+  runId,
+  now,
+}: {
+  readonly runId: string;
+  readonly now: () => number;
+}): ReactElement {
   const { query, announcement, acknowledge, failure } = useRunPolling(runId);
   const [downloadFailure, dismissDownloadFailure] = useDownloadFailure();
   const run = query.data;
@@ -131,6 +142,7 @@ function RunView({ runId }: { readonly runId: string }): ReactElement {
       {run !== undefined && SUCCEEDED.has(run.status) && (
         <RunResults
           runId={run.id}
+          now={now}
           downloadFailure={downloadFailure}
           onDownload={dismissDownloadFailure}
         />
@@ -276,12 +288,13 @@ function flavorOf(status: RunStatus): string | null {
 
 interface RunResultsProps {
   readonly runId: string;
+  readonly now: () => number;
   /** Falha do download que voltou à tela, mostrada acima da lista; some ao baixar de novo. */
   readonly downloadFailure: DownloadFailureCode | null;
   readonly onDownload: () => void;
 }
 
-function RunResults({ runId, downloadFailure, onDownload }: RunResultsProps): ReactElement {
+function RunResults({ runId, now, downloadFailure, onDownload }: RunResultsProps): ReactElement {
   const client = useApiClient();
   const headingId = useId();
   const heading = useRef<HTMLHeadingElement>(null);
@@ -290,9 +303,11 @@ function RunResults({ runId, downloadFailure, onDownload }: RunResultsProps): Re
     queryFn: ({ signal }) => getRunResults(client, runId, signal),
     retry: false,
   });
+  // Anda com a tela aberta (o selo passa a aviso nas últimas horas) e se acerta a cada leitura.
+  const nowMs = useNow(now, RETENTION_TICK_MS, results.dataUpdatedAt);
   return (
     <Card as="section" aria-labelledby={headingId}>
-      {/* tabIndex -1: recebe o foco quando Excluir resultados some com ele. */}
+      {/* tabIndex -1: recebe o foco quando Apagar agora some com ele. */}
       <h2
         id={headingId}
         ref={heading}
@@ -322,6 +337,7 @@ function RunResults({ runId, downloadFailure, onDownload }: RunResultsProps): Re
           <ResultsAvailability
             runId={runId}
             results={results.data}
+            nowMs={nowMs}
             onDeleted={() => heading.current?.focus()}
           >
             <ResultFiles results={results.data} onDownload={onDownload} />
@@ -419,11 +435,6 @@ function ResultFiles({
           </ul>
         </div>
       )}
-      {results.expires_at !== null && !hasExpired(results) && (
-        <p className="text-sm text-fg-muted">
-          {T.results.availableUntil(formatDateTime(results.expires_at))}
-        </p>
-      )}
     </div>
   );
 }
@@ -440,11 +451,6 @@ function previewsBySource(
     }
   }
   return previews;
-}
-
-/** Com uma referência já expirada, o prazo passou: "Disponíveis até" contradiria o motivo. */
-function hasExpired(results: RunResultsData): boolean {
-  return results.artifacts.some((artifact) => artifact.availability === "expired");
 }
 
 interface UnavailableFileProps {

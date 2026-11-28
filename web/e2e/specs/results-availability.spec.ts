@@ -17,6 +17,6 @@ test("resultados expirados não oferecem download e dizem quando venceram @fake-
   await expect(results.getByRole("heading", { name: "Resultados expirados" })).toBeVisible();
   await expect(results).toContainText("Os resultados expiraram em");
   await expect(results.getByRole("link", { name: /^Baixar/ })).toHaveCount(0);
-  await expect(results.getByRole("button", { name: "Excluir resultados" })).toHaveCount(0);
+  await expect(results.getByRole("button", { name: "Apagar agora" })).toHaveCount(0);
   expect((await new AxeBuilder({ page }).analyze()).violations).toEqual([]);
 });

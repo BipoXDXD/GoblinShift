@@ -129,7 +129,7 @@ export function createRoutes({ uploadServices, now, notice }: AppServices): Rout
           handle: titled(TEXT.run.title),
           lazy: async () => {
             const { RunPage } = await import("../runs/RunPage");
-            return { Component: RunPage };
+            return { element: <RunPage now={now} /> };
           },
         },
         { path: "*", element: <NotFoundPage />, handle: titled(TEXT.notFound.title) },

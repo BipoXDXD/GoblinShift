@@ -46,6 +46,24 @@ function runScreen(name: string, overrides: RunOverrides, visibleText: string): 
 }
 
 /**
+ * Execução concluída com o selo do prazo à vista: `soon` põe o prazo nas 6 h finais (tom de
+ * aviso); sem ele, o tom neutro. As duas entram na matriz para o contraste medir os dois tons.
+ */
+function retentionScreen(name: string, soon: boolean): Screen {
+  return {
+    name,
+    open: async (page: Page, api: FakeApi): Promise<void> => {
+      const runId = api.seedRun({ status: "succeeded" });
+      if (soon) {
+        api.expireResultsSoon(runId);
+      }
+      await new ExecucaoPage(page).open(runId);
+      await expect(page.getByText(/^Disponível até .* · apagado automaticamente em/)).toBeVisible();
+    },
+  };
+}
+
+/**
  * Execuções paradas para as telas de lista: uma de cada estado que a lista pinta diferente, com
  * `extra` concluídas a mais, um minuto mais antigas cada, para passar de uma página. Devolve
  * quantas semeou.
@@ -277,6 +295,8 @@ export const SCREENS: readonly Screen[] = [
     },
     "Arquivo 2",
   ),
+  retentionScreen("Execução concluída com o prazo dos resultados", false),
+  retentionScreen("Execução concluída com os resultados perto de expirar", true),
   runScreen(
     "Execução que falhou",
     {

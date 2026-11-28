@@ -6,6 +6,8 @@ import { workbenchFromRunPath } from "../app/paths";
 import { formatDateTime } from "../format";
 import { findRecipe } from "../recipes/registry";
 import type { Run, RunStatus } from "../runs/api";
+import { RetentionBadge } from "../runs/RetentionBadge";
+import { remainingLabel } from "../runs/retention";
 import { TEXT } from "../text";
 
 const T = TEXT.history;
@@ -13,7 +15,7 @@ const T = TEXT.history;
 const WITH_RESULTS: ReadonlySet<RunStatus> = new Set(["succeeded", "succeeded_with_warnings"]);
 
 /**
- * O que o Histórico acrescenta a cada linha (2.2): a disponibilidade dos resultados e "Reutilizar
+ * O que o Histórico acrescenta a cada linha (2.2): o prazo dos resultados e "Reutilizar
  * parâmetros", que abre a Bancada com os parâmetros da execução. O link fica acima do link da
  * linha inteira (`relative`), que cobre o cartão.
  */
@@ -25,14 +27,14 @@ export function RunHistoryExtras({
   readonly nowMs: number;
 }): ReactElement | null {
   const recipe = findRecipe(run.recipe_id);
-  const availability = availabilityText(run, nowMs);
+  const availability = availabilityNote(run, nowMs);
   const reusable = recipe !== null && run.parameters !== null;
   if (availability === null && !reusable) {
     return null;
   }
   return (
     <div className="flex w-full flex-wrap items-center justify-between gap-3">
-      {availability !== null && <p className="text-sm text-fg-muted">{availability}</p>}
+      {availability}
       {reusable && (
         <Link
           to={workbenchFromRunPath(recipe.id, run.id)}
@@ -47,14 +49,17 @@ export function RunHistoryExtras({
   );
 }
 
-function availabilityText(run: Run, nowMs: number): string | null {
+/** O selo do prazo (D5, sem o Apagar agora) enquanto há resultados; senão, o motivo em texto. */
+function availabilityNote(run: Run, nowMs: number): ReactElement | null {
   if (!WITH_RESULTS.has(run.status)) {
     return null;
   }
   if (run.results_expire_at === null) {
-    return T.availability.unavailable;
+    return <p className="text-sm text-fg-muted">{T.availability.unavailable}</p>;
   }
-  return Date.parse(run.results_expire_at) > nowMs
-    ? T.availability.until(formatDateTime(run.results_expire_at))
-    : T.availability.expired;
+  return remainingLabel(run.results_expire_at, nowMs) === null ? (
+    <p className="text-sm text-fg-muted">{T.availability.expired}</p>
+  ) : (
+    <RetentionBadge expiresAt={run.results_expire_at} nowMs={nowMs} />
+  );
 }

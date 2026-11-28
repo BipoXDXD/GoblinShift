@@ -531,7 +531,6 @@ export const TEXT = {
         package: "pacote com todos os arquivos",
         preview: "pré-visualização",
       },
-      availableUntil: (date: string) => `Disponíveis até ${date}.`,
       empty: "Nenhum arquivo para baixar",
       emptyHint: "Esta execução não publicou arquivos, ou eles já expiraram.",
       preview: {
@@ -574,7 +573,7 @@ export const TEXT = {
       fileDeleted: "excluído",
       fileMissing: "perdido",
       fileUnavailable: "indisponível",
-      remove: "Excluir resultados",
+      remove: "Apagar agora",
       removeTitle: "Excluir os resultados desta execução?",
       removeBody:
         "Os arquivos gerados deixam de poder ser baixados na hora. Os arquivos que você enviou não são apagados. Não dá para desfazer.",
@@ -755,11 +754,16 @@ export const TEXT = {
       noOutput: "Peça ao menos uma saída: extraia o áudio ou escolha uma ou três miniaturas.",
     },
   },
+  /** O prazo dos resultados (D5): até quando ficam e quanto falta para serem apagados. */
+  retention: {
+    until: (date: string) => `Disponível até ${date}`,
+    inHours: (hours: number) => `apagado automaticamente em ${String(hours)} h`,
+    inMinutes: (minutes: number) => `apagado automaticamente em ${String(minutes)} min`,
+  },
   history: {
     reuse: "Reutilizar parâmetros",
     reuseOf: (recipe: string, date: string) => `da execução de ${recipe} em ${date}`,
     availability: {
-      until: (date: string) => `Resultados até ${date}`,
       expired: "Resultados expirados",
       unavailable: "Resultados indisponíveis",
     },
