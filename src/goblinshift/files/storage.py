@@ -450,7 +450,13 @@ def _write_exclusive(
     size = 0
     flags = os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW
     fd = os.open(name, flags, _FILE_MODE, dir_fd=directory_fd)
-    with os.fdopen(fd, "wb") as out:
+    try:
+        out = os.fdopen(fd, "wb")
+    except BaseException:
+        # Sem o objeto de arquivo, ninguém fecharia o descritor: ele vazaria até o fim do processo.
+        os.close(fd)
+        raise
+    with out:
         for chunk in chunks:
             size += len(chunk)
             if size > max_bytes:

@@ -14,6 +14,7 @@ from typing import Self
 
 import pytest
 
+from goblinshift.files import storage as storage_module
 from goblinshift.files.storage import (
     ContentTooLargeError,
     FileStorage,
@@ -1006,3 +1007,35 @@ def test_walk_objects_e_preguicoso(storage: FileStorage) -> None:
     storage.create_exclusive("uploads/a", [b"abc"], max_bytes=100)
 
     assert isinstance(storage.walk_objects(), Iterator)
+
+
+def test_write_exclusive_fecha_o_fd_se_o_fdopen_falha(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    opened: list[int] = []
+    real_open = os.open
+
+    def recording_open(
+        path: str | os.PathLike[str], flags: int, mode: int = 0o777, *, dir_fd: int | None = None
+    ) -> int:
+        fd = real_open(path, flags, mode, dir_fd=dir_fd)
+        opened.append(fd)
+        return fd
+
+    def failing_fdopen(*_args: object, **_kwargs: object) -> object:
+        raise OSError(errno.EMFILE, "sem descritores para o objeto de arquivo")
+
+    directory_fd = os.open(tmp_path, os.O_RDONLY | os.O_DIRECTORY)
+    try:
+        monkeypatch.setattr(os, "open", recording_open)
+        monkeypatch.setattr(os, "fdopen", failing_fdopen)
+        with pytest.raises(OSError, match="sem descritores"):
+            storage_module._write_exclusive("a", directory_fd, [b"1"], 10)
+    finally:
+        monkeypatch.undo()
+        os.close(directory_fd)
+
+    assert len(opened) == 1
+    with pytest.raises(OSError) as closed:
+        os.fstat(opened[0])
+    assert closed.value.errno == errno.EBADF

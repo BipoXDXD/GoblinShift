@@ -7,13 +7,14 @@ tmp_path e o `flock` é o de verdade.
 """
 
 import configparser
+import errno
 import os
 import re
 import shutil
 import signal
 import subprocess
 import time
-from collections.abc import Iterator
+from collections.abc import Callable, Iterator
 from contextlib import contextmanager
 from pathlib import Path
 
@@ -45,6 +46,10 @@ GRACE_MARGIN_MIN = 30
 # /proc/uptime: abaixo de 30 min o script espera o worker religar; acima, segue como sempre.
 JUST_BOOTED_S = 60
 LONG_AFTER_BOOT_S = 99999
+# Prazo de quem espera um estado que já deveria ter chegado (não é margem para a corrida).
+WAIT_DEADLINE_S = 10
+# Campo `MAJ:MIN:INODE` de uma linha de /proc/locks (maior e menor em hexadecimal).
+PROC_LOCKS_FILE = re.compile(r"^([0-9a-f]+):([0-9a-f]+):(\d+)$")
 
 FAKE_DOCKER = """#!/bin/sh
 # O marcador do primeiro `start` lento nasce antes do registro: o teste sinaliza assim que vê a
@@ -66,7 +71,15 @@ case "$1" in
     fi
     exit "${FAKE_PS_RC:-0}"
     ;;
-  stop) sleep "${FAKE_STOP_SLEEP_S:-0}"; exit "${FAKE_STOP_RC:-0}" ;;
+  stop)
+    # Com FAKE_STOP_FIFO, o primeiro `stop` só sai quando o teste escrever no FIFO; o repetido
+    # pelo trap não espera, porque ninguém escreve de novo.
+    if [ -n "$FAKE_STOP_FIFO" ] && [ ! -e "$FAKE_CALLS.stop" ]; then
+      : >"$FAKE_CALLS.stop"
+      read -r _ <"$FAKE_STOP_FIFO"
+    fi
+    exit "${FAKE_STOP_RC:-0}"
+    ;;
   start)
     if [ -n "$slow_start" ]; then
       sleep "$FAKE_START_SLEEP_S"
@@ -179,11 +192,19 @@ def scheduled(
     return result, calls.read_text().splitlines() if calls.exists() else []
 
 
-def interrupted(fakes: Path, *, reached: str, group: bool, **env: str) -> tuple[int, list[str]]:
+def interrupted(
+    fakes: Path,
+    *,
+    reached: str,
+    group: bool,
+    after_signal: Callable[[], None] | None = None,
+    **env: str,
+) -> tuple[int, list[str]]:
     """Roda o script e manda SIGTERM assim que a chamada `reached` aparecer no registro.
 
     O systemd sinaliza o cgroup inteiro (`group`); o sinal só no bash cobre o instante entre dois
-    comandos. O novo grupo de processos deixa o sinal longe do pytest.
+    comandos. O novo grupo de processos deixa o sinal longe do pytest. `after_signal` roda depois
+    do sinal e antes de esperar o script, para soltar um fake que segura o comando em curso.
     """
     worker = env.pop("FAKE_WORKER", WORKER)
     with (fakes / "stderr").open("w") as stderr:
@@ -203,6 +224,8 @@ def interrupted(fakes: Path, *, reached: str, group: bool, **env: str) -> tuple[
         os.killpg(process.pid, signal.SIGTERM)
     else:
         process.send_signal(signal.SIGTERM)
+    if after_signal is not None:
+        after_signal()
     code = process.wait(timeout=SCRIPT_TIMEOUT_S)
     return code, calls.read_text().splitlines()
 
@@ -286,8 +309,19 @@ def test_sigterm_na_aceitacao_religa_o_worker_e_pinga_fail(fakes: Path) -> None:
     ]
 
 
-def test_sigterm_entre_comandos_nao_comeca_a_aceitacao(fakes: Path) -> None:
-    code, calls = interrupted(fakes, reached="docker stop", group=False, FAKE_STOP_SLEEP_S="1")
+def test_sigterm_entre_comandos_nao_comeca_a_aceitacao(fakes: Path, tmp_path: Path) -> None:
+    # O SIGTERM chega ao bash com o `stop` preso no FIFO; o bash só roda o trap quando o `stop`
+    # sai, e o FIFO só é escrito depois do sinal. A ordem não depende de tempo.
+    fifo = tmp_path / "stop.fifo"
+    os.mkfifo(fifo)
+
+    code, calls = interrupted(
+        fakes,
+        reached="docker stop",
+        group=False,
+        FAKE_STOP_FIFO=str(fifo),
+        after_signal=lambda: write_to_fifo(fifo),
+    )
 
     assert code == SIGTERM_EXIT
     assert not [call for call in calls if call.startswith("python3")]
@@ -424,16 +458,59 @@ def test_trava_ausente_nao_para_o_worker(fakes: Path) -> None:
     assert calls == [f"curl {CHECK_URL}/fail"]
 
 
+def flock_waiter_on(path: Path) -> bool:
+    """Há alguém bloqueado à espera de um `flock` em `path` (linha `->` de /proc/locks)?"""
+    info = path.stat()
+    wanted = (os.major(info.st_dev), os.minor(info.st_dev), info.st_ino)
+    for line in Path("/proc/locks").read_text().splitlines():
+        fields = line.split()
+        if "->" not in fields:
+            continue
+        for field in fields:
+            match = PROC_LOCKS_FILE.match(field)
+            if match and _lock_file_id(match) == wanted:
+                return True
+    return False
+
+
+def _lock_file_id(match: re.Match[str]) -> tuple[int, int, int]:
+    major, minor, inode = match.groups()
+    return int(major, 16), int(minor, 16), int(inode)
+
+
+def write_to_fifo(fifo: Path) -> None:
+    """Escreve uma linha no FIFO assim que houver leitor; sem leitor no prazo, falha sem travar."""
+
+    def written() -> bool:
+        try:
+            fd = os.open(fifo, os.O_WRONLY | os.O_NONBLOCK)
+        except OSError as error:
+            if error.errno != errno.ENXIO:  # ENXIO: ninguém abriu o FIFO para ler ainda
+                raise
+            return False
+        try:
+            os.write(fd, b"\n")
+        finally:
+            os.close(fd)
+        return True
+
+    wait_until(written, "o leitor do FIFO aparecer")
+
+
+def wait_until(condition: Callable[[], bool], what: str) -> None:
+    deadline = time.monotonic() + WAIT_DEADLINE_S
+    while not condition():
+        assert time.monotonic() < deadline, f"{what} não aconteceu"
+        time.sleep(0.01)
+
+
+@pytest.mark.skipif(not Path("/proc/locks").exists(), reason="/proc/locks só existe no Linux")
 def test_trava_liberada_dentro_do_prazo_segue_com_o_teste(fakes: Path) -> None:
-    # O `flock` do script passa por um registrador: a trava só é solta depois que o script já
-    # pediu a trava com prazo, sem depender de sleep.
-    real_flock = shutil.which("flock")
-    assert real_flock is not None
-    shim = fakes / "bin" / "flock"
-    shim.write_text(f'#!/bin/sh\necho "flock $*" >>"$FAKE_CALLS"\nexec {real_flock} "$@"\n')
-    shim.chmod(0o755)
+    # A trava só é solta depois que o kernel mostra o script bloqueado nela (/proc/locks): o
+    # `flock -w` já está esperando, sem depender de sleep nem de um registrador antes do `exec`.
+    lock = fakes / "release.lock"
     calls_file = fakes / "calls"
-    with release_lock_held(fakes / "release.lock"):
+    with release_lock_held(lock):
         process = subprocess.Popen(  # noqa: S603 - script do repositório
             ["bash", str(SCRIPT)],  # noqa: S607 - o bash do PATH, como na unit
             env={**script_env(fakes, CHECK_URL, WORKER), "ACCEPTANCE_LOCK_WAIT_S": "20"},
@@ -441,16 +518,13 @@ def test_trava_liberada_dentro_do_prazo_segue_com_o_teste(fakes: Path) -> None:
             stderr=subprocess.PIPE,
             text=True,
         )
-        deadline = time.monotonic() + SCRIPT_TIMEOUT_S
-        while not (calls_file.exists() and "flock -w 20 9" in calls_file.read_text()):
-            assert time.monotonic() < deadline, "o script não pediu a trava"
-            time.sleep(0.01)
-        assert f"curl {CHECK_URL}/start" not in calls_file.read_text()
+        wait_until(lambda: flock_waiter_on(lock), "o script esperar a trava")
+        assert not calls_file.exists()
     _, stderr = process.communicate(timeout=SCRIPT_TIMEOUT_S)
     calls = calls_file.read_text().splitlines()
 
     assert process.returncode == 0, stderr
-    assert calls[:2] == ["flock -w 20 9", f"curl {CHECK_URL}/start"]
+    assert calls[0] == f"curl {CHECK_URL}/start"
     assert "python3 -E -s -B -m acceptance.run (em deploy)" in calls
 
 
