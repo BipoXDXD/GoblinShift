@@ -10,6 +10,7 @@ import { fakeApi, jsonResponse, problemResponse, screenRequests } from "../test/
 import { expectHeadingFocused, recordDescriptionOnFocus } from "../test/focus";
 import { escapeIsBlocked, forceClose, heldResponse } from "../test/dialog";
 import { currentUrl, renderRoutes } from "../test/renderRoutes";
+import { TEXT } from "../text";
 import { API_KEYS_QUERY_KEY } from "./api";
 
 await preloadRoutes(
@@ -785,11 +786,159 @@ describe("Acesso: chave nova", () => {
     await user.click(within(form).getByRole("button", { name: "Criar chave" }));
 
     const prompt = await section("Entre de novo para confirmar");
-    expect(within(prompt).getByRole("link", { name: "Entrar com GitHub" })).toHaveAttribute(
-      "href",
-      "/auth/login/github?return_to=%2Facesso&reauth=1",
-    );
+    // A URL com as escolhas chega numa transição do roteador, logo depois do convite.
+    await waitFor(() => {
+      expect(within(prompt).getByRole("link", { name: "Entrar com GitHub" })).toHaveAttribute(
+        "href",
+        "/auth/login/github?return_to=%2Facesso%3Fnova_chave%3D1%26escopo%3Dfiles%253Aread%26dias%3D30&reauth=1",
+      );
+    });
     expect(within(prompt).queryByRole("link", { name: "Entrar com Google" })).toBeNull();
+  });
+
+  describe("volta do login com a chave nova", () => {
+    const RESTORE_PATH = "/acesso?nova_chave=1&escopo=runs%3Aread&dias=7";
+
+    it("o REAUTH ao criar leva escopos e dias no link de entrar", async () => {
+      const { user } = setup({
+        "GET /api/v1/me": () => jsonResponse(meBody({ provider: "github" })),
+        "POST /api/v1/api-keys": () => problemResponse(401, "REAUTH_REQUIRED"),
+      });
+      const form = await openForm(user);
+      await user.click(within(form).getByLabelText("Ver execuções (runs:read)"));
+      await user.click(within(form).getByLabelText("Enviar arquivos (files:write)"));
+      await user.clear(within(form).getByLabelText("Validade, em dias"));
+      await user.type(within(form).getByLabelText("Validade, em dias"), "7");
+      await user.click(within(form).getByRole("button", { name: "Criar chave" }));
+
+      const prompt = await section("Entre de novo para confirmar");
+      await waitFor(() => {
+        expect(within(prompt).getByRole("link", { name: "Entrar com GitHub" })).toHaveAttribute(
+          "href",
+          "/auth/login/github?return_to=%2Facesso%3Fnova_chave%3D1%26escopo%3Dfiles%253Awrite%26escopo%3Druns%253Aread%26dias%3D7&reauth=1",
+        );
+      });
+    });
+
+    it("criar depois do REAUTH, sem sair da tela, tira as escolhas da URL", async () => {
+      let reauth = true;
+      const { user, router } = setup({
+        "POST /api/v1/api-keys": () =>
+          reauth ? problemResponse(401, "REAUTH_REQUIRED") : jsonResponse(created, 201),
+      });
+      const form = await openForm(user);
+      await user.click(within(form).getByLabelText("Ver execuções (runs:read)"));
+      await user.click(within(form).getByRole("button", { name: "Criar chave" }));
+      await section("Entre de novo para confirmar");
+      await waitFor(() => {
+        expect(currentUrl(router)).toContain("nova_chave=1");
+      });
+      reauth = false;
+
+      await user.click(within(form).getByRole("button", { name: "Criar chave" }));
+
+      await section("Chave criada: gsk_nova");
+      await waitFor(() => {
+        expect(currentUrl(router)).toBe("/acesso");
+      });
+    });
+
+    it("cancelar depois do REAUTH tira as escolhas da URL", async () => {
+      const { user, router } = setup({
+        "POST /api/v1/api-keys": () => problemResponse(401, "REAUTH_REQUIRED"),
+      });
+      const form = await openForm(user);
+      await user.click(within(form).getByLabelText("Ver execuções (runs:read)"));
+      await user.click(within(form).getByRole("button", { name: "Criar chave" }));
+      await section("Entre de novo para confirmar");
+      await waitFor(() => {
+        expect(currentUrl(router)).toContain("nova_chave=1");
+      });
+
+      await user.click(within(form).getByRole("button", { name: "Cancelar" }));
+
+      await waitFor(() => {
+        expect(currentUrl(router)).toBe("/acesso");
+      });
+    });
+
+    it("outro erro ao criar não grava as escolhas na URL", async () => {
+      const { user, router } = setup({
+        "POST /api/v1/api-keys": () => problemResponse(409, "STATE_CONFLICT"),
+      });
+      const form = await openForm(user);
+      await user.click(within(form).getByLabelText("Ver execuções (runs:read)"));
+      await user.click(within(form).getByRole("button", { name: "Criar chave" }));
+
+      await within(form).findByRole("alert");
+      expect(currentUrl(router)).toBe("/acesso");
+    });
+
+    it("na volta do login o formulário abre preenchido e a URL fica limpa", async () => {
+      const { router } = setup({}, RESTORE_PATH);
+
+      const form = await screen.findByRole("form", { name: "Nova chave de API" });
+      expect(within(form).getByLabelText("Ver execuções (runs:read)")).toBeChecked();
+      for (const checkbox of within(form).getAllByRole("checkbox")) {
+        if (checkbox !== within(form).getByLabelText("Ver execuções (runs:read)")) {
+          expect(checkbox).not.toBeChecked();
+        }
+      }
+      expect(within(form).getByLabelText("Validade, em dias")).toHaveValue("7");
+      expect(within(form).getByText(TEXT.account.keys.choicesKept)).toBeVisible();
+      expect(form).toHaveAccessibleDescription(TEXT.account.keys.choicesKept);
+      expect(screen.getByRole("heading", { name: "Nova chave de API" })).toHaveFocus();
+      await waitFor(() => {
+        expect(currentUrl(router)).toBe("/acesso");
+      });
+    });
+
+    it("criar depois da volta não põe o segredo na URL", async () => {
+      const { user, router } = setup(
+        { "POST /api/v1/api-keys": () => jsonResponse(created, 201) },
+        RESTORE_PATH,
+      );
+      const form = await screen.findByRole("form", { name: "Nova chave de API" });
+
+      await user.click(within(form).getByRole("button", { name: "Criar chave" }));
+
+      await section("Chave criada: gsk_nova");
+      await waitFor(() => {
+        expect(currentUrl(router)).not.toContain("nova_chave");
+      });
+      expect(currentUrl(router)).not.toContain(CANARY);
+    });
+
+    it("cancelar e abrir de novo traz o formulário vazio", async () => {
+      const { user } = setup({}, RESTORE_PATH);
+      const restored = await screen.findByRole("form", { name: "Nova chave de API" });
+      await user.click(within(restored).getByRole("button", { name: "Cancelar" }));
+
+      const form = await openForm(user);
+
+      expect(within(form).getByLabelText("Ver execuções (runs:read)")).not.toBeChecked();
+      expect(within(form).getByLabelText("Validade, em dias")).toHaveValue("30");
+      expect(within(form).queryByText(TEXT.account.keys.choicesKept)).toBeNull();
+      expect(form).not.toHaveAttribute("aria-describedby");
+    });
+
+    it("escopo desconhecido na URL não marca nada", async () => {
+      setup({}, "/acesso?nova_chave=1&escopo=admin%3Aall&dias=999");
+
+      const form = await screen.findByRole("form", { name: "Nova chave de API" });
+      for (const checkbox of within(form).getAllByRole("checkbox")) {
+        expect(checkbox).not.toBeChecked();
+      }
+      expect(within(form).getByLabelText("Validade, em dias")).toHaveValue("30");
+    });
+
+    it("não tem violações do axe com o formulário restaurado", async () => {
+      const { container } = setup({}, RESTORE_PATH);
+
+      await screen.findByRole("form", { name: "Nova chave de API" });
+
+      expect(await axeViolations(container)).toEqual([]);
+    });
   });
 
   it("no teto de chaves (409), cita os dois limites", async () => {

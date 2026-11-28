@@ -3,7 +3,8 @@
 import { AcessoPage } from "../pages/AcessoPage";
 import { fulfillProblem } from "../support/fakeAccount";
 import { holdRequest } from "../support/held";
-import { expect, test } from "../support/test";
+import { expectNoWcagViolations } from "../support/axe";
+import { expect, test, THEMES, useTheme } from "../support/test";
 
 test.use({ auth: "none" });
 
@@ -143,7 +144,7 @@ test("Esc com a revogação em voo não fecha; a falha aparece e o diálogo reab
   await expect(await acesso.askRevoke(publicId)).toBeVisible();
 });
 
-test("criar chave sem login recente leva ao provedor com reauth=1 e volta ao Acesso @fake-api", async ({
+test("criar chave sem login recente leva ao provedor com reauth=1 e volta ao Acesso com as escolhas @fake-api", async ({
   page,
   fakeApi,
 }) => {
@@ -159,10 +160,36 @@ test("criar chave sem login recente leva ao provedor com reauth=1 e volta ao Ace
 
   const loginUrl = new URL((await login).url());
   expect(loginUrl.searchParams.get("reauth")).toBe("1");
-  expect(loginUrl.searchParams.get("return_to")).toBe("/acesso");
+  expect(loginUrl.searchParams.get("return_to")).toBe(
+    "/acesso?nova_chave=1&escopo=files%3Aread&dias=30",
+  );
   await expect(page).toHaveURL(/\/acesso$/);
-  await expect(await acesso.createKey(["Ler arquivos (files:read)"])).toBeVisible();
+  const form = page.getByRole("form", { name: "Nova chave de API" });
+  await expect(form.getByLabel("Ler arquivos (files:read)")).toBeChecked();
+  await form.getByRole("button", { name: "Criar chave" }).click();
+  await expect(page.getByRole("region", { name: /^Chave criada: / })).toBeVisible();
+  await expect(page).toHaveURL(/\/acesso$/);
 });
+
+for (const theme of THEMES) {
+  test(`a chave nova volta do login com as escolhas e a URL limpa, tema ${theme} @fake-api`, async ({
+    page,
+    fakeApi,
+  }) => {
+    await useTheme(page, theme);
+    await fakeApi.signIn();
+
+    await page.goto("/acesso?nova_chave=1&escopo=runs%3Aread&dias=7");
+
+    const form = page.getByRole("form", { name: "Nova chave de API" });
+    await expect(form.getByLabel("Ver execuções (runs:read)")).toBeChecked();
+    await expect(form.getByLabel("Ler arquivos (files:read)")).not.toBeChecked();
+    await expect(form.getByLabel("Validade, em dias")).toHaveValue("7");
+    await expect(form.getByText("Suas escolhas foram mantidas.")).toBeVisible();
+    await expect(page).toHaveURL(/\/acesso$/);
+    await expectNoWcagViolations(page, `access-restored-${theme}`);
+  });
+}
 
 test("excluir a conta só age com a frase; depois, a exclusão pedida e nenhuma sessão @fake-api", async ({
   page,
