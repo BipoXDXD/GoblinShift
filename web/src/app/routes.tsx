@@ -117,6 +117,14 @@ export function createRoutes({ uploadServices, now, notice }: AppServices): Rout
           },
         },
         {
+          path: PATHS.status,
+          handle: titled(TEXT.status.title),
+          lazy: async () => {
+            const { StatusPage } = await import("../status/StatusPage");
+            return { Component: StatusPage };
+          },
+        },
+        {
           path: PATHS.run,
           handle: titled(TEXT.run.title),
           lazy: async () => {

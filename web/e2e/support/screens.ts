@@ -1,7 +1,7 @@
 // A matriz de telas × estados que as specs de contraste, foco, movimento e CSP percorrem. Cada
 // entrada abre a tela e espera o estado ficar visível; os estados de execução vêm semeados na API
 // falsa, porque a API real não para num estado sob encomenda.
-import type { Page } from "@playwright/test";
+import type { Page, Route } from "@playwright/test";
 
 import { CSV_FILES, PDF_FILES } from "../fixtures/files";
 import { AcessoPage } from "../pages/AcessoPage";
@@ -70,6 +70,17 @@ export function seedRunHistory(api: FakeApi, extra = 0): number {
 }
 
 const HISTORY_START = Date.parse("2026-10-14T11:59:00Z");
+
+/**
+ * O `GET /status` público responde pela própria página: a rota é sem credencial, e a API falsa do
+ * contexto só conhece as rotas autenticadas. A rota da página vence a do contexto.
+ */
+async function routeServiceStatus(
+  page: Page,
+  response: Parameters<Route["fulfill"]>[0],
+): Promise<void> {
+  await page.route("**/api/v1/status", (route) => route.fulfill(response));
+}
 
 function minutesBefore(startMs: number, minutes: number): string {
   return new Date(startMs - minutes * 60_000).toISOString();
@@ -370,6 +381,44 @@ export const SCREENS: readonly Screen[] = [
       await expect(
         page.getByRole("heading", { level: 1, name: "Aviso de Privacidade do GoblinShift" }),
       ).toBeVisible();
+    },
+  },
+  {
+    name: "Estado: tudo normal",
+    open: async (page: Page): Promise<void> => {
+      await routeServiceStatus(page, {
+        status: 200,
+        contentType: "application/json",
+        body: JSON.stringify({
+          api: "up",
+          processing: "normal",
+          queue: "free",
+          checked_at: "2026-10-14T12:00:00Z",
+        }),
+      });
+      await page.goto("/estado");
+      await expect(page.getByText("Livre", { exact: true })).toBeVisible();
+    },
+  },
+  {
+    name: "Estado: API fora",
+    open: async (page: Page): Promise<void> => {
+      await routeServiceStatus(page, {
+        status: 503,
+        contentType: "application/problem+json",
+        headers: { "Retry-After": "5" },
+        body: JSON.stringify({
+          type: "https://goblinshift.dev/problems/service-unavailable",
+          title: "Serviço indisponível",
+          status: 503,
+          detail: "Tente de novo em instantes.",
+          instance: "/api/v1/status",
+          code: "SERVICE_UNAVAILABLE",
+          request_id: "0b8f3c2e-5d4a-4f1b-9c7e-2a6d8e0f1b3c",
+        }),
+      });
+      await page.goto("/estado");
+      await expect(page.getByText("Fora do ar", { exact: true })).toBeVisible();
     },
   },
   {

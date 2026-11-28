@@ -1060,6 +1060,20 @@ export const TEXT = {
     fonts:
       "Bricolage Grotesque e Atkinson Hyperlegible, auto-hospedadas, sob a SIL Open Font License 1.1.",
   },
+  status: {
+    title: "Estado do serviço",
+    footerLink: "Estado do serviço",
+    rows: { api: "API", processing: "Processamento", queue: "Fila" },
+    api: { up: "No ar", down: "Fora do ar" },
+    processing: { normal: "Normal", slow: "Lento", stalled: "Parado" },
+    queue: { free: "Livre", busy: "Ocupada", full: "Cheia" },
+    /** Processamento e fila quando a API não respondeu: não há o que mostrar. */
+    unknown: "Sem leitura",
+    loading: "Lendo o estado do serviço…",
+    checkedAt: (time: string) => `Lido às ${time}`,
+    sameServer:
+      "Esta página roda no mesmo servidor do GoblinShift: se ele cair inteiro, ela cai junto.",
+  },
   legal: {
     termsTitle: "Termos de Uso",
     privacyTitle: "Aviso de Privacidade",

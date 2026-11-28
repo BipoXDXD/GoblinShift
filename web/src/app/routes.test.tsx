@@ -23,6 +23,7 @@ await preloadRoutes(
   "/termos",
   "/privacidade",
   "/creditos",
+  "/estado",
 );
 
 function renderAt(path: string) {
@@ -65,6 +66,7 @@ describe("título da aba e indexação", () => {
     ["/termos", "Termos de Uso · GoblinShift"],
     ["/privacidade", "Aviso de Privacidade · GoblinShift"],
     ["/creditos", "Créditos · GoblinShift"],
+    ["/estado", "Estado do serviço · GoblinShift"],
     ["/termos/aceitar", "Aceite dos termos · GoblinShift"],
     ["/conta-excluida", "Exclusão pedida · GoblinShift"],
     ["/execucoes/0b9c3c1e-7f62-4d1c-9a49-0d6f5d0b8f30", "Execução · GoblinShift"],

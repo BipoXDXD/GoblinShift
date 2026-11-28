@@ -20,24 +20,27 @@ const NAV_LINK =
 /** Valor exato com que o servidor volta de um login recusado (auth_login.py). */
 const LOGIN_FAILED = "failed";
 /**
- * Telas abertas a quem ainda não aceitou os termos vigentes: ler e aceitar os textos e, como na
- * API (ADR 029), reduzir o próprio acesso pelo Acesso (sair, revogar chaves, excluir a conta).
+ * Telas abertas a quem ainda não aceitou os termos vigentes: ler e aceitar os textos, ver o estado
+ * do serviço e, como na API (ADR 029), reduzir o próprio acesso pelo Acesso (sair, revogar chaves,
+ * excluir a conta).
  */
 const TERMS_EXEMPT_PATHS: ReadonlySet<string> = new Set([
   PATHS.acceptTerms,
   PATHS.terms,
   PATHS.privacy,
   PATHS.credits,
+  PATHS.status,
   PATHS.access,
   PATHS.signIn,
   PATHS.accountDeleted,
 ]);
 
-/** Textos legais e créditos disponíveis em toda tela. */
+/** Textos legais, créditos e o estado do serviço, disponíveis em toda tela. */
 const FOOTER_LINKS = [
   { to: PATHS.terms, label: TEXT.legal.termsTitle },
   { to: PATHS.privacy, label: TEXT.legal.privacyTitle },
   { to: PATHS.credits, label: T.creditsLink },
+  { to: PATHS.status, label: TEXT.status.footerLink },
 ] as const;
 
 /** O id do aviso fechado fica no armazenamento do navegador (ADR 031). */
@@ -99,7 +102,7 @@ export function Layout({ now, notice }: LayoutProps): ReactElement {
         <LoginFailedAlert />
         <CanonicalPath />
       </main>
-      {/* Links públicos para textos legais e créditos. */}
+      {/* Links públicos para textos legais, créditos e o estado do serviço. */}
       <footer className="border-t border-line-soft">
         <div className="mx-auto flex w-full max-w-5xl flex-wrap items-center justify-between gap-x-6 gap-y-2 px-4 py-4 text-sm text-fg-muted md:px-8">
           <nav aria-label={T.footerNavLabel} className="flex flex-wrap gap-x-6">

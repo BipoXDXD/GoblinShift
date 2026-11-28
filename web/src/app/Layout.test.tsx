@@ -17,6 +17,7 @@ await preloadRoutes(
   "/termos",
   "/privacidade",
   "/creditos",
+  "/estado",
   "/historico",
   "/entrar",
   "/acesso",
@@ -349,7 +350,7 @@ describe("Layout: aviso global", () => {
 });
 
 describe("Layout: rodapé", () => {
-  it("leva aos Termos, à Privacidade e aos Créditos, com alvo de 44 px", async () => {
+  it("leva aos Termos, à Privacidade, aos Créditos e ao Estado, com alvo de 44 px", async () => {
     setup(() => jsonResponse(meBody()));
 
     const footer = await screen.findByRole("contentinfo");
@@ -358,6 +359,7 @@ describe("Layout: rodapé", () => {
       ["Termos de Uso", "/termos"],
       ["Aviso de Privacidade", "/privacidade"],
       ["Créditos", "/creditos"],
+      ["Estado do serviço", "/estado"],
     ]);
     for (const link of links) {
       expect(link).toHaveClass("min-h-11");
@@ -365,10 +367,11 @@ describe("Layout: rodapé", () => {
   });
 
   it.each([
-    ["/termos", ["page", null, null]],
-    ["/termos/", ["page", null, null]],
-    ["/privacidade", [null, "page", null]],
-    ["/creditos", [null, null, "page"]],
+    ["/termos", ["page", null, null, null]],
+    ["/termos/", ["page", null, null, null]],
+    ["/privacidade", [null, "page", null, null]],
+    ["/creditos", [null, null, "page", null]],
+    ["/estado", [null, null, null, "page"]],
   ])("em %s, só o link da página atual tem aria-current", async (path, expected) => {
     setup(() => jsonResponse(meBody()), path);
 

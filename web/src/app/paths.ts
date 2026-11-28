@@ -15,6 +15,7 @@ export const PATHS = {
   terms: "/termos",
   privacy: "/privacidade",
   credits: "/creditos",
+  status: "/estado",
   acceptTerms: "/termos/aceitar",
   accountDeleted: "/conta-excluida",
 } as const;
