@@ -72,6 +72,8 @@ FROM audit_event WHERE request_id = :'ref'::uuid;
 SQL
 ```
 
+A consulta pode voltar vazia: o código existe, mas nenhum evento foi gravado. Há dois casos. O provedor estava desligado na configuração, um erro de configuração que não é auditado. Ou a recusa veio sem conta (callback forjado ou falha no provedor) durante uma rajada, acima do teto de 30 eventos sem conta por minuto (`MAX_ANONYMOUS_LOGIN_FAILURES_PER_MINUTE`, log `alert = login_failure_audit_cap`). A recusa de uma conta conhecida é sempre gravada; então, sem evento, a recusa não veio da conta. Procure o `request_id` no log da API ou no evento amplo do OpenObserve (30 dias).
+
 Guarde o id numa variável para os passos seguintes:
 
 ```bash
@@ -178,6 +180,7 @@ Os termos (item 8) pedem que quem acha o bloqueio um engano escreva para `contat
 - **`user_id` vazio:** a recusa não veio da conta (falha no provedor, `state` inválido ou provedor desligado). Não há bloqueio a rever: a pessoa deve tentar de novo.
 - **`event_type` = `LOGIN_SUCCEEDED`:** o login foi aceito. O código não é de uma recusa; peça o código da tela de recusa.
 - **`user_id` preenchido num `LOGIN_FAILED`:** a conta foi recusada. Siga para o estado da conta.
+- **`event_type` = `REAUTH_REQUIRED` com o código do callback:** não é bloqueio nem abuso. A pessoa pediu "Entre de novo", e o Google confirmou a conta sem pedir a senha (`auth_time` com mais de 10 min, ADR 065); a tela mostrou como sair da conta Google e entrar de novo. A sessão dela continua valendo. Repita a orientação, sem rever bloqueio.
 
 **2. Conferir o estado da conta.** O `issuer` confirma o provedor que a pessoa informou; o `subject` nunca é consultado nem copiado para a ficha.
 

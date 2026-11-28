@@ -50,7 +50,7 @@
           "CMD",
           "python",
           "-c",
-          "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/readyz',timeout=2)"
+          "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/livez',timeout=2)"
         ],
         "timeout": "3s"
       },
@@ -329,7 +329,7 @@
           "--show-error",
           "--max-time",
           "2",
-          "http://127.0.0.1/readyz"
+          "http://127.0.0.1/livez"
         ]
       },
       "image": "${GS_WEB_IMAGE:-ghcr.io/bipoxdxd/goblinshift-web:sha-03f15c824029@sha256:76d9f0209ded60bcf7a109565fb95e4b77e350a0a7262c7f4eff4bb221328568}",

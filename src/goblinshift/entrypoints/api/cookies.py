@@ -15,10 +15,13 @@ SESSION_COOKIE = "__Host-gs_session"
 CSRF_COOKIE = "__Host-gs_csrf"
 CSRF_HEADER = "X-CSRF-Token"
 
-# Marcador do estado do login (Authlib), assinado; o conteúdo fica em `login_state`. `Path=/auth`
-# faz o cookie nem chegar às rotas da API.
-LOGIN_COOKIE = "__Secure-gs_login"
-LOGIN_COOKIE_PATH = "/auth"
+# Marcador do estado do login (Authlib), assinado; o conteúdo fica em `login_state`. `__Host-`
+# (que exige `Path=/`, `Secure` e nenhum `Domain`) faz o navegador recusar o cookie plantado por
+# um subdomínio irmão com `Domain=`, o CSRF de login que o `__Secure-` com `Path=/auth` deixava.
+# Com `Path=/` o navegador o manda a toda rota, mas só as de `/auth` mexem na sessão de login, e o
+# `SessionMiddleware` só regrava o cookie quando ela muda.
+LOGIN_COOKIE = "__Host-gs_login"
+LOGIN_COOKIE_PATH = "/"
 LOGIN_COOKIE_MAX_AGE_S = 600
 
 # Logout (3.6): o navegador apaga os cookies e o armazenamento da origem.
