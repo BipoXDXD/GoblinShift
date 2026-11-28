@@ -19,12 +19,17 @@ from goblinshift.files.missing import GOVERNOR_MIN_SAMPLE
 from goblinshift.files.objects import hold
 from goblinshift.files.states import Availability, HolderKind, ObjectState
 from goblinshift.files.storage import FileStorage, ObjectStat
-from goblinshift.files.tables import object_use, stored_object, upload
+from goblinshift.files.tables import file_removal, object_use, stored_object, upload
 from goblinshift.files.uploads import get_upload, request_deletion
 from goblinshift.platform.db import unit_of_work
 from goblinshift.runs.cancellation import cancel_run
 from goblinshift.runs.lifecycle import MIN_RETRY_JITTER, Status
-from goblinshift.runs.maintenance import UNREADABLE_LOG_SAMPLE, Maintenance, MaintenanceConfig
+from goblinshift.runs.maintenance import (
+    FILE_REMOVAL_RETRY_AFTER,
+    UNREADABLE_LOG_SAMPLE,
+    Maintenance,
+    MaintenanceConfig,
+)
 from goblinshift.runs.store import LostFencing
 from goblinshift.runs.tables import run
 from goblinshift.runs.worker.claim import claim_next
@@ -399,15 +404,22 @@ def test_arquivo_que_fica_no_disco_entra_na_contagem_do_ciclo(
     def refuse_delete(_key: str) -> None:
         raise PermissionError("disco recusou")
 
-    monkeypatch.setattr(storage, "delete", refuse_delete)
     cycles = maintenance(factory, storage, local_runner(work_root))
-
-    first = cycles.run_cycle()
+    with monkeypatch.context() as broken:
+        broken.setattr(storage, "delete", refuse_delete)
+        first = cycles.run_cycle()
+    # Passa a idade mínima da repetição (`FILE_REMOVAL_RETRY_AFTER`), já com o disco de volta.
+    with unit_of_work(factory) as session:
+        session.execute(
+            update(file_removal).values(requested_at=func.now() - 2 * FILE_REMOVAL_RETRY_AFTER)
+        )
     second = cycles.run_cycle()
 
-    # Um do expurgo, já `deleted`, e um pendente, sem linha: nenhuma volta os repete.
-    assert first["purge_files_not_removed"] == 2
-    assert second["purge_files_not_removed"] == 0
+    # Um do expurgo, já `deleted`, e um pendente, sem linha: os dois ficam na outbox, e a volta
+    # seguinte os tira do disco.
+    assert (first["purge_files_not_removed"], first["file_removals_pending"]) == (2, 2)
+    assert (second["file_removals_retried"], second["file_removals_pending"]) == (2, 0)
+    assert not list(storage.walk_objects())
 
 
 # --- Objetos ausentes do storage (1.7, 3.8) ---------------------------------------------------

@@ -18,6 +18,7 @@ from sqlalchemy.orm import Session, sessionmaker
 from goblinshift import capacity
 from goblinshift.files import retention
 from goblinshift.files.artifacts import get_artifact, open_for_download, publish_artifact
+from goblinshift.files.candidates import discard_candidates
 from goblinshift.files.errors import UploadGoneError, UploadNotFoundError
 from goblinshift.files.limits import INCOMPLETE_UPLOAD_TTL, MIN_INTENT_RESERVED_BYTES
 from goblinshift.files.objects import hold, release
@@ -25,13 +26,15 @@ from goblinshift.files.retention import (
     expire_artifacts,
     expire_incomplete_uploads,
     expire_unused_uploads,
+    file_removals_pending,
     next_storage_release_in,
     purge_deleted_objects,
     remove_file_after_commit,
+    retry_file_removals,
 )
 from goblinshift.files.states import ArtifactRole, Availability, HolderKind, UploadState
 from goblinshift.files.storage import FileStorage, ObjectMissingError
-from goblinshift.files.tables import artifact, stored_object, upload
+from goblinshift.files.tables import artifact, file_removal, stored_object, upload
 from goblinshift.files.uploads import (
     UploadView,
     get_upload,
@@ -523,7 +526,7 @@ def test_exclusao_com_uso_aberto_so_remove_o_arquivo_depois_do_release(
         storage.stat(key)
 
 
-def test_falha_ao_apagar_o_arquivo_registra_a_chave_para_o_operador(
+def test_falha_ao_apagar_o_arquivo_registra_a_chave_no_log_e_na_outbox(
     factory: sessionmaker[Session],
     storage: FileStorage,
     monkeypatch: pytest.MonkeyPatch,
@@ -543,9 +546,12 @@ def test_falha_ao_apagar_o_arquivo_registra_a_chave_para_o_operador(
         report = purge_deleted_objects(session, storage)
 
     assert report.failed_keys == (key,)
+    assert outbox_keys(factory) == {key}
     records = [r for r in caplog.records if getattr(r, "fields", {}).get("storage_key") == key]
-    assert [r.fields["alert"] for r in records] == ["purge_file_not_removed"]  # type: ignore[attr-defined]
+    assert len(records) == 1
     assert records[0].exc_info is not None
+    # Sem alerta: a manutenção repete, e a causa lê o que continua pendente depois de três voltas.
+    assert "alert" not in records[0].fields  # type: ignore[attr-defined]
 
 
 def test_diretorio_adulterado_no_caminho_vira_o_mesmo_alerta_sem_parar_a_remocao(
@@ -727,3 +733,198 @@ def test_proxima_liberacao_ja_vencida_e_zero_e_nao_negativa(
     with unit_of_work(factory) as session:
         expires_in(session, upload, view.id, -overdue)
         assert next_storage_release_in(session, owner) == timedelta(0)
+
+
+# --- Outbox de remoção (17b) ------------------------------------------------------------------
+#
+# Toda chave que sai do banco entra em `file_removal` na mesma transação; a remoção depois do
+# commit apaga o arquivo e então a linha. Uma queda no meio deixa a linha, e a manutenção repete.
+
+RETRY_AFTER = timedelta(minutes=1)
+
+
+def outbox_keys(factory: sessionmaker[Session]) -> set[str]:
+    with factory() as session:
+        return set(session.execute(select(file_removal.c.storage_key)).scalars())
+
+
+def age_outbox(factory: sessionmaker[Session], age: timedelta) -> None:
+    with unit_of_work(factory) as session:
+        session.execute(update(file_removal).values(requested_at=func.now() - age))
+
+
+def enqueue_aged(factory: sessionmaker[Session], key: str, age: timedelta) -> None:
+    with unit_of_work(factory) as session:
+        session.execute(insert(file_removal).values(storage_key=key, requested_at=func.now() - age))
+
+
+def deleted_upload_key(factory: sessionmaker[Session], storage: FileStorage) -> str:
+    """Chave de um upload pronto que a pessoa excluiu: o expurgo o leva na próxima volta."""
+    owner = create_user(factory, f"conta-{uuid.uuid4()}")
+    view = ready_upload(factory, storage, owner)
+    with unit_of_work(factory) as session:
+        request_deletion(session, owner, view.id)
+    _, key = object_of(factory, view.id)
+    return key
+
+
+def stale_intent_key(factory: sessionmaker[Session], storage: FileStorage) -> str:
+    """Chave de um upload incompleto vencido, com o arquivo parcial no disco."""
+    owner = create_user(factory, f"conta-{uuid.uuid4()}")
+    intent = create_intent(factory, owner)
+    expire_row(factory, upload, intent.id)
+    with factory() as session:
+        key: str = session.execute(
+            select(stored_object.c.storage_key)
+            .join(upload, upload.c.object_id == stored_object.c.id)
+            .where(upload.c.id == intent.id)
+        ).scalar_one()
+    (storage.root / key).parent.mkdir(parents=True, exist_ok=True)
+    (storage.root / key).write_bytes(b"ab")
+    return key
+
+
+def purge(session: Session, storage: FileStorage) -> object:
+    return purge_deleted_objects(session, storage)
+
+
+def expire_incomplete(session: Session, storage: FileStorage) -> object:
+    return expire_incomplete_uploads(session, storage)
+
+
+@pytest.mark.parametrize(
+    ("seed", "step"),
+    [(deleted_upload_key, purge), (stale_intent_key, expire_incomplete)],
+    ids=["expurgo", "upload-incompleto"],
+)
+def test_queda_entre_commit_e_unlink_deixa_a_chave_na_outbox(
+    factory: sessionmaker[Session],
+    storage: FileStorage,
+    monkeypatch: pytest.MonkeyPatch,
+    seed: Callable[[sessionmaker[Session], FileStorage], str],
+    step: Callable[[Session, FileStorage], object],
+) -> None:
+    key = seed(factory, storage)
+
+    # O processo cai depois do commit: nada do que vem depois dele chega a rodar.
+    def crash_after_commit(*_args: object) -> tuple[str, ...]:
+        return ()
+
+    monkeypatch.setattr(retention, "remove_files_after_commit", crash_after_commit)
+    with factory() as session:
+        step(session, storage)
+
+    assert outbox_keys(factory) == {key}
+    assert (storage.root / key).exists()
+
+
+def test_descarte_de_candidato_pendente_poe_a_chave_na_outbox(
+    factory: sessionmaker[Session],
+) -> None:
+    owner = create_user(factory, "a")
+    attempt_id = uuid.uuid4()
+    with unit_of_work(factory) as session:
+        session.execute(
+            insert(stored_object).values(
+                owner_id=owner, storage_key="runs/r/g1/saida.txt", attempt_id=attempt_id
+            )
+        )
+        keys = discard_candidates(session, attempt_id)
+
+    assert keys == ["runs/r/g1/saida.txt"]
+    assert outbox_keys(factory) == {"runs/r/g1/saida.txt"}
+
+
+def test_remocao_bem_sucedida_tira_a_chave_da_outbox(
+    factory: sessionmaker[Session], storage: FileStorage
+) -> None:
+    key = deleted_upload_key(factory, storage)
+
+    with factory() as session:
+        report = purge_deleted_objects(session, storage)
+
+    assert report.failed_keys == ()
+    assert outbox_keys(factory) == set()
+    assert not (storage.root / key).exists()
+
+
+def test_retentativa_apaga_o_arquivo_e_a_linha(
+    factory: sessionmaker[Session], storage: FileStorage, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    key = deleted_upload_key(factory, storage)
+
+    def refuse_delete(_key: str) -> None:
+        raise PermissionError("disco recusou")
+
+    with monkeypatch.context() as broken:
+        broken.setattr(storage, "delete", refuse_delete)
+        with factory() as session:
+            assert purge_deleted_objects(session, storage).failed_keys == (key,)
+    age_outbox(factory, 2 * RETRY_AFTER)
+
+    with factory() as session:
+        retry = retry_file_removals(session, storage, older_than=RETRY_AFTER, limit=10)
+
+    assert (retry.removed, retry.failed_keys) == (1, ())
+    assert outbox_keys(factory) == set()
+    assert not (storage.root / key).exists()
+
+
+def test_retentativa_com_falha_mantem_a_linha_e_conta_pendente(
+    factory: sessionmaker[Session], storage: FileStorage, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    key = deleted_upload_key(factory, storage)
+
+    def refuse_delete(_key: str) -> None:
+        raise PermissionError("disco recusou")
+
+    monkeypatch.setattr(storage, "delete", refuse_delete)
+    with factory() as session:
+        purge_deleted_objects(session, storage)
+    age_outbox(factory, 2 * RETRY_AFTER)
+
+    with factory() as session:
+        retry = retry_file_removals(session, storage, older_than=RETRY_AFTER, limit=10)
+    with factory() as session:
+        pending = file_removals_pending(session)
+
+    assert (retry.removed, retry.failed_keys) == (0, (key,))
+    assert outbox_keys(factory) == {key}
+    assert pending == 1
+
+
+def test_linha_recente_nao_e_repetida(factory: sessionmaker[Session], storage: FileStorage) -> None:
+    enqueue_aged(factory, "uploads/recente", timedelta(seconds=59))
+    enqueue_aged(factory, "uploads/antiga", timedelta(seconds=61))
+
+    with factory() as session:
+        retry = retry_file_removals(session, storage, older_than=RETRY_AFTER, limit=10)
+
+    assert retry.removed == 1
+    assert outbox_keys(factory) == {"uploads/recente"}
+
+
+def test_retentativa_respeita_o_tamanho_do_lote(
+    factory: sessionmaker[Session], storage: FileStorage
+) -> None:
+    for index in range(3):
+        enqueue_aged(factory, f"uploads/{index}", 2 * RETRY_AFTER)
+
+    with factory() as session:
+        retry = retry_file_removals(session, storage, older_than=RETRY_AFTER, limit=2)
+
+    assert retry.removed == 2
+    assert len(outbox_keys(factory)) == 1
+
+
+def test_chave_ja_ausente_do_disco_sai_da_outbox(
+    factory: sessionmaker[Session], storage: FileStorage
+) -> None:
+    enqueue_aged(factory, "uploads/ja-saiu", 2 * RETRY_AFTER)
+    assert not (storage.root / "uploads/ja-saiu").exists()
+
+    with factory() as session:
+        retry = retry_file_removals(session, storage, older_than=RETRY_AFTER, limit=10)
+
+    assert (retry.removed, retry.failed_keys) == (1, ())
+    assert outbox_keys(factory) == set()

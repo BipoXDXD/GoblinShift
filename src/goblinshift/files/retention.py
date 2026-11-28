@@ -5,11 +5,12 @@ Cada função processa um lote numa transação própria e curta, travando com
 manutenção.
 
 Ordem entre banco e disco: o estado é confirmado no banco primeiro e o arquivo é apagado depois
-do commit. Se o processo cair no meio, sobra um arquivo órfão, que só ocupa espaço; a ordem
-inversa poderia deixar uma linha apontando para um arquivo que já não existe caso o commit
-falhasse, e quem confiasse na linha leria um objeto sumido. `gs-admin orphan-files` lista esses
-arquivos (files/orphans.py), só para leitura. As falhas de remoção vão para o
-relatório e para o log, com a chave, e não interrompem o lote.
+do commit; a ordem inversa poderia deixar uma linha apontando para um arquivo que já não existe
+caso o commit falhasse, e quem confiasse na linha leria um objeto sumido. Para o arquivo não ficar
+órfão quando o processo cai ou o disco recusa no meio, a chave entra na outbox `file_removal` na
+mesma transação que o tira de uso, e só sai dela depois que o arquivo deixa o disco
+(`remove_files_after_commit`). A manutenção repete o que ficou (`retry_file_removals`). As falhas
+de remoção vão para o relatório e para o log, com a chave, e não interrompem o lote.
 """
 
 import logging
@@ -30,6 +31,7 @@ from sqlalchemy import (
     union_all,
     update,
 )
+from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.orm import Session
 
 from goblinshift import capacity
@@ -46,7 +48,7 @@ from goblinshift.files.objects import (
 )
 from goblinshift.files.states import ObjectState, UploadState
 from goblinshift.files.storage import FileStorage, ObjectTamperedError
-from goblinshift.files.tables import artifact, object_use, stored_object, upload
+from goblinshift.files.tables import artifact, file_removal, object_use, stored_object, upload
 from goblinshift.platform.sql import skip_locked_batch
 from goblinshift.platform.telemetry import exception_fields
 
@@ -79,26 +81,94 @@ class IncompleteUploadsExpiry:
     failed_keys: tuple[str, ...]
 
 
-def remove_file_after_commit(storage: FileStorage, key: str) -> bool:
-    """Apaga o arquivo de uma linha já confirmada; `False` se ele ficou no disco.
+@dataclass(frozen=True)
+class FileRemovalRetry:
+    removed: int
+    # Seguem na outbox: a próxima volta tenta de novo.
+    failed_keys: tuple[str, ...]
 
-    Nada repete a remoção depois do commit: a falha vira alerta com a chave e não impede
-    que o resto do lote saia do disco. Um diretório adulterado no caminho é uma dessas falhas.
+
+def remove_file_after_commit(storage: FileStorage, key: str) -> bool:
+    """Apaga um arquivo que nenhuma linha da outbox registra; `False` se ele ficou no disco.
+
+    Para chaves fora da outbox, como as reservadas pelo worker antes de existir linha: nada repete
+    a remoção, e a falha vira alerta com a chave. Um diretório adulterado no caminho é uma dessas
+    falhas. O que saiu do banco usa `remove_files_after_commit`, que a manutenção repete.
     """
+    return _delete_from_disk(storage, key, alert=True)
+
+
+def enqueue_file_removals(session: Session, keys: Sequence[str]) -> None:
+    """Registra na outbox, na transação de quem chama, as chaves que acabam de sair de uso."""
+    if keys:
+        session.execute(
+            pg_insert(file_removal)
+            .values([{"storage_key": key} for key in keys])
+            .on_conflict_do_nothing()
+        )
+
+
+def remove_files_after_commit(
+    session: Session, storage: FileStorage, keys: Sequence[str]
+) -> tuple[str, ...]:
+    """Apaga do disco as chaves já na outbox e tira dela as que saíram; devolve as que ficaram.
+
+    Numa transação própria, depois do commit de quem registrou as chaves. A que fica no disco
+    segue na outbox, e `retry_file_removals` a repete: a falha vai ao log com a chave, sem alerta,
+    porque o alerta de causa lê as que continuam pendentes depois de várias voltas.
+    """
+    failed = tuple(key for key in keys if not _delete_from_disk(storage, key, alert=False))
+    _forget_removed(session, [key for key in keys if key not in failed])
+    return failed
+
+
+def retry_file_removals(
+    session: Session, storage: FileStorage, *, older_than: timedelta, limit: int
+) -> FileRemovalRetry:
+    """Repete a remoção das chaves que ficaram na outbox há `older_than` ou mais.
+
+    `older_than` deixa de fora a remoção em curso, entre o commit de quem registrou e o `unlink`.
+    O lote fica travado (`SKIP LOCKED`) até a linha sair, para duas manutenções não repetirem a
+    mesma chave. Arquivo que já não existe é sucesso: o estado final é o mesmo.
+    """
+    with session.begin():
+        keys = list(
+            session.execute(
+                select(file_removal.c.storage_key)
+                .where(file_removal.c.requested_at <= func.now() - older_than)
+                .order_by(file_removal.c.requested_at, file_removal.c.storage_key)
+                .limit(limit)
+                .with_for_update(skip_locked=True)
+            ).scalars()
+        )
+        failed = tuple(key for key in keys if not _delete_from_disk(storage, key, alert=False))
+        removed = [key for key in keys if key not in failed]
+        if removed:
+            session.execute(delete(file_removal).where(file_removal.c.storage_key.in_(removed)))
+    return FileRemovalRetry(removed=len(removed), failed_keys=failed)
+
+
+def file_removals_pending(session: Session) -> int:
+    """Chaves que ainda esperam sair do disco: o medidor que o alerta de causa lê."""
+    pending: int = session.execute(select(func.count()).select_from(file_removal)).scalar_one()
+    return pending
+
+
+def _forget_removed(session: Session, keys: Sequence[str]) -> None:
+    if keys:
+        with session.begin():
+            session.execute(delete(file_removal).where(file_removal.c.storage_key.in_(keys)))
+
+
+def _delete_from_disk(storage: FileStorage, key: str, *, alert: bool) -> bool:
+    """Apaga do disco; `alert` marca a falha que nada repete, a única que pede alguém."""
     try:
         storage.delete(key)
     except (OSError, ObjectTamperedError) as error:
-        logger.warning(
-            "arquivo não removido do disco",
-            exc_info=True,
-            extra={
-                "fields": {
-                    "alert": "purge_file_not_removed",
-                    "storage_key": key,
-                    **exception_fields(error),
-                }
-            },
-        )
+        fields: dict[str, object] = {"storage_key": key, **exception_fields(error)}
+        if alert:
+            fields |= {"alert": "purge_file_not_removed"}
+        logger.warning("arquivo não removido do disco", exc_info=True, extra={"fields": fields})
         return False
     return True
 
@@ -140,9 +210,8 @@ def expire_incomplete_uploads(session: Session, storage: FileStorage) -> Incompl
                     stored_object.c.state == ObjectState.PENDING,
                 )
             )
-    failed_keys = tuple(
-        row.storage_key for row in rows if not remove_file_after_commit(storage, row.storage_key)
-    )
+            enqueue_file_removals(session, [row.storage_key for row in rows])
+    failed_keys = remove_files_after_commit(session, storage, [row.storage_key for row in rows])
     return IncompleteUploadsExpiry(uploads=len(rows), failed_keys=failed_keys)
 
 
@@ -217,16 +286,13 @@ def purge_deleted_objects(session: Session, storage: FileStorage) -> PurgeReport
                 .values(state=ObjectState.DELETED)
             )
             capacity.release_many(session, holder=capacity.HolderKind.OBJECT, holder_ids=object_ids)
-    failed_keys = [
-        candidate.storage_key
-        for candidate in chosen
-        if not remove_file_after_commit(storage, candidate.storage_key)
-    ]
+            enqueue_file_removals(session, [c.storage_key for c in chosen])
+    failed_keys = remove_files_after_commit(session, storage, [c.storage_key for c in chosen])
     return PurgeReport(
         objects=len(chosen),
         bytes=sum(c.size_bytes for c in chosen),
         limit_reached=len(chosen) < len(candidates),
-        failed_keys=tuple(failed_keys),
+        failed_keys=failed_keys,
     )
 
 

@@ -13,6 +13,7 @@ from sqlalchemy import delete, or_, select
 from sqlalchemy.orm import Session
 
 from goblinshift.files.objects import has_valid_reference, request_deletion_of_unreferenced
+from goblinshift.files.retention import enqueue_file_removals
 from goblinshift.files.states import ObjectState
 from goblinshift.files.tables import stored_object, upload
 
@@ -40,8 +41,9 @@ def discard_candidates(session: Session, attempt_id: uuid.UUID) -> list[str]:
     """Marca para remoção os candidatos da tentativa que não viraram artefato.
 
     Confirmados sem referência viram `delete_requested`, e o expurgo da manutenção os remove
-    com o limitador. Pendentes nunca tiveram conteúdo confirmado: a linha sai aqui, e as chaves
-    voltam para quem chama apagar do disco depois do commit (a mesma ordem de `retention`).
+    com o limitador. Pendentes nunca tiveram conteúdo confirmado: a linha sai aqui, as chaves
+    entram na outbox na mesma transação e voltam para quem chama apagar do disco depois do commit
+    com `retention.remove_files_after_commit` (a mesma ordem de `retention`).
     """
     rows = session.execute(
         select(stored_object.c.id, stored_object.c.state, stored_object.c.storage_key)
@@ -57,6 +59,7 @@ def discard_candidates(session: Session, attempt_id: uuid.UUID) -> list[str]:
         session.execute(
             delete(stored_object).where(stored_object.c.id.in_([row.id for row in pending]))
         )
+        enqueue_file_removals(session, [row.storage_key for row in pending])
     request_deletion_of_unreferenced(
         session, [row.id for row in rows if row.state == ObjectState.COMMITTED]
     )

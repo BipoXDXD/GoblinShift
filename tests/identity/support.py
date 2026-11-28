@@ -31,7 +31,9 @@ def prepare_database(settings: Settings, engine: Engine) -> None:
     """Schema no head, tabelas de identidade vazias (com o que depende delas) e o pool global."""
     run_migrations(settings, "head")
     with engine.begin() as conn:
-        conn.execute(text("TRUNCATE app_user, api_key, audit_event, login_state CASCADE"))
+        conn.execute(
+            text("TRUNCATE app_user, api_key, audit_event, login_state, file_removal CASCADE")
+        )
         restore_capacity_seed(conn)
 
 
