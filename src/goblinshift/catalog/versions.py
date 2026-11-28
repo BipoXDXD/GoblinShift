@@ -14,13 +14,14 @@ import copy
 import dataclasses
 from collections.abc import Callable, Iterable, Mapping
 from dataclasses import dataclass, field
-from datetime import datetime
+from datetime import UTC, date, datetime, timedelta
 from enum import StrEnum
 from typing import Any
 
 from pydantic import BaseModel, ValidationError
 
 from goblinshift.catalog.csv_janitor_v1 import CsvJanitorV1Parameters
+from goblinshift.catalog.csv_janitor_v2 import CsvJanitorV2Parameters
 from goblinshift.catalog.downloads_detox_v1 import DownloadsDetoxV1Parameters
 from goblinshift.catalog.image_forge_v1 import ImageForgeV1Parameters
 from goblinshift.catalog.media_mill_v1 import MediaMillV1Parameters
@@ -160,16 +161,44 @@ class Catalog:
         return recipe_version.resolve(raw_params)
 
 
+_CSV_JANITOR_LIMITS: Mapping[str, int] = {
+    "max_inputs": csv_janitor.MAX_TABLES,
+    "max_input_bytes": COMMON_MAX_INPUT_BYTES,
+    **dataclasses.asdict(Limits()),
+}
+
+_DEPRECATION_NOTICE = timedelta(days=90)
+
+
+def sunset_after_merge(merged_on: date) -> datetime:
+    """Primeiro dia do mês seguinte a (merge + 90 dias), à meia-noite UTC: a regra de 1.6."""
+    last_day = merged_on + _DEPRECATION_NOTICE
+    year, month = (
+        (last_day.year + 1, 1) if last_day.month == 12 else (last_day.year, last_day.month + 1)
+    )
+    return datetime(year, month, 1, tzinfo=UTC)
+
+
+# Último dia de merge da v2 para o qual o Sunset abaixo vale (ADR 067). A data é fixa, sem ler o
+# relógio, para o catálogo e os snapshots não mudarem sozinhos; merge depois disso move o prazo.
+CSV_JANITOR_V2_MERGE_DEADLINE = date(2026, 11, 30)
+CSV_JANITOR_V1_SUNSET = sunset_after_merge(CSV_JANITOR_V2_MERGE_DEADLINE)
+
 CSV_JANITOR_V1 = RecipeVersion(
     recipe_id=csv_janitor.RECIPE_ID,
     version=csv_janitor.VERSION,
-    status=VersionStatus.CURRENT,
+    status=VersionStatus.DEPRECATED,
     parameters_model=CsvJanitorV1Parameters,
-    limits={
-        "max_inputs": csv_janitor.MAX_TABLES,
-        "max_input_bytes": COMMON_MAX_INPUT_BYTES,
-        **dataclasses.asdict(Limits()),
-    },
+    limits=_CSV_JANITOR_LIMITS,
+    sunset_at=CSV_JANITOR_V1_SUNSET,
+)
+
+CSV_JANITOR_V2 = RecipeVersion(
+    recipe_id=csv_janitor.RECIPE_ID,
+    version=csv_janitor.VERSION_2,
+    status=VersionStatus.CURRENT,
+    parameters_model=CsvJanitorV2Parameters,
+    limits=_CSV_JANITOR_LIMITS,
 )
 
 _IMAGE_LIMITS = image_forge.Limits()
@@ -243,7 +272,16 @@ PDF_PRESS_V1 = RecipeVersion(
     upload_references=upload_references,
 )
 
-CATALOG = Catalog([CSV_JANITOR_V1, IMAGE_FORGE_V1, DOWNLOADS_DETOX_V1, PDF_PRESS_V1, MEDIA_MILL_V1])
+CATALOG = Catalog(
+    [
+        CSV_JANITOR_V1,
+        CSV_JANITOR_V2,
+        IMAGE_FORGE_V1,
+        DOWNLOADS_DETOX_V1,
+        PDF_PRESS_V1,
+        MEDIA_MILL_V1,
+    ]
+)
 
 
 def _field_errors(error: ValidationError) -> list[FieldError]:

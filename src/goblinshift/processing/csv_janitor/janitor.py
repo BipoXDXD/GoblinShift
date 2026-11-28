@@ -1,9 +1,11 @@
 """Limpeza de uma tabela pelo CSV Janitor (docs/GoblinShiftPlan.md, 1.3).
 
-Ordem fixa: ler estrutura → normalizar colunas selecionadas → filtrar → deduplicar →
-selecionar/ordenar colunas → serializar. Todo campo é texto; nada é inferido.
+Ordem fixa: ler estrutura → normalizar colunas selecionadas (aparar → colapsar → caixa) →
+filtrar → deduplicar → selecionar/ordenar colunas → serializar. Todo campo é texto; nada é
+inferido.
 """
 
+import re
 from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass
 
@@ -29,6 +31,11 @@ FORMULA_GUARD_PREFIX = "\t"
 # pacote não pode importar (import-linter): sem ele, cabeçalhos longos estouram o relatório.
 WARNING_COLUMN_NAME_CHARS = 120
 _ELLIPSIS = "…"
+# Marca de UTF-8 que o Excel exige para não abrir a saída como Windows-1252.
+UTF8_BOM = "\ufeff".encode()
+# Espaço Unicode que não quebre a linha: as quebras de `str.splitlines()` (CR, LF, VT, FF, FS,
+# GS, RS, NEL, LS, PS) e o US, separador de registro, ficam dentro do campo.
+_INTERNAL_WHITESPACE = re.compile(r"[^\S\r\n\x0b\x0c\x1c-\x1f\x85\u2028\u2029]+")
 
 _CASE: Mapping[CaseMode, Callable[[str], str]] = {
     # Operações Unicode do Python fixado, sem depender do locale do servidor.
@@ -54,7 +61,7 @@ def clean_table(
 
 
 def _clean(data: bytes, params: Params, limits: Limits) -> TableCleaned:
-    table = read_table(data, params.input_delimiter, limits)
+    table = read_table(data, params.input_delimiter, limits, params.input_encoding)
     column = _index_columns(table.header, params)
     normalize = _normalizer(params, column)
     records = [_Record(n, normalize(fields)) for n, fields in enumerate(table.records, start=1)]
@@ -110,6 +117,8 @@ def _normalizer(
     for name in params.trim_columns:
         # Só os espaços das pontas (qualquer espaço Unicode); os internos ficam.
         steps.setdefault(column[name], []).append(str.strip)
+    for name in params.collapse_whitespace_columns:
+        steps.setdefault(column[name], []).append(_collapse_whitespace)
     for rule in params.case_rules:
         steps.setdefault(column[rule.column], []).append(_CASE[rule.mode])
 
@@ -121,6 +130,10 @@ def _normalizer(
         return tuple(result)
 
     return normalize
+
+
+def _collapse_whitespace(value: str) -> str:
+    return _INTERNAL_WHITESPACE.sub(" ", value)
 
 
 def _deduplicate(records: list[_Record], key: Sequence[int]) -> list[_Record]:
@@ -158,7 +171,9 @@ def _guard(value: str) -> str:
 def _serialize(
     header: Sequence[str], records: list[_Record], params: Params, limits: Limits
 ) -> bytes:
-    lines = [_encode(header, "o cabeçalho", params, limits)]
+    # O BOM vem antes do cabeçalho já protegido: o prefixo tab fica dentro das aspas, logo após.
+    lines = [UTF8_BOM] if params.output_bom else []
+    lines.append(_encode(header, "o cabeçalho", params, limits))
     lines += [_encode(r.fields, f"o registro {r.position}", params, limits) for r in records]
     content = b"".join(lines)
     if len(content) > limits.table_bytes:

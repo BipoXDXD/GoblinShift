@@ -14,6 +14,7 @@ import { ANNOUNCE_DELAY_MS, LiveRegion } from "../components/a11y/LiveRegion";
 import { FailureNotice } from "../components/feedback/FailureNotice";
 import type { Preset } from "../presets/api";
 import {
+  acceptsSource,
   recipeOf,
   withoutUploadBoundParameters,
   type RecipeForm,
@@ -212,7 +213,7 @@ function prefilledForm({ recipe, version, fallback, source, error }: PrefillSour
       preset: null,
     };
   }
-  const sameRecipe = source.recipeId === recipe.id && source.recipeVersion === recipe.version;
+  const sameRecipe = acceptsSource(recipe, source);
   if (!sameRecipe) {
     return withNotice(fallback, source.wrongRecipeNotice);
   }

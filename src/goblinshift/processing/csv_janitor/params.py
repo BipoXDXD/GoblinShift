@@ -22,6 +22,14 @@ class Delimiter(StrEnum):
     TAB = "\t"
 
 
+class InputEncoding(StrEnum):
+    """Codificação declarada dos arquivos de entrada; a saída é sempre UTF-8."""
+
+    UTF_8 = "utf-8"
+    WINDOWS_1252 = "windows-1252"
+    LATIN_1 = "latin-1"
+
+
 class CaseMode(StrEnum):
     LOWER = "lower"
     UPPER = "upper"
@@ -82,9 +90,13 @@ class Params:
     # None preserva todas as colunas na ordem original; tupla vazia é inválida.
     output_columns: tuple[str, ...] | None = None
     formula_guard: FormulaGuard = FormulaGuard.NONE
+    input_encoding: InputEncoding = InputEncoding.UTF_8
+    output_bom: bool = False
+    collapse_whitespace_columns: tuple[str, ...] = ()
 
     def __post_init__(self) -> None:
         _require_distinct("trim_columns", self.trim_columns)
+        _require_distinct("collapse_whitespace_columns", self.collapse_whitespace_columns)
         _require_distinct("case_rules", [rule.column for rule in self.case_rules])
         _require_distinct("deduplicate_by", self.deduplicate_by)
         if len(self.filters) > MAX_FILTERS:
@@ -101,6 +113,7 @@ class Params:
         """Colunas citadas pela configuração, sem repetição, na ordem em que aparecem."""
         referenced = [
             *self.trim_columns,
+            *self.collapse_whitespace_columns,
             *(rule.column for rule in self.case_rules),
             *(f.column for f in self.filters),
             *self.deduplicate_by,
@@ -126,11 +139,26 @@ _KNOWN_OPTIONS = frozenset(
         "formula_guard",
     }
 )
+# A v2 aceita tudo da v1 e mais estas; a v1 continua recusando-as (versão congelada, 1.6).
+_KNOWN_OPTIONS_V2 = _KNOWN_OPTIONS | {
+    "input_encoding",
+    "output_bom",
+    "collapse_whitespace_columns",
+}
 
 
 def params_from_mapping(raw: Mapping[str, object]) -> Params:
-    """Converte a configuração decodificada de JSON; recusa campos desconhecidos e tipos errados."""
-    if not set(raw) <= _KNOWN_OPTIONS:
+    """Configuração da v1 decodificada de JSON; recusa campos desconhecidos e tipos errados."""
+    return _build(raw, _KNOWN_OPTIONS)
+
+
+def params_v2_from_mapping(raw: Mapping[str, object]) -> Params:
+    """Configuração da v2: a da v1 mais codificação de entrada, BOM na saída e colapso."""
+    return _build(raw, _KNOWN_OPTIONS_V2)
+
+
+def _build(raw: Mapping[str, object], known: frozenset[str]) -> Params:
+    if not set(raw) <= known:
         raise InvalidParametersError("opções desconhecidas")
     output_columns = raw.get("output_columns")
     return Params(
@@ -146,6 +174,11 @@ def params_from_mapping(raw: Mapping[str, object]) -> Params:
         if output_columns is None
         else _strings(output_columns, "output_columns"),
         formula_guard=_enum(FormulaGuard, raw.get("formula_guard", "none"), "formula_guard"),
+        input_encoding=_enum(InputEncoding, raw.get("input_encoding", "utf-8"), "input_encoding"),
+        output_bom=_bool(raw.get("output_bom", False), "output_bom"),
+        collapse_whitespace_columns=_strings(
+            raw.get("collapse_whitespace_columns", []), "collapse_whitespace_columns"
+        ),
     )
 
 
@@ -185,6 +218,12 @@ def _enum[E: StrEnum](kind: type[E], raw: object, option: str) -> E:
 def _string(raw: object, option: str) -> str:
     if not isinstance(raw, str):
         raise InvalidParametersError(f"{option} deve ser texto")
+    return raw
+
+
+def _bool(raw: object, option: str) -> bool:
+    if not isinstance(raw, bool):
+        raise InvalidParametersError(f"{option} deve ser verdadeiro ou falso")
     return raw
 
 

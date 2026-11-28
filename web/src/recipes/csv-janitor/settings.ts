@@ -4,6 +4,7 @@ import type { CatalogVersion } from "../../catalog/api";
 import {
   CASE_MODES,
   DELIMITERS,
+  ENCODINGS,
   FILTER_OPS,
   FORMULA_GUARDS,
   type CsvJanitorFormValues,
@@ -20,8 +21,11 @@ const columns = z.array(z.string());
 
 const defaultsSchema = z.object({
   input_delimiter: z.enum(DELIMITERS),
+  input_encoding: z.enum(ENCODINGS),
   output_delimiter: z.enum(DELIMITERS),
+  output_bom: z.boolean(),
   trim_columns: columns,
+  collapse_whitespace_columns: columns,
   case_rules: z.array(z.object({ column: z.string(), mode: z.enum(CASE_MODES) })),
   filters: z.array(
     z.object({ column: z.string(), op: z.enum(FILTER_OPS), value: z.string().nullable() }),
@@ -60,8 +64,11 @@ export function csvJanitorSettings(
 function formValuesOf(defaults: z.infer<typeof defaultsSchema>): CsvJanitorFormValues {
   return {
     input_delimiter: defaults.input_delimiter,
+    input_encoding: defaults.input_encoding,
     output_delimiter: defaults.output_delimiter,
+    output_bom: defaults.output_bom,
     trim_columns: defaults.trim_columns.join("\n"),
+    collapse_whitespace_columns: defaults.collapse_whitespace_columns.join("\n"),
     case_rules: defaults.case_rules.map((rule, index) => ({
       key: `default-${String(index)}`,
       ...rule,

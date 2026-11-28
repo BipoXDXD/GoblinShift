@@ -12,9 +12,11 @@ from goblinshift.processing.csv_janitor.params import (
     Filter,
     FilterOp,
     FormulaGuard,
+    InputEncoding,
     InvalidParametersError,
     Params,
     params_from_mapping,
+    params_v2_from_mapping,
 )
 from goblinshift.processing.csv_janitor.results import (
     Counts,
@@ -33,6 +35,7 @@ __all__ = [
     "Filter",
     "FilterOp",
     "FormulaGuard",
+    "InputEncoding",
     "InvalidParametersError",
     "Limits",
     "Params",
@@ -43,4 +46,5 @@ __all__ = [
     "WarningCode",
     "clean_table",
     "params_from_mapping",
+    "params_v2_from_mapping",
 ]

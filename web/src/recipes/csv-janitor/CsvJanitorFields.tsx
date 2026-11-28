@@ -9,6 +9,7 @@ import {
   addButtonId,
   CASE_MODES,
   DELIMITERS,
+  ENCODINGS,
   FILTER_OPS,
   FORMULA_GUARDS,
   parseCsvJanitor,
@@ -22,24 +23,27 @@ import type { CsvJanitorSettings } from "./settings";
 
 const T = TEXT.csvJanitor;
 
-type ColumnListField = "trim_columns" | "deduplicate_by" | "output_columns";
-type OptionField = "input_delimiter" | "output_delimiter" | "formula_guard";
+type ColumnListField =
+  "trim_columns" | "collapse_whitespace_columns" | "deduplicate_by" | "output_columns";
+type OptionField = "input_delimiter" | "input_encoding" | "output_delimiter" | "formula_guard";
 
 interface OptionSelect<F extends OptionField> {
   readonly field: F;
   readonly label: string;
+  readonly hint?: string;
   readonly options: readonly CsvJanitorFormValues[F][];
   readonly labels: Readonly<Record<CsvJanitorFormValues[F], string>>;
 }
 
 const COLUMN_LISTS: readonly { field: ColumnListField; label: string; hint: string }[] = [
   { field: "trim_columns", label: T.trimColumns, hint: T.trimColumnsHint },
+  { field: "collapse_whitespace_columns", label: T.collapseColumns, hint: T.collapseColumnsHint },
   { field: "deduplicate_by", label: T.deduplicateBy, hint: T.deduplicateByHint },
   { field: "output_columns", label: T.outputColumns, hint: T.outputColumnsHint },
 ];
 
 /**
- * Formulário da CSV Janitor v1, escrito à mão (2.2), com defaults e limites do catálogo. Guarda os próprios valores e entrega à Bancada,
+ * Formulário da CSV Janitor v2, escrito à mão (2.2), com defaults e limites do catálogo. Guarda os próprios valores e entrega à Bancada,
  * a cada mudança, o comando validado ou os erros. Adicionar uma linha leva o foco a ela; remover
  * devolve o foco ao botão de adicionar.
  */
@@ -70,10 +74,16 @@ export function CsvJanitorFields({
   const optionSelect = <F extends OptionField>({
     field,
     label,
+    hint,
     options,
     labels,
   }: OptionSelect<F>): ReactElement => (
-    <Field id={singleFieldId(field)} label={label} error={errorOf(singleFieldId(field))}>
+    <Field
+      id={singleFieldId(field)}
+      label={label}
+      {...(hint === undefined ? {} : { description: hint })}
+      error={errorOf(singleFieldId(field))}
+    >
       {(control) => (
         <select
           {...control}
@@ -104,11 +114,36 @@ export function CsvJanitorFields({
         labels: T.delimiters,
       })}
       {optionSelect({
+        field: "input_encoding",
+        label: T.inputEncoding,
+        hint: T.inputEncodingHint,
+        options: ENCODINGS,
+        labels: T.inputEncodings,
+      })}
+      {optionSelect({
         field: "output_delimiter",
         label: T.outputDelimiter,
         options: DELIMITERS,
         labels: T.delimiters,
       })}
+      <Field
+        layout="inline"
+        id={singleFieldId("output_bom")}
+        label={T.outputBom}
+        description={T.outputBomHint}
+        error={errorOf(singleFieldId("output_bom"))}
+      >
+        {(control) => (
+          <input
+            {...control}
+            type="checkbox"
+            checked={values.output_bom}
+            onChange={(event) => {
+              update({ ...values, output_bom: event.currentTarget.checked });
+            }}
+          />
+        )}
+      </Field>
       {COLUMN_LISTS.map(({ field, label, hint }) => (
         <Field
           key={field}

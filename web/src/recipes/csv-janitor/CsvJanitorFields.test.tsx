@@ -2,6 +2,7 @@ import { render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { describe, expect, it, vi } from "vitest";
 
+import { TEXT } from "../../text";
 import { axeViolations } from "../../test/axe";
 import type { RecipeDraft } from "../types";
 import { CsvJanitorFields } from "./CsvJanitorFields";
@@ -12,8 +13,11 @@ const MAX_FILTERS = 3;
 const SETTINGS: CsvJanitorSettings = {
   defaults: {
     input_delimiter: ";",
+    input_encoding: "utf-8",
     output_delimiter: ",",
+    output_bom: false,
     trim_columns: "",
+    collapse_whitespace_columns: "",
     case_rules: [],
     filters: [],
     deduplicate_by: "",
@@ -48,6 +52,9 @@ function parametersOf(draft: RecipeDraft<"csv-janitor">) {
   if (!draft.ok) {
     throw new Error("rascunho inválido");
   }
+  if (draft.command.recipe_version !== 2) {
+    throw new Error("o formulário deveria montar a versão 2");
+  }
   return draft.command.parameters;
 }
 
@@ -75,6 +82,51 @@ describe("CsvJanitorFields", () => {
     const parameters = parametersOf(lastDraft());
     expect(parameters.output_delimiter).toBe(";");
     expect(parameters.output_columns).toEqual(["b", "a"]);
+  });
+
+  it("o select de codificação tem as três opções com rótulo e a dica", () => {
+    setup();
+
+    const select = screen.getByRole("combobox", { name: TEXT.csvJanitor.inputEncoding });
+    expect(select).toHaveAccessibleDescription(TEXT.csvJanitor.inputEncodingHint);
+    expect(Array.from(select.querySelectorAll("option"), (option) => option.textContent)).toEqual([
+      "UTF-8 (padrão)",
+      "Windows-1252 (Excel no Windows)",
+      "Latin-1 (ISO-8859-1)",
+    ]);
+  });
+
+  it("codificação, BOM e colapso vão para o comando", async () => {
+    const { user, lastDraft } = setup();
+
+    await user.selectOptions(
+      screen.getByRole("combobox", { name: TEXT.csvJanitor.inputEncoding }),
+      "latin-1",
+    );
+    await user.click(screen.getByRole("checkbox", { name: TEXT.csvJanitor.outputBom }));
+    await user.type(
+      screen.getByRole("textbox", { name: TEXT.csvJanitor.collapseColumns }),
+      "nome{Enter}obs",
+    );
+
+    const parameters = parametersOf(lastDraft());
+    expect(parameters.input_encoding).toBe("latin-1");
+    expect(parameters.output_bom).toBe(true);
+    expect(parameters.collapse_whitespace_columns).toEqual(["nome", "obs"]);
+  });
+
+  it("os campos novos ficam ao lado dos que completam (D7)", () => {
+    setup();
+
+    const labels = Array.from(document.querySelectorAll("label"), (label) => label.textContent);
+    const position = (label: string) => labels.indexOf(label);
+    expect(position(TEXT.csvJanitor.inputEncoding)).toBe(
+      position(TEXT.csvJanitor.inputDelimiter) + 1,
+    );
+    expect(position(TEXT.csvJanitor.outputBom)).toBe(position(TEXT.csvJanitor.outputDelimiter) + 1);
+    expect(position(TEXT.csvJanitor.collapseColumns)).toBe(
+      position(TEXT.csvJanitor.trimColumns) + 1,
+    );
   });
 
   it("adicionar regra leva o foco à coluna da linha nova", async () => {

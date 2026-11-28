@@ -2833,6 +2833,72 @@ export interface operations {
                     };
                 } | {
                     /** @constant */
+                    recipe_id: "csv-janitor";
+                    /** @constant */
+                    recipe_version: 2;
+                    /** CsvJanitorV2Parameters */
+                    parameters: {
+                        /**
+                         * Delimiter
+                         * @default ,
+                         * @enum {string}
+                         */
+                        input_delimiter?: "," | ";" | "\t";
+                        /**
+                         * Delimiter
+                         * @default ,
+                         * @enum {string}
+                         */
+                        output_delimiter?: "," | ";" | "\t";
+                        /** Trim Columns */
+                        trim_columns?: string[];
+                        /** Case Rules */
+                        case_rules?: {
+                            column: string;
+                            /**
+                             * CaseMode
+                             * @enum {string}
+                             */
+                            mode: "lower" | "upper";
+                        }[];
+                        /** Filters */
+                        filters?: {
+                            column: string;
+                            /**
+                             * FilterOp
+                             * @enum {string}
+                             */
+                            op: "eq" | "ne" | "contains" | "is_empty";
+                            /** Value */
+                            value?: string | null;
+                        }[];
+                        /** Deduplicate By */
+                        deduplicate_by?: string[];
+                        /** Output Columns */
+                        output_columns?: string[] | null;
+                        /**
+                         * FormulaGuard
+                         * @default none
+                         * @enum {string}
+                         */
+                        formula_guard?: "none" | "tab_prefix";
+                        /**
+                         * InputEncoding
+                         * @description Codificação declarada dos arquivos de entrada; a saída é sempre UTF-8.
+                         * @default utf-8
+                         * @enum {string}
+                         */
+                        input_encoding?: "utf-8" | "windows-1252" | "latin-1";
+                        /**
+                         * Output Bom
+                         * @default false
+                         */
+                        output_bom?: boolean;
+                        /** Collapse Whitespace Columns */
+                        collapse_whitespace_columns?: string[];
+                    };
+                } | {
+                    /** @constant */
                     recipe_id: "image-forge";
                     /** @constant */
                     recipe_version: 1;
@@ -3214,6 +3280,72 @@ export interface operations {
                          * @enum {string}
                          */
                         formula_guard?: "none" | "tab_prefix";
+                    };
+                } | {
+                    /** @constant */
+                    recipe_id: "csv-janitor";
+                    /** @constant */
+                    recipe_version: 2;
+                    /** CsvJanitorV2Parameters */
+                    parameters: {
+                        /**
+                         * Delimiter
+                         * @default ,
+                         * @enum {string}
+                         */
+                        input_delimiter?: "," | ";" | "\t";
+                        /**
+                         * Delimiter
+                         * @default ,
+                         * @enum {string}
+                         */
+                        output_delimiter?: "," | ";" | "\t";
+                        /** Trim Columns */
+                        trim_columns?: string[];
+                        /** Case Rules */
+                        case_rules?: {
+                            column: string;
+                            /**
+                             * CaseMode
+                             * @enum {string}
+                             */
+                            mode: "lower" | "upper";
+                        }[];
+                        /** Filters */
+                        filters?: {
+                            column: string;
+                            /**
+                             * FilterOp
+                             * @enum {string}
+                             */
+                            op: "eq" | "ne" | "contains" | "is_empty";
+                            /** Value */
+                            value?: string | null;
+                        }[];
+                        /** Deduplicate By */
+                        deduplicate_by?: string[];
+                        /** Output Columns */
+                        output_columns?: string[] | null;
+                        /**
+                         * FormulaGuard
+                         * @default none
+                         * @enum {string}
+                         */
+                        formula_guard?: "none" | "tab_prefix";
+                        /**
+                         * InputEncoding
+                         * @description Codificação declarada dos arquivos de entrada; a saída é sempre UTF-8.
+                         * @default utf-8
+                         * @enum {string}
+                         */
+                        input_encoding?: "utf-8" | "windows-1252" | "latin-1";
+                        /**
+                         * Output Bom
+                         * @default false
+                         */
+                        output_bom?: boolean;
+                        /** Collapse Whitespace Columns */
+                        collapse_whitespace_columns?: string[];
                     };
                 } | {
                     /** @constant */
@@ -3746,6 +3878,72 @@ export interface operations {
                          * @enum {string}
                          */
                         formula_guard?: "none" | "tab_prefix";
+                    };
+                } | {
+                    /** @constant */
+                    recipe_id: "csv-janitor";
+                    /** @constant */
+                    recipe_version: 2;
+                    /** CsvJanitorV2Parameters */
+                    parameters: {
+                        /**
+                         * Delimiter
+                         * @default ,
+                         * @enum {string}
+                         */
+                        input_delimiter?: "," | ";" | "\t";
+                        /**
+                         * Delimiter
+                         * @default ,
+                         * @enum {string}
+                         */
+                        output_delimiter?: "," | ";" | "\t";
+                        /** Trim Columns */
+                        trim_columns?: string[];
+                        /** Case Rules */
+                        case_rules?: {
+                            column: string;
+                            /**
+                             * CaseMode
+                             * @enum {string}
+                             */
+                            mode: "lower" | "upper";
+                        }[];
+                        /** Filters */
+                        filters?: {
+                            column: string;
+                            /**
+                             * FilterOp
+                             * @enum {string}
+                             */
+                            op: "eq" | "ne" | "contains" | "is_empty";
+                            /** Value */
+                            value?: string | null;
+                        }[];
+                        /** Deduplicate By */
+                        deduplicate_by?: string[];
+                        /** Output Columns */
+                        output_columns?: string[] | null;
+                        /**
+                         * FormulaGuard
+                         * @default none
+                         * @enum {string}
+                         */
+                        formula_guard?: "none" | "tab_prefix";
+                        /**
+                         * InputEncoding
+                         * @description Codificação declarada dos arquivos de entrada; a saída é sempre UTF-8.
+                         * @default utf-8
+                         * @enum {string}
+                         */
+                        input_encoding?: "utf-8" | "windows-1252" | "latin-1";
+                        /**
+                         * Output Bom
+                         * @default false
+                         */
+                        output_bom?: boolean;
+                        /** Collapse Whitespace Columns */
+                        collapse_whitespace_columns?: string[];
                     };
                 } | {
                     /** @constant */

@@ -14,6 +14,12 @@ export type RecipeCommandFor<K extends RecipeId> = Extract<RecipeCommand, { reci
 
 export type RecipeParameters<K extends RecipeId> = RecipeCommandFor<K>["parameters"];
 
+/** Parâmetros de uma versão: o formulário escrito para ela monta só essa variante. */
+export type RecipeParametersAt<
+  K extends RecipeId,
+  V extends RecipeCommandFor<K>["recipe_version"],
+> = Extract<RecipeCommandFor<K>, { recipe_version: V }>["parameters"];
+
 /** Estado atual do formulário de uma receita: o comando válido, ou os erros por campo. */
 export type RecipeDraft<K extends RecipeId> =
   | { readonly ok: true; readonly command: RecipeCommandFor<K> }

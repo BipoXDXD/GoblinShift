@@ -34,10 +34,13 @@ export interface RecipeForm {
   readonly renderFields: (props: RecipeFormProps<RecipeId>) => ReactElement;
 }
 
+/** As versões de cada receita no contrato, num tipo mapeado para `RecipeModule` variar só em K. */
+type RecipeVersions = { readonly [K in RecipeId]: RecipeCommandFor<K>["recipe_version"] };
+
 /** O que a Bancada precisa de cada receita: o formulário escrito à mão e como apontar seus erros. */
 export interface RecipeModule<K extends RecipeId = RecipeId> {
   readonly id: K;
-  readonly version: RecipeCommandFor<K>["recipe_version"];
+  readonly version: RecipeVersions[K];
   readonly title: string;
   /** Atributo `accept` do input de arquivos; `null` aceita qualquer tipo. */
   readonly accept: string | null;
@@ -52,6 +55,9 @@ export interface RecipeModule<K extends RecipeId = RecipeId> {
    * arquivos, então um preset ou uma execução reusada abre sem eles, no default.
    */
   readonly uploadBoundParameters?: readonly string[];
+  /** Versões anteriores cujos parâmetros este formulário aceita como estão, sobre os defaults da
+   * versão atual. */
+  readonly reusableVersions?: readonly number[];
 }
 
 interface FormParts<K extends RecipeId, S> {
@@ -86,7 +92,8 @@ function catalogForm<K extends RecipeId, S>({
 const RECIPES: { readonly [K in RecipeId]: RecipeModule<K> } = {
   "csv-janitor": {
     id: "csv-janitor",
-    version: 1,
+    version: 2,
+    reusableVersions: [1],
     title: RECIPE_TITLES["csv-janitor"],
     accept: ".csv,text/csv",
     formFor: catalogForm({
@@ -166,6 +173,30 @@ export function withoutUploadBoundParameters(
     ([key, value]) => bound.has(key) && value !== null,
   );
   return { parameters: Object.fromEntries(kept), dropped };
+}
+
+/** O que basta de uma receita para decidir se ela abre uma origem (preset ou execução). */
+interface SourceTarget {
+  readonly id: string;
+  readonly version: number;
+  readonly reusableVersions?: readonly number[];
+}
+
+/**
+ * A origem abre no formulário da receita: mesmo id, e versão igual à atual ou uma das anteriores
+ * que a receita declara reaproveitar.
+ */
+export function acceptsSource(
+  recipe: SourceTarget,
+  source: { readonly recipeId: string; readonly recipeVersion: number },
+): boolean {
+  if (source.recipeId !== recipe.id) {
+    return false;
+  }
+  return (
+    source.recipeVersion === recipe.version ||
+    (recipe.reusableVersions ?? []).includes(source.recipeVersion)
+  );
 }
 
 /** Receitas na ordem de exibição. */

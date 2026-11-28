@@ -2,17 +2,24 @@ import { z } from "zod";
 
 import { formIssue, type FormField } from "../../components/a11y/ErrorSummary";
 import { TEXT } from "../../text";
-import type { RecipeDraft, RecipeParameters } from "../types";
+import type { RecipeDraft, RecipeParametersAt } from "../types";
 
-// Formulário da variante csv-janitor v1. Tipos e opções vêm do código gerado da spec; defaults e
-// limites, que o tipo não carrega, vêm de GET /catalog em tempo de execução (settings.ts).
-type Parameters = RecipeParameters<"csv-janitor">;
+// Formulário da variante csv-janitor v2 (os parâmetros da v1 abrem nele, sobre os defaults da v2).
+// Tipos e opções vêm do código gerado da spec; defaults e limites, que o tipo não carrega, vêm de
+// GET /catalog em tempo de execução (settings.ts).
+type Parameters = RecipeParametersAt<"csv-janitor", 2>;
 type Delimiter = NonNullable<Parameters["input_delimiter"]>;
+type InputEncoding = NonNullable<Parameters["input_encoding"]>;
 type FormulaGuard = NonNullable<Parameters["formula_guard"]>;
 type CaseRule = NonNullable<Parameters["case_rules"]>[number];
 type Filter = NonNullable<Parameters["filters"]>[number];
 
 export const DELIMITERS = [",", ";", "\t"] as const satisfies readonly Delimiter[];
+export const ENCODINGS = [
+  "utf-8",
+  "windows-1252",
+  "latin-1",
+] as const satisfies readonly InputEncoding[];
 export const FORMULA_GUARDS = ["none", "tab_prefix"] as const satisfies readonly FormulaGuard[];
 export const CASE_MODES = ["lower", "upper"] as const satisfies readonly CaseRule["mode"][];
 export const FILTER_OPS = [
@@ -45,8 +52,11 @@ export interface FilterRow {
 /** Valores do formulário com os nomes da API; listas de colunas são texto, uma por linha. */
 export interface CsvJanitorFormValues {
   readonly input_delimiter: Delimiter;
+  readonly input_encoding: InputEncoding;
   readonly output_delimiter: Delimiter;
+  readonly output_bom: boolean;
   readonly trim_columns: string;
+  readonly collapse_whitespace_columns: string;
   readonly case_rules: readonly CaseRuleRow[];
   readonly filters: readonly FilterRow[];
   readonly deduplicate_by: string;
@@ -86,8 +96,11 @@ function parametersSchema({
 }: CsvJanitorLimits): z.ZodType<Required<Parameters>> {
   return z.object({
     input_delimiter: option(DELIMITERS),
+    input_encoding: option(ENCODINGS),
     output_delimiter: option(DELIMITERS),
+    output_bom: z.boolean(),
     trim_columns: columnList(maxColumns),
+    collapse_whitespace_columns: columnList(maxColumns),
     case_rules: z.array(caseRule).max(maxColumns, { error: ERRORS.tooManyRows(maxColumns) }),
     filters: z.array(filter).max(maxFilters, { error: ERRORS.tooManyRows(maxFilters) }),
     deduplicate_by: columnList(maxColumns),
@@ -117,7 +130,7 @@ export function parseCsvJanitor(
   }
   return {
     ok: true,
-    command: { recipe_id: "csv-janitor", recipe_version: 1, parameters: result.data },
+    command: { recipe_id: "csv-janitor", recipe_version: 2, parameters: result.data },
   };
 }
 
@@ -129,8 +142,11 @@ type RowPart = "column" | "mode" | "op" | "value";
 // Os mesmos rótulos do formulário (CsvJanitorFields): o resumo de erros cita o campo por eles.
 const SINGLE_LABELS: Readonly<Record<SingleField, string>> = {
   input_delimiter: T.inputDelimiter,
+  input_encoding: T.inputEncoding,
   output_delimiter: T.outputDelimiter,
+  output_bom: T.outputBom,
   trim_columns: T.trimColumns,
+  collapse_whitespace_columns: T.collapseColumns,
   deduplicate_by: T.deduplicateBy,
   output_columns: T.outputColumns,
   formula_guard: T.formulaGuard,

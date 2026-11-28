@@ -7,9 +7,10 @@ from pathlib import Path
 
 import pytest
 
+from goblinshift.catalog import CATALOG
 from goblinshift.processing.csv_janitor import FormulaGuard, Limits, Params
 from goblinshift.processing.csv_janitor.janitor import clean_table
-from goblinshift.processing.csv_janitor.recipe import MAX_TABLES, RECIPE_ID, CsvJanitorV1
+from goblinshift.processing.csv_janitor.recipe import MAX_TABLES, RECIPE_ID, CsvJanitor
 from goblinshift.processing.csv_janitor.results import TableCleaned, TableRejected
 from goblinshift.processing.output_dir import FileSystemOutputDir
 from goblinshift.processing.recipe import (
@@ -52,8 +53,8 @@ class Workspace:
         digest = hashlib.sha256(data).hexdigest()
         self.inputs.append(InputFile(position, path, original_name, len(data), digest))
 
-    def run(self, params: Params | None = None, recipe: CsvJanitorV1 | None = None) -> Report:
-        return (recipe or CsvJanitorV1()).run(
+    def run(self, params: Params | None = None, recipe: CsvJanitor | None = None) -> Report:
+        return (recipe or CsvJanitor()).run(
             params or Params(), self.inputs, FileSystemOutputDir(self.out_dir), self.progress
         )
 
@@ -144,7 +145,7 @@ def test_todas_rejeitadas_devolve_o_relatorio_sem_saidas_em_vez_de_falhar(
 def test_limite_da_tabela_rejeita_com_field_limit_exceeded(work: Workspace) -> None:
     work.add("grande.csv", "nome\r\na\r\nb\r\n")
 
-    report = work.run(recipe=CsvJanitorV1(limits=Limits(records=1)))
+    report = work.run(recipe=CsvJanitor(limits=Limits(records=1)))
 
     [item] = report.items
     assert isinstance(item, ItemRejected)
@@ -155,12 +156,12 @@ def test_tabela_um_byte_acima_do_tamanho_e_rejeitada(work: Workspace) -> None:
     work.add("a.csv", VALID)
     size = len(VALID.encode())
 
-    at_limit = work.run(recipe=CsvJanitorV1(limits=Limits(table_bytes=size)))
+    at_limit = work.run(recipe=CsvJanitor(limits=Limits(table_bytes=size)))
 
     assert isinstance(at_limit.items[0], ItemOk)
     shutil.rmtree(work.out_dir)
     work.out_dir.mkdir()
-    above = work.run(recipe=CsvJanitorV1(limits=Limits(table_bytes=size - 1)))
+    above = work.run(recipe=CsvJanitor(limits=Limits(table_bytes=size - 1)))
     assert isinstance(above.items[0], ItemRejected)
 
 
@@ -285,12 +286,24 @@ def test_registro_executa_a_receita_a_partir_dos_parametros_resolvidos(
     assert (work.out_dir / "a.csv").read_bytes() == b"nome\r\nana\r\n"
 
 
+def test_registro_da_v2_aceita_as_opcoes_novas(work: Workspace) -> None:
+    work.add("a.csv", "a\r\n1\r\n")
+    raw = CATALOG.resolve("csv-janitor", 2, {"output_bom": True})
+
+    report = RECIPES["csv-janitor", 2].execute(
+        raw, work.inputs, FileSystemOutputDir(work.out_dir), work.progress
+    )
+
+    assert isinstance(report.items[0], ItemOk)
+    assert (work.out_dir / "a.csv").read_bytes() == b"\xef\xbb\xbfa\r\n1\r\n"
+
+
 def test_tabela_que_cresce_alem_do_limite_na_saida_vira_item_rejeitado(work: Workspace) -> None:
     # O prefixo tab soma 3 bytes a cada "=1"; a entrada cabe no limite, a saída não.
     grows = "a\r\n=1\r\n"
     work.add("cresce.csv", grows)
     work.add("ok.csv", "b\r\n1\r\n")
-    recipe = CsvJanitorV1(limits=Limits(table_bytes=len(grows)))
+    recipe = CsvJanitor(limits=Limits(table_bytes=len(grows)))
 
     report = work.run(Params(formula_guard=FormulaGuard.TAB_PREFIX), recipe)
 
@@ -306,7 +319,7 @@ def test_previews_vem_depois_de_todas_as_saidas(work: Workspace) -> None:
     work.add("b.csv", VALID)
     out = FileSystemOutputDir(work.out_dir)
 
-    CsvJanitorV1().run(Params(), work.inputs, out, work.progress)
+    CsvJanitor().run(Params(), work.inputs, out, work.progress)
 
     assert [name for name, _role in out.created] == [
         "a.csv",
@@ -341,7 +354,7 @@ def test_erro_numa_tabela_no_meio_do_lote_sobe_sem_progresso_nem_preview(
     out = FileSystemOutputDir(work.out_dir)
 
     with pytest.raises(RuntimeError) as raised:
-        CsvJanitorV1().run(Params(), work.inputs, out, work.progress)
+        CsvJanitor().run(Params(), work.inputs, out, work.progress)
 
     assert raised.value is boom
     assert calls == ["a", "b"]

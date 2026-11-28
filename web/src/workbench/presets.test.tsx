@@ -89,7 +89,7 @@ describe("Bancada: Salvar preset", () => {
     expect(await request?.json()).toMatchObject({
       name: "Clientes do mês",
       recipe_id: "csv-janitor",
-      recipe_version: 1,
+      recipe_version: 2,
       parameters: expect.objectContaining({ input_delimiter: "," }) as unknown,
     });
   });
@@ -376,6 +376,18 @@ describe("Bancada aberta com um preset", () => {
     expect(screen.getByLabelText("Colunas sem espaços nas pontas")).toHaveValue("nome");
   });
 
+  it("preset da versão anterior abre com os parâmetros", async () => {
+    setup(`/bancada/csv-janitor?preset=${PRESET_ID}`, {
+      [`GET /api/v1/presets/${PRESET_ID}`]: () => jsonResponse(presetBody({ recipe_version: 1 })),
+    });
+
+    expect(await screen.findByText("Parâmetros do preset Clientes do mês.")).toBeVisible();
+    expect(screen.getByLabelText("Colunas sem espaços nas pontas")).toHaveValue("nome");
+    // Os campos da v2 ficam nos defaults dela.
+    expect(screen.getByLabelText("Codificação dos arquivos de entrada")).toHaveValue("utf-8");
+    expect(screen.getByLabelText("Colunas com espaços internos juntados")).toHaveValue("");
+  });
+
   it("anuncia a origem numa região viva que já existia antes de o preset chegar", async () => {
     let release = (): void => undefined;
     const held = new Promise<void>((resolve) => {
@@ -446,7 +458,7 @@ describe("Bancada aberta com um preset", () => {
 
   it("preset de outra versão da receita abre com os parâmetros padrão e avisa", async () => {
     setup(`/bancada/csv-janitor?preset=${PRESET_ID}`, {
-      [`GET /api/v1/presets/${PRESET_ID}`]: () => jsonResponse(presetBody({ recipe_version: 2 })),
+      [`GET /api/v1/presets/${PRESET_ID}`]: () => jsonResponse(presetBody({ recipe_version: 3 })),
     });
 
     expect(
@@ -556,7 +568,8 @@ describe("Bancada: Atualizar preset", () => {
     expect(await request?.json()).toMatchObject({
       name: "Clientes do mês",
       recipe_id: "csv-janitor",
-      recipe_version: 1,
+      // O preset era da v1 e foi aberto no formulário da v2: atualizar o leva à v2.
+      recipe_version: 2,
       parameters: expect.objectContaining({
         output_delimiter: ",",
         trim_columns: ["nome"],
@@ -820,7 +833,7 @@ describe("Bancada: Atualizar preset", () => {
       "por preset de outra versão da mesma receita",
       PRESET_ROUTE,
       {
-        [`GET /api/v1/presets/${PRESET_ID}`]: () => jsonResponse(presetBody({ recipe_version: 2 })),
+        [`GET /api/v1/presets/${PRESET_ID}`]: () => jsonResponse(presetBody({ recipe_version: 3 })),
       },
     ],
     [
