@@ -11,10 +11,10 @@ export type RecipeId = RunCommand["recipe_id"];
 export type RecipeCommand = DistributiveOmit<RunCommand, "input_upload_ids">;
 
 /**
- * Versão que o formulário escreve, nas receitas com mais de uma versão no catálogo. O Image Forge
- * v2 já existe na API, mas a Bancada continua na v1 até ganhar o formulário da v2.
+ * Versão que o formulário escreve, nas receitas com mais de uma versão no catálogo. A Bancada só
+ * mostra a mais nova; a anterior abre nela (`RecipeModule.opensVersions`).
  */
-type FormVersions = Record<RecipeId, number> & { readonly "image-forge": 1 };
+type FormVersions = Record<RecipeId, number> & { readonly "image-forge": 2 };
 
 /** A versão que o formulário da receita escreve. */
 export type RecipeFormVersion<K extends RecipeId> = FormVersions[K];

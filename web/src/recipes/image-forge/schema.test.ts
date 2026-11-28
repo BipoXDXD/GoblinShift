@@ -1,7 +1,7 @@
 import { describe, expect, expectTypeOf, it } from "vitest";
 
 import type { RecipeDraft, RecipeParameters } from "../types";
-import type { OUTPUT_FORMATS } from "./schema";
+import type { FIT_MODES, OUTPUT_FORMATS } from "./schema";
 import {
   imageForgeField,
   parseImageForge,
@@ -17,13 +17,41 @@ const SETTINGS: ImageForgeSettings = {
     jpeg_quality: "85",
     jpeg_background: "#FFFFFF",
     make_thumbnails: false,
+    fit: "contain",
+    scale_percent: "100",
+    webp_quality: "80",
+    webp_lossless: false,
+  },
+  disabledValues: {
+    max_width: "1600",
+    max_height: "1600",
+    jpeg_quality: "85",
+    jpeg_background: "#FFFFFF",
+    scale_percent: "100",
+    webp_quality: "80",
+    webp_lossless: false,
   },
   limits: {
     width: { min: 16, max: 4096 },
     height: { min: 16, max: 4096 },
     quality: { min: 60, max: 95 },
+    scale: { min: 1, max: 100 },
+    webpQuality: { min: 60, max: 95 },
     thumbnailBox: 320,
   },
+};
+
+const V2_DEFAULTS = {
+  max_width: 1600,
+  max_height: 1600,
+  output_format: "preserve",
+  jpeg_quality: 85,
+  jpeg_background: "#FFFFFF",
+  make_thumbnails: false,
+  fit: "contain",
+  scale_percent: 100,
+  webp_quality: 80,
+  webp_lossless: false,
 };
 
 function values(overrides: Partial<ImageForgeFormValues> = {}): ImageForgeFormValues {
@@ -50,25 +78,126 @@ describe("constantes espelham os tipos gerados", () => {
       NonNullable<RecipeParameters<"image-forge">["output_format"]>
     >();
   });
+
+  it("modos de ajuste", () => {
+    expectTypeOf<(typeof FIT_MODES)[number]>().toEqualTypeOf<
+      NonNullable<RecipeParameters<"image-forge">["fit"]>
+    >();
+  });
 });
 
 describe("parseImageForge", () => {
-  it("os defaults viram um comando válido e explícito", () => {
-    expect(parseImageForge(values(), SETTINGS)).toEqual({
+  it("produz o comando da versão 2 com os defaults do catálogo", () => {
+    expect(parseImageForge(SETTINGS.defaults, SETTINGS)).toEqual({
       ok: true,
-      command: {
-        recipe_id: "image-forge",
-        recipe_version: 1,
-        parameters: {
-          max_width: 1600,
-          max_height: 1600,
-          output_format: "preserve",
-          jpeg_quality: 85,
-          jpeg_background: "#FFFFFF",
-          make_thumbnails: false,
-        },
-      },
+      command: { recipe_id: "image-forge", recipe_version: 2, parameters: V2_DEFAULTS },
     });
+  });
+
+  it("em escala, largura e altura saem no default do catálogo, sem erro", () => {
+    const parameters = parametersOf(
+      parseImageForge(
+        values({ fit: "scale", scale_percent: "50", max_width: "abc", max_height: "800" }),
+        SETTINGS,
+      ),
+    );
+
+    expect(parameters).toMatchObject({
+      fit: "scale",
+      scale_percent: 50,
+      max_width: 1600,
+      max_height: 1600,
+    });
+  });
+
+  it("fora de escala, a escala sai no default do catálogo, sem erro", () => {
+    const parameters = parametersOf(
+      parseImageForge(values({ fit: "cover", scale_percent: "0" }), SETTINGS),
+    );
+
+    expect(parameters).toMatchObject({ fit: "cover", scale_percent: 100 });
+  });
+
+  it("o default enviado é o do schema, não o valor que abriu o formulário", () => {
+    const settings = { ...SETTINGS, defaults: values({ max_width: "1080", jpeg_quality: "70" }) };
+
+    expect(
+      parametersOf(parseImageForge(values({ fit: "scale", output_format: "png" }), settings)),
+    ).toMatchObject({ max_width: 1600, jpeg_quality: 85 });
+  });
+
+  it.each([
+    ["1", true],
+    ["100", true],
+    ["0", false],
+    ["101", false],
+  ])("escala %s", (scale, valid) => {
+    expect(parseImageForge(values({ fit: "scale", scale_percent: scale }), SETTINGS).ok).toBe(
+      valid,
+    );
+  });
+
+  it("escala fora de 1 a 100 aponta o campo", () => {
+    expect(
+      issuesOf(parseImageForge(values({ fit: "scale", scale_percent: "150" }), SETTINGS)),
+    ).toEqual([
+      {
+        fieldId: "image-forge-scale_percent",
+        label: "Escala, em %",
+        message: "Informe um número inteiro de 1 a 100.",
+      },
+    ]);
+  });
+
+  it.each(["jpeg", "png"] as const)(
+    "com saída %s, as opções de WebP saem nos defaults do catálogo",
+    (format) => {
+      const parameters = parametersOf(
+        parseImageForge(
+          values({ output_format: format, webp_quality: "x", webp_lossless: true }),
+          SETTINGS,
+        ),
+      );
+
+      expect(parameters).toMatchObject({ webp_quality: 80, webp_lossless: false });
+    },
+  );
+
+  it.each(["webp", "preserve"] as const)("com saída %s, as opções de WebP valem", (format) => {
+    const parameters = parametersOf(
+      parseImageForge(values({ output_format: format, webp_quality: "90" }), SETTINGS),
+    );
+
+    expect(parameters).toMatchObject({ webp_quality: 90, webp_lossless: false });
+  });
+
+  it("WebP sem perdas manda a qualidade do WebP no default", () => {
+    const parameters = parametersOf(
+      parseImageForge(
+        values({ output_format: "webp", webp_lossless: true, webp_quality: "61" }),
+        SETTINGS,
+      ),
+    );
+
+    expect(parameters).toMatchObject({ webp_lossless: true, webp_quality: 80 });
+  });
+
+  it("qualidade do WebP fora da faixa aponta o campo", () => {
+    expect(issuesOf(parseImageForge(values({ webp_quality: "96" }), SETTINGS))).toEqual([
+      {
+        fieldId: "image-forge-webp_quality",
+        label: "Qualidade do WebP",
+        message: "Informe um número inteiro de 60 a 95.",
+      },
+    ]);
+  });
+
+  it("com saída WebP, as opções de JPEG saem nos defaults do catálogo", () => {
+    const parameters = parametersOf(
+      parseImageForge(values({ output_format: "webp", jpeg_quality: "abc" }), SETTINGS),
+    );
+
+    expect(parameters).toMatchObject({ jpeg_quality: 85, jpeg_background: "#FFFFFF" });
   });
 
   it.each([
@@ -176,6 +305,10 @@ describe("imageForgeField", () => {
     [["max_width"], "image-forge-max_width", "Largura máxima, em pixels"],
     [["jpeg_background"], "image-forge-jpeg_background", "Cor de fundo da transparência no JPEG"],
     [["make_thumbnails"], "image-forge-make_thumbnails", "Gerar miniaturas"],
+    [["fit"], "image-forge-fit", "Ajuste"],
+    [["scale_percent"], "image-forge-scale_percent", "Escala, em %"],
+    [["webp_quality"], "image-forge-webp_quality", "Qualidade do WebP"],
+    [["webp_lossless"], "image-forge-webp_lossless", "WebP sem perdas"],
   ])("%j → %s (%s)", (path, fieldId, label) => {
     expect(imageForgeField(path)).toEqual({ fieldId, label });
   });

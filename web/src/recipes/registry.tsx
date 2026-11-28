@@ -98,10 +98,11 @@ const RECIPES: { readonly [K in RecipeId]: RecipeModule<K> } = {
   },
   "image-forge": {
     id: "image-forge",
-    version: 1,
+    version: 2,
     title: RECIPE_TITLES["image-forge"],
-    // MPO (fotos de celular) costuma vir com extensão .jpg; .mpo cobre o resto (1.2).
-    accept: ".jpg,.jpeg,.png,.mpo,image/jpeg,image/png",
+    // MPO (fotos de celular) costuma vir com extensão .jpg; .mpo cobre o resto (1.2). WebP e GIF
+    // estáticos entram na v2; a animação é recusada no executor.
+    accept: ".jpg,.jpeg,.png,.mpo,.webp,.gif,image/jpeg,image/png,image/webp,image/gif",
     formFor: catalogForm({
       settingsOf: imageForgeSettings,
       initialDraft: (settings) => parseImageForge(settings.defaults, settings),

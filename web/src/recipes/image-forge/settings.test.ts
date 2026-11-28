@@ -14,6 +14,27 @@ describe("imageForgeSettings", () => {
       jpeg_quality: "85",
       jpeg_background: "#FFFFFF",
       make_thumbnails: false,
+      fit: "contain",
+      scale_percent: "100",
+      webp_quality: "80",
+      webp_lossless: false,
+    });
+  });
+
+  it("os valores dos controles desabilitados são os defaults do schema", () => {
+    const settings = imageForgeSettings({
+      ...version,
+      defaults: { ...version.defaults, max_width: 1080, webp_quality: 90 },
+    });
+
+    expect(settings?.disabledValues).toEqual({
+      max_width: "1600",
+      max_height: "1600",
+      jpeg_quality: "85",
+      jpeg_background: "#FFFFFF",
+      scale_percent: "100",
+      webp_quality: "80",
+      webp_lossless: false,
     });
   });
 
@@ -22,6 +43,8 @@ describe("imageForgeSettings", () => {
       width: { min: 16, max: 4096 },
       height: { min: 16, max: 4096 },
       quality: { min: 60, max: 95 },
+      scale: { min: 1, max: 100 },
+      webpQuality: { min: 60, max: 95 },
       thumbnailBox: 320,
     });
   });
@@ -33,7 +56,7 @@ describe("imageForgeSettings", () => {
       parameters_schema: {
         properties: {
           ...version.parameters_schema.properties,
-          max_width: { minimum: 32, maximum: 2048 },
+          max_width: { minimum: 32, maximum: 2048, default: 1600 },
         },
       },
     });
@@ -45,8 +68,24 @@ describe("imageForgeSettings", () => {
     });
   });
 
+  it("settings devolve null quando o catálogo não traz fit", () => {
+    expect(imageForgeSettings(catalogVersion("image-forge", 1))).toBeNull();
+  });
+
   it.each([
-    ["formato desconhecido", { defaults: { ...version.defaults, output_format: "webp" } }],
+    ["formato desconhecido", { defaults: { ...version.defaults, output_format: "avif" } }],
+    ["modo de ajuste desconhecido", { defaults: { ...version.defaults, fit: "zoom" } }],
+    [
+      "schema sem default do lado",
+      {
+        parameters_schema: {
+          properties: {
+            ...version.parameters_schema.properties,
+            max_width: { minimum: 16, maximum: 4096 },
+          },
+        },
+      },
+    ],
     ["default ausente", { defaults: { max_width: 1600 } }],
     ["sem caixa da miniatura", { limits: { max_inputs: 100 } }],
     ["schema sem faixa", { parameters_schema: { properties: {} } }],

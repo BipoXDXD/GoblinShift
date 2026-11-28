@@ -783,7 +783,7 @@ describe("Bancada", () => {
     expect(screen.getByRole("heading", { level: 1, name: "Bancada: Image Forge" })).toHaveFocus();
     expect(screen.getByLabelText("Escolher arquivos")).toHaveAttribute(
       "accept",
-      ".jpg,.jpeg,.png,.mpo,image/jpeg,image/png",
+      ".jpg,.jpeg,.png,.mpo,.webp,.gif,image/jpeg,image/png,image/webp,image/gif",
     );
     await user.upload(screen.getByLabelText("Escolher arquivos"), [
       new File(["png"], "foto.png", { type: "image/png" }),
@@ -795,7 +795,7 @@ describe("Bancada", () => {
 
     await screen.findByRole("heading", { level: 1, name: "Execução" });
     const body = await bodyOf(runRequests(api.requests)[0]);
-    expect(body).toMatchObject({ recipe_id: "image-forge", recipe_version: 1 });
+    expect(body).toMatchObject({ recipe_id: "image-forge", recipe_version: 2 });
     expect(body.parameters).toEqual({
       max_width: 1600,
       max_height: 1600,
@@ -803,6 +803,10 @@ describe("Bancada", () => {
       jpeg_quality: 85,
       jpeg_background: "#FFFFFF",
       make_thumbnails: true,
+      fit: "contain",
+      scale_percent: 100,
+      webp_quality: 80,
+      webp_lossless: false,
     });
   });
 

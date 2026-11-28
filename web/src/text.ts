@@ -573,10 +573,25 @@ export const TEXT = {
       `De ${String(min)} a ${String(max)}. A imagem é reduzida para caber, mantendo a proporção; nunca é ampliada.`,
     outputFormat: "Formato de saída",
     outputFormats: {
-      preserve: "Manter o formato (PNG continua PNG; JPEG continua JPEG)",
+      preserve: "Manter o formato (PNG e GIF saem PNG; JPEG sai JPEG; WebP sai WebP)",
       jpeg: "JPEG",
       png: "PNG",
+      webp: "WebP",
     },
+    fit: "Ajuste",
+    fitModes: {
+      contain: "Caber na caixa (mantém a proporção)",
+      cover: "Preencher e cortar o centro",
+      pad: "Caixa exata com margem",
+      scale: "Escala em porcentagem",
+    },
+    fitHints: {
+      cover: "Corta o que sobra nas bordas para preencher a caixa; nunca amplia.",
+      pad: "A margem fica transparente em PNG e WebP, e na cor de fundo em JPEG.",
+    },
+    scalePercent: "Escala, em %",
+    webpQuality: "Qualidade do WebP",
+    webpLossless: "WebP sem perdas",
     jpegQuality: "Qualidade do JPEG",
     jpegQualityHint: (min: number, max: number) =>
       `De ${String(min)} a ${String(max)}. Vale só para as saídas em JPEG.`,

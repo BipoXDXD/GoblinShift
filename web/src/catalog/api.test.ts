@@ -66,7 +66,7 @@ describe("findCatalogVersion", () => {
 
   it.each([
     ["receita ausente", "receita-inexistente", 1],
-    ["versão ausente", "image-forge", 2],
+    ["versão ausente", "image-forge", 3],
   ])("%s → null", async (_, recipeId, version) => {
     const catalog = await loadCatalog();
     expect(findCatalogVersion(catalog, recipeId, version)).toBeNull();

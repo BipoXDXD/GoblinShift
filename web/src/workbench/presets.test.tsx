@@ -838,7 +838,7 @@ describe("Bancada: Atualizar preset", () => {
   it("parâmetros inválidos pedem correção em vez de abrir o diálogo", async () => {
     const { api, user } = setup(`/bancada/image-forge?preset=${PRESET_ID}`, {
       [`GET /api/v1/presets/${PRESET_ID}`]: () =>
-        jsonResponse(presetBody({ recipe_id: "image-forge", parameters: {} })),
+        jsonResponse(presetBody({ recipe_id: "image-forge", recipe_version: 2, parameters: {} })),
     });
 
     const width = await screen.findByLabelText("Largura máxima, em pixels");
