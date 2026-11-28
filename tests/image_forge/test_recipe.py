@@ -6,6 +6,7 @@ import pytest
 from PIL import Image
 
 from goblinshift.processing.image_forge import RECIPE_ID, OutputFormat, Params
+from goblinshift.processing.image_forge.inspection import V1_FORMATS
 from goblinshift.processing.image_forge.limits import Limits
 from goblinshift.processing.image_forge.preparation import Prepared, prepare
 from goblinshift.processing.image_forge.recipe import ImageForgeV1
@@ -413,12 +414,14 @@ def test_erro_numa_imagem_no_meio_do_lote_sobe_sem_progresso_nem_preview(
     boom = RuntimeError("falha inesperada na segunda imagem")
     calls: list[str] = []
 
-    def prepare_that_fails_second(path: Path, limits: Limits) -> Prepared:
+    def prepare_that_fails_second(
+        path: Path, limits: Limits, formats: tuple[str, ...] = V1_FORMATS
+    ) -> Prepared:
         # O Workspace grava cada entrada como inputs/<posição com 4 dígitos>.
         calls.append(path.name)
         if path.name == "0001":
             raise boom
-        return prepare(path, limits)
+        return prepare(path, limits, formats)
 
     monkeypatch.setattr(
         "goblinshift.processing.image_forge.recipe.prepare", prepare_that_fails_second

@@ -12,6 +12,7 @@ valor, o `mapping` aponta cada `recipe_id` para um `oneOf` das versões dela, di
 
 import copy
 import dataclasses
+import re
 from collections.abc import Callable, Iterable, Mapping
 from dataclasses import dataclass, field
 from datetime import datetime
@@ -23,6 +24,7 @@ from pydantic import BaseModel, ValidationError
 from goblinshift.catalog.csv_janitor_v1 import CsvJanitorV1Parameters
 from goblinshift.catalog.downloads_detox_v1 import DownloadsDetoxV1Parameters
 from goblinshift.catalog.image_forge_v1 import ImageForgeV1Parameters
+from goblinshift.catalog.image_forge_v2 import ImageForgeV2Parameters
 from goblinshift.catalog.media_mill_v1 import MediaMillV1Parameters
 from goblinshift.catalog.pdf_press_v1 import PdfPressV1Parameters, upload_references
 from goblinshift.catalog.references import UploadReference, no_upload_references
@@ -74,6 +76,42 @@ class InvalidParametersError(ValueError):
         super().__init__("; ".join(map(str, self.errors)))
 
 
+def _field_errors(error: ValidationError) -> list[FieldError]:
+    return [
+        FieldError(tuple(str(part) for part in detail["loc"]), detail["msg"], detail["type"])
+        for detail in error.errors()
+    ]
+
+
+def _sorted_keys(value: object) -> object:
+    if isinstance(value, dict):
+        return {key: _sorted_keys(value[key]) for key in sorted(value)}
+    if isinstance(value, list):
+        return [_sorted_keys(item) for item in value]
+    return value
+
+
+# Ids do catálogo e chaves de ajuste pronto (`csv-janitor`, `web-1600`); a API usa o mesmo formato
+# no caminho e nos filtros.
+SLUG_PATTERN = r"^[a-z0-9]+(?:-[a-z0-9]+)*$"
+
+
+@dataclass(frozen=True)
+class SystemPreset:
+    """Ajuste pronto de uma versão (D2): dado do produto, só leitura, fora de `/presets`.
+
+    `parameters` é parcial; o resto vem dos defaults da versão ao resolver.
+    """
+
+    key: str
+    name: str
+    parameters: Mapping[str, object]
+
+    def __post_init__(self) -> None:
+        if re.fullmatch(SLUG_PATTERN, self.key) is None:
+            raise ValueError(f"chave de ajuste pronto fora do formato: {self.key!r}")
+
+
 @dataclass(frozen=True)
 class RecipeVersion:
     recipe_id: str
@@ -89,6 +127,8 @@ class RecipeVersion:
     # Data de desligamento (header `Sunset`, RFC 8594): obrigatória em `deprecated`, que continua
     # aceita por pelo menos 90 dias (1.6); a retirada pode guardar a data em que saiu.
     sunset_at: datetime | None = None
+    # Ajustes prontos publicados em `GET /catalog`; validados pelo modelo da versão no import.
+    system_presets: tuple[SystemPreset, ...] = ()
 
     def __post_init__(self) -> None:
         if self.sunset_at is not None and self.sunset_at.tzinfo is None:
@@ -97,6 +137,18 @@ class RecipeVersion:
             raise ValueError("versão deprecated exige sunset_at")
         if self.status is VersionStatus.CURRENT and self.sunset_at is not None:
             raise ValueError("versão current não tem sunset_at")
+        self._check_system_presets()
+
+    def _check_system_presets(self) -> None:
+        keys = [preset.key for preset in self.system_presets]
+        if len(set(keys)) != len(keys):
+            raise ValueError("chave de ajuste pronto repetida")
+        names = [preset.name for preset in self.system_presets]
+        if len(set(names)) != len(names):
+            raise ValueError("nome de ajuste pronto repetido")
+        # `InvalidParametersError` sobe como está: o import do catálogo falha com o erro por campo.
+        for preset in self.system_presets:
+            self.resolve(preset.parameters)
 
     def resolve(self, raw_params: object) -> dict[str, object]:
         """Parâmetros validados com os defaults da versão, em forma canônica.
@@ -188,6 +240,50 @@ IMAGE_FORGE_V1 = RecipeVersion(
     },
 )
 
+# Ao lado da v1, com os mesmos limites (ADR 066): a v1 continua aceita até a Bancada mudar.
+IMAGE_FORGE_V2 = RecipeVersion(
+    recipe_id=image_forge.RECIPE_ID,
+    version=image_forge.VERSION_2,
+    status=VersionStatus.CURRENT,
+    parameters_model=ImageForgeV2Parameters,
+    limits=IMAGE_FORGE_V1.limits,
+    system_presets=(
+        SystemPreset(
+            "web-1600",
+            "Web 1600",
+            {
+                "fit": "contain",
+                "max_width": 1600,
+                "max_height": 1600,
+                "output_format": "webp",
+                "webp_quality": 80,
+            },
+        ),
+        SystemPreset(
+            "email-1024",
+            "E-mail 1024",
+            {
+                "fit": "contain",
+                "max_width": 1024,
+                "max_height": 1024,
+                "output_format": "jpeg",
+                "jpeg_quality": 80,
+            },
+        ),
+        SystemPreset(
+            "redes-1080",
+            "Redes 1080",
+            {
+                "fit": "cover",
+                "max_width": 1080,
+                "max_height": 1080,
+                "output_format": "jpeg",
+                "jpeg_quality": 85,
+            },
+        ),
+    ),
+)
+
 # O teto do lote fica abaixo dos 480 MiB de conteúdo de saída (1.7): o Detox copia cada entrada
 # aceita. A aceitação o impõe (`max_total_input_bytes` → 422) antes de reservar o teto de saída.
 DOWNLOADS_DETOX_V1 = RecipeVersion(
@@ -243,22 +339,16 @@ PDF_PRESS_V1 = RecipeVersion(
     upload_references=upload_references,
 )
 
-CATALOG = Catalog([CSV_JANITOR_V1, IMAGE_FORGE_V1, DOWNLOADS_DETOX_V1, PDF_PRESS_V1, MEDIA_MILL_V1])
-
-
-def _field_errors(error: ValidationError) -> list[FieldError]:
-    return [
-        FieldError(tuple(str(part) for part in detail["loc"]), detail["msg"], detail["type"])
-        for detail in error.errors()
+CATALOG = Catalog(
+    [
+        CSV_JANITOR_V1,
+        IMAGE_FORGE_V1,
+        IMAGE_FORGE_V2,
+        DOWNLOADS_DETOX_V1,
+        PDF_PRESS_V1,
+        MEDIA_MILL_V1,
     ]
-
-
-def _sorted_keys(value: object) -> object:
-    if isinstance(value, dict):
-        return {key: _sorted_keys(value[key]) for key in sorted(value)}
-    if isinstance(value, list):
-        return [_sorted_keys(item) for item in value]
-    return value
+)
 
 
 def _inline_refs(schema: dict[str, Any]) -> dict[str, Any]:

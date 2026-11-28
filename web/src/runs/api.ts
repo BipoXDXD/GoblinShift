@@ -97,7 +97,7 @@ const formulaCellsSchema = z
   .nullable()
   .catch(null);
 
-const imageFormatSchema = z.enum(["jpeg", "png", "mpo"]);
+const imageFormatSchema = z.enum(["jpeg", "png", "mpo", "webp", "gif"]);
 
 /**
  * Antes e depois de cada entrada, só com números e valores de listas fechadas. Um `kind` ou

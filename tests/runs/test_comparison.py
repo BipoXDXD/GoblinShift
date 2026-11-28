@@ -5,6 +5,7 @@ from enum import StrEnum
 import pytest
 
 from goblinshift.processing.image_forge.encoding import SaveFormat
+from goblinshift.processing.image_forge.formats import V2_FORMATS
 from goblinshift.processing.image_forge.inspection import ACCEPTED_FORMATS, MPO
 from goblinshift.processing.media_mill import probe
 from goblinshift.processing.media_mill.params import AudioFormat as MediaMillAudioFormat
@@ -138,7 +139,7 @@ def test_detox_e_receita_desconhecida_nao_tem_comparacao(recipe_id: str) -> None
         ("width_after", "800"),
         ("width_after", None),
         ("format_before", "a.jpg"),
-        ("format_after", "gif"),
+        ("format_after", "avif"),
         ("format_after", 1),
         ("bytes_before", 1.5),
         ("bytes_before", -1),
@@ -242,6 +243,23 @@ def test_codecs_de_audio_sao_os_da_allowlist_do_media_mill() -> None:
 def test_formatos_de_imagem_cobrem_entrada_e_saida_da_v1() -> None:
     v1 = {name.lower() for name in (*ACCEPTED_FORMATS, MPO)} | values(SaveFormat)
     assert v1 <= values(ImageFormat)
+
+
+def test_formatos_de_imagem_cobrem_entrada_e_saida_da_v2() -> None:
+    v2 = {name.lower() for name in (*V2_FORMATS, MPO)} | values(SaveFormat)
+    assert v2 <= values(ImageFormat)
+
+
+def test_comparacao_da_v2_aceita_webp_e_gif() -> None:
+    details = IMAGE_DETAILS | {"format_before": "gif", "format_after": "webp"}
+
+    comparison = comparison_from_report("image-forge", {}, details)
+
+    assert isinstance(comparison, ImageComparison)
+    assert (comparison.format_before, comparison.format_after) == (
+        ImageFormat.GIF,
+        ImageFormat.WEBP,
+    )
 
 
 def test_formatos_de_audio_cobrem_os_da_v1_do_media_mill() -> None:

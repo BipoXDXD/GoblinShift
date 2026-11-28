@@ -12,6 +12,7 @@ from goblinshift.catalog import (
     Catalog,
     InvalidParametersError,
     RecipeVersionRetiredError,
+    SystemPreset,
     UnknownRecipeVersionError,
     VersionStatus,
 )
@@ -241,6 +242,7 @@ def test_catalogo_lista_as_receitas_implementadas_na_versao_1() -> None:
     assert keys == {
         ("csv-janitor", 1),
         ("image-forge", 1),
+        ("image-forge", 2),
         ("downloads-detox", 1),
         ("pdf-press", 1),
         ("media-mill", 1),
@@ -357,3 +359,107 @@ def test_detox_aceita_com_preserve_o_name_prefix_default_enviado() -> None:
 def test_detox_recusa_com_preserve_outro_name_prefix() -> None:
     with pytest.raises(InvalidParametersError):
         CATALOG.resolve("downloads-detox", 1, {"name_mode": "preserve", "name_prefix": "doc"})
+
+
+# Ajustes prontos do sistema (D2/D3 do plano de paridade): dado do catálogo, só leitura.
+
+
+@pytest.mark.parametrize(
+    ("key", "name", "expected"),
+    [
+        (
+            "web-1600",
+            "Web 1600",
+            {"fit": "contain", "max_width": 1600, "max_height": 1600},
+        ),
+        (
+            "email-1024",
+            "E-mail 1024",
+            {"fit": "contain", "max_width": 1024, "max_height": 1024},
+        ),
+        (
+            "redes-1080",
+            "Redes 1080",
+            {"fit": "cover", "max_width": 1080, "max_height": 1080},
+        ),
+    ],
+    ids=["web", "email", "redes"],
+)
+def test_ajuste_pronto_da_v2_fixa_ajuste_e_caixa(
+    key: str, name: str, expected: dict[str, object]
+) -> None:
+    v2 = CATALOG.get_version("image-forge", 2)
+    [preset] = [preset for preset in v2.system_presets if preset.key == key]
+
+    resolved = v2.resolve(preset.parameters)
+
+    assert preset.name == name
+    assert {field: resolved[field] for field in expected} == expected
+
+
+@pytest.mark.parametrize(
+    ("key", "expected"),
+    [
+        ("web-1600", {"output_format": "webp", "webp_quality": 80}),
+        ("email-1024", {"output_format": "jpeg", "jpeg_quality": 80}),
+        ("redes-1080", {"output_format": "jpeg", "jpeg_quality": 85}),
+    ],
+    ids=["web", "email", "redes"],
+)
+def test_ajuste_pronto_da_v2_fixa_formato_e_qualidade(
+    key: str, expected: dict[str, object]
+) -> None:
+    v2 = CATALOG.get_version("image-forge", 2)
+    [preset] = [preset for preset in v2.system_presets if preset.key == key]
+
+    resolved = v2.resolve(preset.parameters)
+
+    assert {field: resolved[field] for field in expected} == expected
+
+
+def test_ajustes_prontos_da_v2_saem_na_ordem_do_produto() -> None:
+    v2 = CATALOG.get_version("image-forge", 2)
+
+    assert [preset.key for preset in v2.system_presets] == ["web-1600", "email-1024", "redes-1080"]
+
+
+def test_versoes_sem_ajustes_prontos_ficam_com_a_tupla_vazia() -> None:
+    assert CATALOG.get_version("image-forge", 1).system_presets == ()
+
+
+@pytest.mark.parametrize(
+    ("presets", "message"),
+    [
+        (
+            (SystemPreset("a", "A", {}), SystemPreset("a", "B", {})),
+            "chave de ajuste pronto repetida",
+        ),
+        (
+            (SystemPreset("a", "A", {}), SystemPreset("b", "A", {})),
+            "nome de ajuste pronto repetido",
+        ),
+    ],
+    ids=["chave", "nome"],
+)
+def test_ajuste_pronto_repetido_e_recusado_no_import(
+    presets: tuple[SystemPreset, ...], message: str
+) -> None:
+    v2 = CATALOG.get_version("image-forge", 2)
+
+    with pytest.raises(ValueError, match=message):
+        replace(v2, system_presets=presets)
+
+
+def test_ajuste_pronto_com_parametros_invalidos_e_recusado_pelo_modelo_da_versao() -> None:
+    v2 = CATALOG.get_version("image-forge", 2)
+
+    with pytest.raises(InvalidParametersError) as raised:
+        replace(v2, system_presets=(SystemPreset("a", "A", {"max_width": 0}),))
+
+    assert [error.location for error in raised.value.errors] == [("max_width",)]
+
+
+@pytest.mark.parametrize("key", ["", "Web-1600", "web 1600", "-web", "web-", "web--1600", "wéb"])
+def test_chave_de_ajuste_pronto_fora_do_formato_de_slug_e_recusada(key: str) -> None:
+    with pytest.raises(ValueError, match="chave de ajuste pronto fora do formato"):
+        SystemPreset(key, "A", {})

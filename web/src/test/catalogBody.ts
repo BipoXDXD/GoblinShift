@@ -1,6 +1,12 @@
+import type { CatalogVersion } from "../catalog/api";
+
 // Corpo de GET /api/v1/catalog como a API o devolve hoje (só os trechos do schema que a interface
 // lê). Cada teste do Vitest parte daqui e troca o que precisa com `withVersion` (catalog.ts). Fica
 // num módulo sem Vitest porque a API falsa do E2E (e2e/support/fakeApi.ts) serve o mesmo corpo.
+// Nenhuma receita da interface lê os ajustes prontos ainda. Tipado à parte porque o `as const`
+// abaixo deixaria o `[]` somente leitura, e o tipo do catálogo é uma lista comum.
+const NO_SYSTEM_PRESETS: CatalogVersion["system_presets"] = [];
+
 export const CATALOG_BODY = {
   recipes: [
     {
@@ -28,6 +34,7 @@ export const CATALOG_BODY = {
             output_delimiter: ",",
             trim_columns: [],
           },
+          system_presets: NO_SYSTEM_PRESETS,
           parameters_schema: {
             type: "object",
             properties: {
@@ -58,6 +65,7 @@ export const CATALOG_BODY = {
             max_width: 1600,
             output_format: "preserve",
           },
+          system_presets: NO_SYSTEM_PRESETS,
           parameters_schema: {
             type: "object",
             properties: {
@@ -82,6 +90,7 @@ export const CATALOG_BODY = {
             name_mode: "preserve",
             name_prefix: "file",
           },
+          system_presets: NO_SYSTEM_PRESETS,
           parameters_schema: {
             type: "object",
             properties: {
@@ -106,6 +115,7 @@ export const CATALOG_BODY = {
             max_output_documents: 200,
           },
           defaults: { operation: "merge", pages_per_document: 1, select: null },
+          system_presets: NO_SYSTEM_PRESETS,
           parameters_schema: {
             type: "object",
             properties: {
@@ -158,6 +168,7 @@ export const CATALOG_BODY = {
             extract_audio: true,
             thumbnail_count: 1,
           },
+          system_presets: NO_SYSTEM_PRESETS,
           parameters_schema: {
             type: "object",
             properties: {

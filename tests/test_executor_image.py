@@ -122,6 +122,7 @@ def make_work_dir(
     tables: Sequence[tuple[str, bytes]],
     recipe_id: str = "csv-janitor",
     parameters: Mapping[str, object] | None = None,
+    version: int = 1,
 ) -> Path:
     """Área como o worker a monta, com os parâmetros resolvidos pelo catálogo."""
     work = root / "work"
@@ -143,8 +144,8 @@ def make_work_dir(
         )
     job = {
         "recipe_id": recipe_id,
-        "recipe_version": 1,
-        "parameters": CATALOG.resolve(recipe_id, 1, parameters or {}),
+        "recipe_version": version,
+        "parameters": CATALOG.resolve(recipe_id, version, parameters or {}),
         "inputs": entries,
     }
     (work / "job.json").write_text(json.dumps(job), encoding="utf-8")
@@ -224,7 +225,7 @@ def test_pillow_fixado_e_a_versao_do_lock(image: str) -> None:
     assert result.stdout.strip() == PILLOW_VERSION
 
 
-@pytest.mark.parametrize("feature", ["jpg", "zlib", "littlecms2"])
+@pytest.mark.parametrize("feature", ["jpg", "zlib", "littlecms2", "webp"])
 def test_pillow_traz_as_bibliotecas_nativas_que_o_image_forge_usa(image: str, feature: str) -> None:
     result = run_python(image, f"import PIL.features as f; print(f.check({feature!r}))")
 
@@ -377,6 +378,38 @@ def test_image_forge_converte_orienta_e_recusa_na_imagem(image: str, tmp_path: P
             "manifest.json",
             "report.json",
         ]
+
+
+def image_forge_v2_batch() -> list[tuple[str, bytes]]:
+    """GIF estático, WebP e GIF animado (a v2 lê os dois primeiros e recusa o terceiro)."""
+    return [
+        ("icone.gif", media.gif(media.solid("P", (16, 16), 3))),
+        ("foto.webp", media.webp(media.solid("RGB", (40, 20), (200, 30, 30)))),
+        ("animado.gif", media.animated_gif(2)),
+    ]
+
+
+def run_image_forge_v2(image: str, root: Path) -> Path:
+    work = make_work_dir(
+        root, image_forge_v2_batch(), "image-forge", {"output_format": "webp"}, version=2
+    )
+    result = run_executor(image, work)
+    assert result.returncode == SUCCEEDED, result.stderr
+    return work / "out"
+
+
+def test_image_forge_v2_le_webp_e_gif_e_grava_webp_na_imagem(image: str, tmp_path: Path) -> None:
+    out = run_image_forge_v2(image, tmp_path / "1")
+    again = run_image_forge_v2(image, tmp_path / "2")
+
+    report = read_json(out / "report.json")
+    assert [item["status"] for item in report["items"]] == ["ok", "ok", "rejected"]
+    for name in ("icone.webp", "foto.webp"):
+        with Image.open(out / "images" / name) as written:
+            assert written.format == "WEBP"
+            assert not written.getexif()
+            assert "icc_profile" not in written.info
+    assert package_digest(out, "image-forge") == package_digest(again, "image-forge")
 
 
 def test_image_forge_gera_o_mesmo_zip_em_duas_execucoes_na_imagem(

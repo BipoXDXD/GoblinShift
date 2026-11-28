@@ -16,7 +16,7 @@ describe("contrato gerado de POST /runs", () => {
 
   it("fixa a versão de cada variante como literal", () => {
     expectTypeOf<Variant<"csv-janitor">["recipe_version"]>().toEqualTypeOf<1>();
-    expectTypeOf<Variant<"image-forge">["recipe_version"]>().toEqualTypeOf<1>();
+    expectTypeOf<Variant<"image-forge">["recipe_version"]>().toEqualTypeOf<1 | 2>();
     expectTypeOf<Variant<"downloads-detox">["recipe_version"]>().toEqualTypeOf<1>();
     expectTypeOf<Variant<"pdf-press">["recipe_version"]>().toEqualTypeOf<1>();
     expectTypeOf<Variant<"media-mill">["recipe_version"]>().toEqualTypeOf<1>();
@@ -38,8 +38,8 @@ describe("contrato gerado de POST /runs", () => {
     >();
   });
 
-  it("dá ao Image Forge os próprios parâmetros, sem index signature", () => {
-    type Parameters = Variant<"image-forge">["parameters"];
+  it("dá ao Image Forge v1 os próprios parâmetros, sem index signature", () => {
+    type Parameters = Extract<Variant<"image-forge">, { recipe_version: 1 }>["parameters"];
 
     expectTypeOf<Parameters["output_format"]>().toEqualTypeOf<
       "preserve" | "jpeg" | "png" | undefined
@@ -52,6 +52,29 @@ describe("contrato gerado de POST /runs", () => {
       | "jpeg_quality"
       | "jpeg_background"
       | "make_thumbnails"
+    >();
+  });
+
+  it("dá ao Image Forge v2 os da v1 mais o ajuste e o WebP", () => {
+    type Parameters = Extract<Variant<"image-forge">, { recipe_version: 2 }>["parameters"];
+
+    expectTypeOf<Parameters["output_format"]>().toEqualTypeOf<
+      "preserve" | "jpeg" | "png" | "webp" | undefined
+    >();
+    expectTypeOf<Parameters["fit"]>().toEqualTypeOf<
+      "contain" | "cover" | "pad" | "scale" | undefined
+    >();
+    expectTypeOf<keyof Parameters>().toEqualTypeOf<
+      | "max_width"
+      | "max_height"
+      | "output_format"
+      | "jpeg_quality"
+      | "jpeg_background"
+      | "make_thumbnails"
+      | "fit"
+      | "scale_percent"
+      | "webp_quality"
+      | "webp_lossless"
     >();
   });
 

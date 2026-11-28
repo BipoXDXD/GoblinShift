@@ -20,6 +20,8 @@ from goblinshift.processing.packaging import compression_for
         "pacote.ZIP",
         "audio/trilha.flac",
         "audio/trilha.FLAC",
+        "images/foto.webp",
+        "thumbnails/foto.WEBP",
     ],
 )
 def test_formatos_ja_comprimidos_vao_sem_compressao(arcname: str) -> None:

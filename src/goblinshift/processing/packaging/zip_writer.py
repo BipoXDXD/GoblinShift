@@ -28,8 +28,8 @@ COPY_CHUNK_BYTES = 1 * MIB
 _REGULAR_FILE_0644 = (stat.S_IFREG | 0o644) << 16
 _UNIX = 3  # "create_system" do ZIP: atributos externos no formato Unix
 # Formatos que já chegam comprimidos: DEFLATE só gastaria CPU. O WAV do Media Mill é PCM cru e
-# continua com DEFLATE; o FLAC já é compressão sem perdas (ADR 036).
-_STORED_SUFFIXES = frozenset({".jpg", ".jpeg", ".png", ".zip", ".flac"})
+# continua com DEFLATE; o FLAC já é compressão sem perdas (ADR 036). O WebP vem do Image Forge v2.
+_STORED_SUFFIXES = frozenset({".jpg", ".jpeg", ".png", ".webp", ".zip", ".flac"})
 
 
 @dataclass(frozen=True)
@@ -39,7 +39,7 @@ class ZipSource:
 
 
 def compression_for(arcname: str) -> int:
-    """`ZIP_STORED` para .jpg, .jpeg, .png, .zip e .flac (qualquer caixa); DEFLATE no resto."""
+    """`ZIP_STORED` para os formatos já comprimidos (qualquer caixa); DEFLATE no resto."""
     suffix = PurePosixPath(arcname).suffix.casefold()
     return zipfile.ZIP_STORED if suffix in _STORED_SUFFIXES else zipfile.ZIP_DEFLATED
 

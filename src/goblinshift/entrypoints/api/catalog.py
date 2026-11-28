@@ -26,6 +26,7 @@ from goblinshift.catalog import (
     UnknownRecipeVersionError,
     VersionStatus,
 )
+from goblinshift.catalog.versions import SLUG_PATTERN
 from goblinshift.entrypoints.api.dependencies import CurrentPrincipal
 from goblinshift.entrypoints.api.problems import ApiProblem, ProblemCode, problem_responses
 
@@ -37,7 +38,7 @@ CACHE_CONTROL = "private, no-cache"
 SUNSET_HEADER = "Sunset"
 MAX_RECIPE_ID_CHARS = 64
 # Formato dos ids do catálogo (`csv-janitor`): caminho e filtros só aceitam ids nesse formato.
-RECIPE_ID_PATTERN = r"^[a-z0-9]+(?:-[a-z0-9]+)*$"
+RECIPE_ID_PATTERN = SLUG_PATTERN
 # No máximo duas versões convivem (1.6); o teto só limita a entrada, longe do que existe.
 MAX_RECIPE_VERSION = 999
 
@@ -49,12 +50,21 @@ RecipeIdField = Annotated[
 RecipeVersionField = Annotated[int, Field(ge=1, le=MAX_RECIPE_VERSION)]
 
 
+class SystemPresetResponse(BaseModel):
+    key: str
+    name: str
+    # Já resolvidos: os defaults da versão completam o que o ajuste não fixa.
+    parameters: dict[str, Any]
+
+
 class RecipeVersionResponse(BaseModel):
     version: int
     status: VersionStatus
     limits: dict[str, int]
     defaults: dict[str, Any]
     parameters_schema: dict[str, Any]
+    # Ajustes prontos, só leitura; não são presets da conta nem aparecem em /presets.
+    system_presets: list[SystemPresetResponse]
 
 
 class RecipeResponse(BaseModel):
@@ -93,6 +103,12 @@ def _version_response(version: RecipeVersion) -> RecipeVersionResponse:
         limits=dict(version.limits),
         defaults=version.resolve({}),
         parameters_schema=version.parameters_schema(),
+        system_presets=[
+            SystemPresetResponse(
+                key=preset.key, name=preset.name, parameters=version.resolve(preset.parameters)
+            )
+            for preset in version.system_presets
+        ],
     )
 
 

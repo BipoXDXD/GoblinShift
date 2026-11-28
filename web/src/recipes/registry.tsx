@@ -20,10 +20,10 @@ import { mediaMillField, parseMediaMill } from "./media-mill/schema";
 import { mediaMillSettings } from "./media-mill/settings";
 import { RECIPE_TITLES } from "./titles";
 import type {
-  RecipeCommandFor,
   RecipeDraft,
   RecipeFieldsProps,
   RecipeFormProps,
+  RecipeFormVersion,
   RecipeId,
 } from "./types";
 
@@ -37,7 +37,7 @@ export interface RecipeForm {
 /** O que a Bancada precisa de cada receita: o formulário escrito à mão e como apontar seus erros. */
 export interface RecipeModule<K extends RecipeId = RecipeId> {
   readonly id: K;
-  readonly version: RecipeCommandFor<K>["recipe_version"];
+  readonly version: RecipeFormVersion<K>;
   readonly title: string;
   /** Atributo `accept` do input de arquivos; `null` aceita qualquer tipo. */
   readonly accept: string | null;

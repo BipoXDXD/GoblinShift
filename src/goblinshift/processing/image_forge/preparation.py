@@ -22,6 +22,7 @@ from PIL import ExifTags, Image, UnidentifiedImageError
 from goblinshift.processing.image_forge.color import ColorProfile, to_srgb
 from goblinshift.processing.image_forge.inspection import (
     MPO,
+    V1_FORMATS,
     Header,
     header_prefix,
     open_image,
@@ -59,7 +60,7 @@ _TRANSPOSITIONS = {
 @dataclass(frozen=True)
 class Prepared:
     image: Image.Image  # orientada, em RGB, RGBA, L ou LA, em sRGB
-    source_format: str  # "jpeg", "png" ou "mpo"
+    source_format: str  # "jpeg", "png", "mpo", "webp" ou "gif"
     orientation: int  # 1 a 8, a que foi aplicada
     color_profile: ColorProfile
     frames_discarded: int  # quadros do MPO além do principal
@@ -75,19 +76,19 @@ class _Decoded:
     declares_srgb: bool
 
 
-def prepare(path: Path, limits: Limits) -> Prepared:
-    """Imagem pronta para redimensionar, ou `ImageRejected`."""
+def prepare(path: Path, limits: Limits, formats: tuple[str, ...] = V1_FORMATS) -> Prepared:
+    """Imagem pronta para redimensionar, ou `ImageRejected`; só abre os `formats` da versão."""
     with path.open("rb") as source:
         try:
             with warnings.catch_warnings(action="error"):
-                decoded = _decode(source, limits)
+                decoded = _decode(source, limits, formats)
         except _BOMB as error:
             raise ImageRejected(
                 RejectionCode.IMAGE_TOO_LARGE, "imagem acima do limite de pixels"
             ) from error
         except UnidentifiedImageError as error:
             raise ImageRejected(
-                RejectionCode.UNSUPPORTED_FORMAT, "não é um JPEG nem um PNG reconhecível"
+                RejectionCode.UNSUPPORTED_FORMAT, _unrecognized_reason(formats)
             ) from error
         except _DECODER_ERRORS as error:
             _reject_unreadable(error)
@@ -107,6 +108,16 @@ def prepare(path: Path, limits: Limits) -> Prepared:
     )
 
 
+def _unrecognized_reason(formats: tuple[str, ...]) -> str:
+    """Na v1, "não é um JPEG nem um PNG reconhecível"; nas outras, a lista da versão."""
+    names = [_FORMAT_NAMES.get(name, name) for name in formats]
+    listed = ", ".join(names[:-1]) + " nem um " + names[-1] if len(names) > 1 else names[0]
+    return f"não é um {listed} reconhecível"
+
+
+_FORMAT_NAMES = {"WEBP": "WebP"}
+
+
 def _reject_unreadable(error: Exception) -> NoReturn:
     """Erro do Pillow vira recusa; `OSError` com errno é falha real de leitura e propaga."""
     if isinstance(error, OSError) and error.errno is not None:
@@ -116,9 +127,9 @@ def _reject_unreadable(error: Exception) -> NoReturn:
     ) from error
 
 
-def _decode(source: BinaryIO, limits: Limits) -> _Decoded:
+def _decode(source: BinaryIO, limits: Limits, formats: tuple[str, ...]) -> _Decoded:
     prefix = header_prefix(source)
-    with open_image(source) as opened:
+    with open_image(source, formats) as opened:
         header = read_header(opened, prefix)
         validate(header, limits)
         opened.seek(0)  # MPO: só o quadro principal

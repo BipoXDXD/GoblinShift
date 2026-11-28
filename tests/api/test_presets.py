@@ -278,6 +278,18 @@ def test_listagem_traz_so_os_presets_da_conta(
     assert all(item.keys() == PRESET_KEYS for item in body["data"])
 
 
+def test_ajustes_prontos_nao_aparecem_em_presets(
+    client: TestClient, factory: sessionmaker[Session]
+) -> None:
+    # Os ajustes prontos do catálogo (`system_presets`) não são linhas de `preset` de conta alguma.
+    account = Account(factory)
+
+    response = client.get(PRESETS, headers=account.headers)
+
+    assert response.status_code == 200
+    assert response.json() == {"data": []}
+
+
 def test_ler_traz_o_etag_da_revisao(client: TestClient, factory: sessionmaker[Session]) -> None:
     account = Account(factory)
     created = create(client, account)

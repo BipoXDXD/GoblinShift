@@ -28,6 +28,24 @@ describe("getCatalog", () => {
     expect(requests[0]?.method).toBe("GET");
   });
 
+  it("lê os ajustes prontos de uma versão", async () => {
+    const preset = { key: "web-1600", name: "Web 1600", parameters: { max_width: 1600 } };
+    const version = { version: 2, status: "current", limits: {}, defaults: {} };
+    const body = {
+      recipes: [
+        {
+          recipe_id: "image-forge",
+          versions: [{ ...version, parameters_schema: {}, system_presets: [preset] }],
+        },
+      ],
+    };
+    const { client } = fakeApi({ "GET /api/v1/catalog": catalogHandler(body) });
+
+    const catalog = await getCatalog(client);
+
+    expect(catalog.recipes[0]?.versions[0]?.system_presets).toEqual([preset]);
+  });
+
   it("recusa catálogo fora do formato", async () => {
     const { client } = fakeApi({
       "GET /api/v1/catalog": () => jsonResponse({ recipes: [{ recipe_id: "csv-janitor" }] }),

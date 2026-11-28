@@ -140,3 +140,26 @@ def with_sof_size(jpeg_bytes: bytes, width: int, height: int) -> bytes:
             struct.pack_into(">HH", data, index + 5, height, width)
             return bytes(data)
     raise ValueError("JPEG sem SOF0 nem SOF2")
+
+
+def webp(image: Image.Image, **options: object) -> bytes:
+    return encoded(image, "WEBP", **options)
+
+
+def gif(image: Image.Image, **options: object) -> bytes:
+    return encoded(image, "GIF", **options)
+
+
+def _alternating(count: int) -> list[Image.Image]:
+    colors = [(255, 0, 0), (0, 0, 255)]
+    return [solid("RGB", (8, 8), colors[index % 2]) for index in range(count)]
+
+
+def animated_webp(frames: int) -> bytes:
+    images = _alternating(frames)
+    return encoded(images[0], "WEBP", save_all=True, append_images=images[1:], lossless=True)
+
+
+def animated_gif(frames: int) -> bytes:
+    images = _alternating(frames)
+    return encoded(images[0], "GIF", save_all=True, append_images=images[1:])

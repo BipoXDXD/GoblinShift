@@ -10,6 +10,14 @@ const catalogVersionSchema = z.object({
   limits: z.record(z.string(), z.int()),
   defaults: z.record(z.string(), z.unknown()),
   parameters_schema: z.record(z.string(), z.unknown()),
+  // Ajustes prontos do sistema, com os parâmetros já resolvidos.
+  system_presets: z.array(
+    z.object({
+      key: z.string(),
+      name: z.string(),
+      parameters: z.record(z.string(), z.unknown()),
+    }),
+  ),
 });
 
 const catalogSchema = z.object({
