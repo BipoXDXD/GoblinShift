@@ -27,7 +27,7 @@ from uuid import uuid4
 
 from fastapi import FastAPI, Request
 from fastapi.exceptions import RequestValidationError
-from fastapi.responses import JSONResponse
+from fastapi.responses import JSONResponse, Response
 from pydantic import BaseModel, Field
 from sqlalchemy.exc import DBAPIError, OperationalError
 from sqlalchemy.exc import TimeoutError as PoolTimeoutError
@@ -36,6 +36,7 @@ from starlette.exceptions import HTTPException as StarletteHTTPException
 from starlette.routing import Match
 from starlette.types import ASGIApp, Message, Receive, Scope, Send
 
+from goblinshift.entrypoints.api.download_navigation import failure_redirect
 from goblinshift.entrypoints.api.wide_event import record_error
 from goblinshift.platform.telemetry import request_id_bound
 
@@ -439,7 +440,12 @@ def request_id_of(request: Request) -> str:
     return request_id
 
 
-async def _handle_api_problem(request: Request, exc: ApiProblem) -> JSONResponse:
+async def _handle_api_problem(request: Request, exc: ApiProblem) -> Response:
+    # O download por navegação que falha volta à tela da execução com o código (64a).
+    redirect = failure_redirect(request, exc.code.value)
+    if redirect is not None:
+        record_error(exc.code.value)
+        return redirect
     return problem_response(
         code=exc.code,
         detail=exc.detail,

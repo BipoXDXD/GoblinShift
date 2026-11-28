@@ -94,6 +94,18 @@ def get_artifact_details(
     response_class=DownloadResponse,
     responses={
         200: {"content": {OCTET_STREAM: {"schema": {"type": "string", "format": "binary"}}}},
+        303: {
+            "description": (
+                "Navegação do navegador que falhou: volta à tela da execução com ?falha=<code>."
+            ),
+            "headers": {
+                "Location": {
+                    "description": "Tela da execução de origem: /execucoes/<uuid>?falha=<code>.",
+                    "required": True,
+                    "schema": {"type": "string"},
+                }
+            },
+        },
         **problem_responses(404, 410, 429),
     },
 )
