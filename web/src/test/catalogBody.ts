@@ -139,7 +139,7 @@ export const CATALOG_BODY = {
       versions: [
         {
           version: 1,
-          status: "current",
+          status: "deprecated",
           limits: {
             max_inputs: 5,
             max_input_bytes: 268435456,
@@ -166,6 +166,65 @@ export const CATALOG_BODY = {
                 default: null,
               },
               thumbnail_count: { type: "integer", enum: [0, 1, 3], default: 1 },
+            },
+          },
+        },
+        {
+          version: 2,
+          status: "current",
+          limits: {
+            max_inputs: 5,
+            max_input_bytes: 268435456,
+            max_total_input_bytes: 536870912,
+            max_duration_s: 300,
+            max_long_side_px: 1920,
+            max_short_side_px: 1080,
+            max_fps: 60,
+            max_audio_sample_rate_hz: 48000,
+            max_audio_channels: 2,
+            thumbnail_max_side_px: 640,
+          },
+          defaults: {
+            audio_bitrate_kbps: 192,
+            audio_format: "wav",
+            audio_stream_index: null,
+            extract_audio: true,
+            thumbnail_count: 1,
+            trim_end_ms: null,
+            trim_start_ms: 0,
+          },
+          parameters_schema: {
+            type: "object",
+            allOf: [
+              {
+                if: { properties: { audio_format: { const: "mp3" } }, required: ["audio_format"] },
+                then: { properties: { audio_bitrate_kbps: { enum: [128, 160, 192, 256, 320] } } },
+              },
+              {
+                if: { properties: { audio_format: { const: "aac" } }, required: ["audio_format"] },
+                then: { properties: { audio_bitrate_kbps: { enum: [96, 128, 160, 192, 256] } } },
+              },
+              {
+                if: { properties: { audio_format: { const: "opus" } }, required: ["audio_format"] },
+                then: { properties: { audio_bitrate_kbps: { enum: [64, 96, 128, 160, 192] } } },
+              },
+            ],
+            properties: {
+              audio_stream_index: {
+                anyOf: [{ type: "integer", minimum: 0, maximum: 15 }, { type: "null" }],
+                default: null,
+              },
+              thumbnail_count: { type: "integer", enum: [0, 1, 3], default: 1 },
+              audio_bitrate_kbps: {
+                type: "integer",
+                enum: [64, 96, 128, 160, 192, 256, 320],
+                default: 192,
+              },
+              trim_start_ms: { type: "integer", minimum: 0, maximum: 300000, default: 0 },
+              trim_end_ms: {
+                anyOf: [{ type: "integer", minimum: 1, maximum: 300000 }, { type: "null" }],
+                default: null,
+              },
             },
           },
         },

@@ -5,10 +5,15 @@ type CatalogBody = typeof CATALOG_BODY;
 type RecipeEntry = CatalogBody["recipes"][number];
 type VersionEntry = RecipeEntry["versions"][number];
 
-/** Versão da receita no catálogo de exemplo; lança se o exemplo não a tiver. */
-export function catalogVersion(recipeId: RecipeEntry["recipe_id"]): VersionEntry {
+/**
+ * Versão da receita no catálogo de exemplo (sem número, a mais nova, que é a do formulário); lança
+ * se o exemplo não a tiver.
+ */
+export function catalogVersion(recipeId: RecipeEntry["recipe_id"], number?: number): VersionEntry {
   const recipe = CATALOG_BODY.recipes.find((entry) => entry.recipe_id === recipeId);
-  const version = recipe?.versions[0];
+  const versions: readonly VersionEntry[] = recipe?.versions ?? [];
+  const version =
+    number === undefined ? versions.at(-1) : versions.find((entry) => entry.version === number);
   if (version === undefined) {
     throw new Error(`receita ${recipeId} ausente do catálogo de exemplo`);
   }

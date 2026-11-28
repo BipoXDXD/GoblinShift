@@ -121,7 +121,7 @@ for (const journey of JOURNEYS) {
   });
 }
 
-test("media-mill: vídeos → áudio FLAC e três miniaturas → executar → ver miniaturas → baixar @fake-api", async ({
+test("media-mill: vídeos → áudio FLAC, três miniaturas e trecho → executar → ver miniaturas → baixar @fake-api", async ({
   page,
   fakeApi,
 }) => {
@@ -133,6 +133,7 @@ test("media-mill: vídeos → áudio FLAC e três miniaturas → executar → ve
   await expect(page.locator("video, audio, img[src^='blob:']")).toHaveCount(0);
   await bancada.pick("FLAC (compressão sem perdas)");
   await bancada.pick("Três, em 10%, 50% e 90% da duração");
+  await bancada.fill("Fim do trecho", "1:30,5");
   await bancada.run();
 
   const execucao = new ExecucaoPage(page);
@@ -143,10 +144,19 @@ test("media-mill: vídeos → áudio FLAC e três miniaturas → executar → ve
       recipeId: "media-mill",
       files: MP4_FILES,
       fillParameters: () => Promise.resolve(),
-      expectedParameters: { audio_format: "flac", thumbnail_count: 3, extract_audio: true },
+      expectedParameters: {
+        audio_format: "flac",
+        thumbnail_count: 3,
+        extract_audio: true,
+        audio_bitrate_kbps: 192,
+        trim_start_ms: 0,
+        trim_end_ms: 90500,
+      },
     },
     MP4_FILES.map((file) => file.name),
   );
+  // A Bancada escreve a versão 2; a v1 só abre nela (preset ou execução antiga).
+  expect(fakeApi.createdRuns[0]?.recipe_version).toBe(2);
   // Pelo preview genérico (ADR 037): `<img>` na rota de preview, nunca fetch → Blob.
   await expect
     .poll(() => execucao.imagePreviews())

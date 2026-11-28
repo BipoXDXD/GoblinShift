@@ -52,6 +52,11 @@ export interface RecipeModule<K extends RecipeId = RecipeId> {
    * arquivos, então um preset ou uma execução reusada abre sem eles, no default.
    */
   readonly uploadBoundParameters?: readonly string[];
+  /**
+   * Versões anteriores cujos parâmetros o formulário abre sem conversão, sobre os defaults da
+   * versão atual (a atual é superconjunto delas): um preset ou execução da v1 abre na Bancada da v2.
+   */
+  readonly opensVersions?: readonly number[];
 }
 
 interface FormParts<K extends RecipeId, S> {
@@ -139,10 +144,12 @@ const RECIPES: { readonly [K in RecipeId]: RecipeModule<K> } = {
   },
   "media-mill": {
     id: "media-mill",
-    version: 1,
+    version: 2,
     title: RECIPE_TITLES["media-mill"],
     // Só os contêineres da allowlist (1.5); o conteúdo é conferido pelo ffprobe no executor.
     accept: ".mp4,.mov,.webm,video/mp4,video/quicktime,video/webm",
+    // A v2 é superconjunto da v1 (catalog/media_mill_v2.py): os mesmos campos, faixas e defaults.
+    opensVersions: [1],
     formFor: catalogForm({
       settingsOf: mediaMillSettings,
       initialDraft: (settings) => parseMediaMill(settings.defaults, settings),

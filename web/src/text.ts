@@ -184,6 +184,8 @@ export const TEXT = {
   },
   workbench: {
     title: (recipe: string) => `Bancada: ${recipe}`,
+    olderVersionLoaded: (version: number) =>
+      `Vieram da versão ${String(version)} da receita e abriram na versão atual com os mesmos valores.`,
     backHome: "Oficina",
     filesHeading: "Arquivos de entrada",
     chooseFiles: "Escolher arquivos",
@@ -666,15 +668,30 @@ export const TEXT = {
     title: "Media Mill",
     extractAudio: "Extrair o áudio",
     extractAudioHint: (maxRateKhz: string, maxChannels: number) =>
-      `Uma faixa de áudio por vídeo, na taxa e nos canais de origem: sem reamostrar nem misturar canais. Vídeo com áudio acima de ${maxRateKhz} kHz ou de ${String(maxChannels)} canais é recusado.`,
+      `Uma faixa de áudio por vídeo, nos canais de origem, sem misturar canais. Vídeo com áudio acima de ${maxRateKhz} kHz ou de ${String(maxChannels)} canais é recusado.`,
     audioFormat: "Formato do áudio",
+    // Só para WAV e FLAC (D9).
     audioFormatHint:
       "Os dois saem com amostras de 16 bits, uma conversão declarada: o FLAC não recupera qualidade que o vídeo já perdeu.",
+    lossyFormatHint:
+      "Com perda, o arquivo fica menor e não volta à qualidade do vídeo. Áudio fora de 44,1 ou 48 kHz é reamostrado para 48 kHz.",
+    opusHint: "O Opus sai sempre em 48 kHz.",
     audioFormats: {
       wav: "WAV (PCM, sem compressão)",
       flac: "FLAC (compressão sem perdas)",
+      mp3: "MP3 (com perda, toca em qualquer lugar)",
+      aac: "AAC em M4A (com perda, padrão de celulares)",
+      opus: "Opus (com perda, menor tamanho; sai em 48 kHz)",
     },
     audioDisabledHint: "Marque Extrair o áudio para escolher o formato e a faixa.",
+    audioBitrate: "Qualidade do áudio, em kbps",
+    audioBitrateLosslessHint: "Só vale para MP3, AAC e Opus.",
+    trimStart: "Início do trecho",
+    trimStartHint:
+      "No formato m:ss, como 1:15. Aceita também segundos, como 75, e décimos depois da vírgula, como 1:15,5.",
+    trimEnd: "Fim do trecho",
+    trimEndHint:
+      "Vazio no fim vai até o final do vídeo. O trecho vale para o áudio e para as miniaturas.",
     audioStreamIndex: "Faixa de áudio",
     audioStreamIndexHint: (max: number) =>
       `Deixe vazio para usar a primeira faixa de cada vídeo. Para outra, informe o número de 0 a ${String(max)}, contando só as faixas de áudio a partir de 0.`,
@@ -690,6 +707,8 @@ export const TEXT = {
       streamIndex: (max: number) =>
         `Deixe vazio ou informe um número inteiro de 0 a ${String(max)}.`,
       noOutput: "Peça ao menos uma saída: extraia o áudio ou escolha uma ou três miniaturas.",
+      trim: (max: string) => `Use m:ss, como 1:15, ou segundos, como 75, até ${max}.`,
+      trimEndBeforeStart: "O fim do trecho precisa vir depois do início.",
     },
   },
   history: {

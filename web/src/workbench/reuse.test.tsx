@@ -14,8 +14,9 @@ import {
 } from "../test/fakeApi";
 import { presetBody, PRESET_ID } from "../test/presets";
 import { renderRoutes } from "../test/renderRoutes";
+import { TEXT } from "../text";
 
-await preloadRoutes("/bancada/csv-janitor", "/historico");
+await preloadRoutes("/bancada/csv-janitor", "/bancada/media-mill", "/historico");
 
 const PARAMETERS = {
   input_delimiter: ",",
@@ -171,5 +172,32 @@ describe("Bancada aberta pela execução (reutilizar parâmetros)", () => {
     expect(
       screenRequests(api.requests).filter((request) => request.url.includes("/runs/")),
     ).toEqual([]);
+  });
+
+  it("parâmetros da v1 do Media Mill abrem na v2 com aviso", async () => {
+    setup(
+      () =>
+        jsonResponse(
+          runBody({
+            recipe_id: "media-mill",
+            recipe_version: 1,
+            status: "succeeded",
+            parameters: {
+              extract_audio: true,
+              audio_format: "flac",
+              audio_stream_index: 1,
+              thumbnail_count: 3,
+            },
+          }),
+        ),
+      `/bancada/media-mill?execucao=${RUN_ID}`,
+    );
+
+    const notice = await screen.findByText(/^Parâmetros da execução de /);
+    expect(notice).toHaveTextContent(TEXT.workbench.olderVersionLoaded(1));
+    expect(screen.getByRole("radio", { name: "FLAC (compressão sem perdas)" })).toBeChecked();
+    expect(screen.getByRole("textbox", { name: "Faixa de áudio" })).toHaveValue("1");
+    expect(screen.getByRole("radio", { name: "Três, em 10%, 50% e 90% da duração" })).toBeChecked();
+    expect(screen.getByRole("textbox", { name: "Fim do trecho" })).toHaveValue("");
   });
 });

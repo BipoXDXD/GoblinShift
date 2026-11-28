@@ -212,7 +212,11 @@ function prefilledForm({ recipe, version, fallback, source, error }: PrefillSour
       preset: null,
     };
   }
-  const sameRecipe = source.recipeId === recipe.id && source.recipeVersion === recipe.version;
+  const olderVersion =
+    source.recipeVersion !== recipe.version &&
+    recipe.opensVersions?.includes(source.recipeVersion) === true;
+  const sameRecipe =
+    source.recipeId === recipe.id && (source.recipeVersion === recipe.version || olderVersion);
   if (!sameRecipe) {
     return withNotice(fallback, source.wrongRecipeNotice);
   }
@@ -227,13 +231,12 @@ function prefilledForm({ recipe, version, fallback, source, error }: PrefillSour
   if (form === null) {
     return withNotice(fallback, source.wrongRecipeNotice);
   }
-  return withNotice(
-    form,
-    reusable.dropped
-      ? `${source.loadedNotice} ${TEXT.workbench.uploadBoundDropped}`
-      : source.loadedNotice,
-    source.preset,
-  );
+  const notices = [
+    source.loadedNotice,
+    ...(olderVersion ? [TEXT.workbench.olderVersionLoaded(source.recipeVersion)] : []),
+    ...(reusable.dropped ? [TEXT.workbench.uploadBoundDropped] : []),
+  ];
+  return withNotice(form, notices.join(" "), source.preset);
 }
 
 function withNotice(

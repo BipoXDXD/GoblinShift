@@ -394,7 +394,7 @@ class FakeState {
     }
     this.createdRuns.push(command);
     const id = randomUUID();
-    const run = runBody(id, command.recipe_id);
+    const run = { ...runBody(id, command.recipe_id), recipe_version: command.recipe_version };
     this.runs.set(id, { run, advances: true, inputIds, outputs: [] });
     const accepted: Schemas["AcceptedRunResponse"] = { ...run, idempotency_expires_at: LATER };
     await fulfillJson(route, accepted, { status: 202 });

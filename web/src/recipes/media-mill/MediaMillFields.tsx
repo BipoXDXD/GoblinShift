@@ -7,6 +7,7 @@ import type { RecipeFieldsProps } from "../types";
 import {
   AUDIO_FORMATS,
   fieldId,
+  isLossy,
   parseMediaMill,
   THUMBNAIL_COUNTS,
   type MediaMillFormValues,
@@ -17,8 +18,9 @@ const T = TEXT.mediaMill;
 const HZ_PER_KHZ = 1000;
 
 /**
- * Formulário do Media Mill v1, escrito à mão (2.2), com defaults e limites do catálogo. Formato e
- * faixa de áudio ficam desabilitados, mas visíveis, sem a extração: a pessoa vê o que existe.
+ * Formulário do Media Mill v2, escrito à mão (2.2), com defaults, limites e bitrates do catálogo.
+ * Formato, faixa e bitrate ficam desabilitados, mas visíveis, sem a extração, e o bitrate também
+ * em WAV e FLAC, com a dica do motivo: a pessoa vê o que existe.
  */
 export function MediaMillFields({
   settings,
@@ -35,6 +37,46 @@ export function MediaMillFields({
   const errorOf = (field: keyof MediaMillFormValues): string | null =>
     errors.get(fieldId(field)) ?? null;
   const audioOff = !values.extract_audio;
+  const lossy = isLossy(values.audio_format);
+  const bitrates = isLossy(values.audio_format)
+    ? settings.bitratesByFormat[values.audio_format]
+    : [values.audio_bitrate_kbps];
+  const formatHint = [
+    lossy ? T.lossyFormatHint : T.audioFormatHint,
+    ...(values.audio_format === "opus" ? [T.opusHint] : []),
+    ...(audioOff ? [T.audioDisabledHint] : []),
+  ].join(" ");
+  const bitrateHint = audioOff
+    ? T.audioDisabledHint
+    : lossy
+      ? undefined
+      : T.audioBitrateLosslessHint;
+
+  /** Troca o formato e leva o bitrate ao default se a lista nova não tem o atual. */
+  const chooseFormat = (format: MediaMillFormValues["audio_format"]): void => {
+    const kept = isLossy(format)
+      ? settings.bitratesByFormat[format].includes(values.audio_bitrate_kbps)
+      : true;
+    update({
+      ...values,
+      audio_format: format,
+      audio_bitrate_kbps: kept ? values.audio_bitrate_kbps : settings.defaults.audio_bitrate_kbps,
+    });
+  };
+  const trimField = (field: "trim_start" | "trim_end", label: string, hint: string) => (
+    <Field id={fieldId(field)} label={label} description={hint} error={errorOf(field)}>
+      {(control) => (
+        // Sem inputMode: o teclado numérico do celular não tem os dois-pontos de `m:ss`.
+        <input
+          {...control}
+          value={values[field]}
+          onChange={(event) => {
+            update({ ...values, [field]: event.currentTarget.value });
+          }}
+        />
+      )}
+    </Field>
+  );
 
   return (
     <>
@@ -62,7 +104,7 @@ export function MediaMillFields({
       <FieldGroup
         id={fieldId("audio_format")}
         legend={T.audioFormat}
-        description={audioOff ? `${T.audioFormatHint} ${T.audioDisabledHint}` : T.audioFormatHint}
+        description={formatHint}
         error={errorOf("audio_format")}
       >
         {AUDIO_FORMATS.map((format, index) => (
@@ -81,13 +123,41 @@ export function MediaMillFields({
                 disabled={audioOff}
                 checked={values.audio_format === format}
                 onChange={() => {
-                  update({ ...values, audio_format: format });
+                  chooseFormat(format);
                 }}
               />
             )}
           </Field>
         ))}
       </FieldGroup>
+      <Field
+        id={fieldId("audio_bitrate_kbps")}
+        label={T.audioBitrate}
+        {...(bitrateHint === undefined ? {} : { description: bitrateHint })}
+        error={errorOf("audio_bitrate_kbps")}
+      >
+        {(control) => (
+          <select
+            {...control}
+            disabled={audioOff || !lossy}
+            value={values.audio_bitrate_kbps}
+            onChange={(event) => {
+              const chosen = bitrates.find(
+                (bitrate) => String(bitrate) === event.currentTarget.value,
+              );
+              if (chosen !== undefined) {
+                update({ ...values, audio_bitrate_kbps: chosen });
+              }
+            }}
+          >
+            {bitrates.map((bitrate) => (
+              <option key={bitrate} value={bitrate}>
+                {bitrate}
+              </option>
+            ))}
+          </select>
+        )}
+      </Field>
       <Field
         id={fieldId("audio_stream_index")}
         label={T.audioStreamIndex}
@@ -138,6 +208,8 @@ export function MediaMillFields({
           </Field>
         ))}
       </FieldGroup>
+      {trimField("trim_start", T.trimStart, T.trimStartHint)}
+      {trimField("trim_end", T.trimEnd, T.trimEndHint)}
     </>
   );
 }

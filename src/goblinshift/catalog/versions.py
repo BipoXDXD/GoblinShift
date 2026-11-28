@@ -14,7 +14,7 @@ import copy
 import dataclasses
 from collections.abc import Callable, Iterable, Mapping
 from dataclasses import dataclass, field
-from datetime import datetime
+from datetime import UTC, date, datetime
 from enum import StrEnum
 from typing import Any
 
@@ -219,16 +219,22 @@ _MEDIA_MILL_LIMITS: dict[str, int] = {
     "thumbnail_max_side_px": _MEDIA_LIMITS.thumbnail_max_side_px,
 }
 
+# Merge da Bancada da v2 (PR F de paridade-media-mill): a v1 vira `deprecated` (D1) e é aceita
+# até o primeiro dia do mês depois de 90 dias desta data (1.6). A retirada fica num PR posterior.
+MEDIA_MILL_V2_RELEASED_ON = date(2026, 11, 28)
+
 # `max_input_bytes` sobe o teto por arquivo de 32 MiB para os 256 MiB de vídeo (1.7, ADR 036).
 MEDIA_MILL_V1 = RecipeVersion(
     recipe_id=media_mill.RECIPE_ID,
     version=media_mill.VERSION,
-    status=VersionStatus.CURRENT,
+    status=VersionStatus.DEPRECATED,
+    sunset_at=datetime(2027, 3, 1, tzinfo=UTC),
     parameters_model=MediaMillV1Parameters,
     limits=dict(_MEDIA_MILL_LIMITS),
 )
 
-# ADR 063: superconjunto da v1 (áudio com perda e trecho), com os mesmos limites.
+# ADR 063: superconjunto da v1 (áudio com perda e trecho), com os mesmos limites. A Bancada só
+# mostra a v2 e abre nela os parâmetros da v1; a v1 segue aceita pela API até o `sunset_at`.
 MEDIA_MILL_V2 = RecipeVersion(
     recipe_id=media_mill.RECIPE_ID,
     version=media_mill.VERSION_2,

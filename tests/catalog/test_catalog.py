@@ -2,7 +2,7 @@
 
 import json
 from dataclasses import replace
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from typing import Any
 
 import pytest
@@ -16,7 +16,7 @@ from goblinshift.catalog import (
     VersionStatus,
 )
 from goblinshift.catalog.csv_janitor_v1 import CsvJanitorV1Parameters
-from goblinshift.catalog.versions import COMMON_MAX_INPUT_BYTES
+from goblinshift.catalog.versions import COMMON_MAX_INPUT_BYTES, MEDIA_MILL_V2_RELEASED_ON
 from goblinshift.files.limits import MAX_FILE_BYTES
 from goblinshift.processing import downloads_detox, image_forge
 from goblinshift.processing.csv_janitor import (
@@ -252,8 +252,28 @@ def test_media_mill_v2_entra_ao_lado_da_v1_com_os_mesmos_limites() -> None:
     v1 = CATALOG.get_version("media-mill", 1)
     v2 = CATALOG.get_version("media-mill", 2)
 
-    assert (v1.status, v2.status) == (VersionStatus.CURRENT, VersionStatus.CURRENT)
+    assert v2.status is VersionStatus.CURRENT
     assert v2.limits == v1.limits
+
+
+def test_media_mill_v1_fica_deprecated_por_90_dias_ou_mais() -> None:
+    v1 = CATALOG.get_version("media-mill", 1)
+
+    assert v1.status is VersionStatus.DEPRECATED
+    assert v1.sunset_at is not None
+    assert v1.sunset_at.date() >= MEDIA_MILL_V2_RELEASED_ON + timedelta(days=90)
+
+
+def test_sunset_da_media_mill_v1_e_o_primeiro_dia_do_mes_em_utc() -> None:
+    sunset_at = CATALOG.get_version("media-mill", 1).sunset_at
+
+    assert sunset_at is not None
+    assert (sunset_at.day, sunset_at.hour, sunset_at.minute, sunset_at.utcoffset()) == (
+        1,
+        0,
+        0,
+        timedelta(0),
+    )
 
 
 def test_image_forge_publica_os_limites_de_1_7() -> None:

@@ -20,8 +20,9 @@ import { presetBody, PRESET_ID } from "../test/presets";
 import { escapeIsBlocked, forceClose } from "../test/dialog";
 import { recordDescriptionOnFocus } from "../test/focus";
 import { renderRoutes } from "../test/renderRoutes";
+import { TEXT } from "../text";
 
-await preloadRoutes("/", "/bancada/csv-janitor", "/bancada/image-forge");
+await preloadRoutes("/", "/bancada/csv-janitor", "/bancada/image-forge", "/bancada/media-mill");
 
 type Handler = (request: Request) => Response | Promise<Response> | null;
 
@@ -453,6 +454,25 @@ describe("Bancada aberta com um preset", () => {
       await screen.findByText(/Este preset é de outra receita ou de uma versão/),
     ).toBeVisible();
     expect(screen.getByLabelText("Delimitador dos arquivos de saída")).toHaveValue(",");
+  });
+
+  it("preset da v1 do Media Mill abre na v2 com os mesmos valores e aviso", async () => {
+    setup(`/bancada/media-mill?preset=${PRESET_ID}`, {
+      [`GET /api/v1/presets/${PRESET_ID}`]: () =>
+        jsonResponse(
+          presetBody({
+            recipe_id: "media-mill",
+            recipe_version: 1,
+            parameters: { extract_audio: true, audio_format: "flac", thumbnail_count: 0 },
+          }),
+        ),
+    });
+
+    const notice = await screen.findByText(/^Parâmetros do preset Clientes do mês\./);
+    expect(notice).toHaveTextContent(TEXT.workbench.olderVersionLoaded(1));
+    expect(screen.getByRole("radio", { name: "FLAC (compressão sem perdas)" })).toBeChecked();
+    expect(screen.getByRole("radio", { name: "Nenhuma" })).toBeChecked();
+    expect(screen.getByRole("combobox", { name: "Qualidade do áudio, em kbps" })).toBeDisabled();
   });
 
   it("parâmetros num formato que a interface não conhece abrem os padrões e avisam", async () => {
