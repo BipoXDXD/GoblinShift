@@ -58,9 +58,9 @@ def release(session: Session, holder_kind: HolderKind, holder_id: uuid.UUID) -> 
     Para `HolderKind.RUN`, é aqui que a retenção de 48 h das entradas usadas passa a contar
     (1.7: "48 horas após o término"): os uploads prontos desses objetos ganham
     `expires_at = GREATEST(expires_at, now() + 48 h)`. `runs` chama esta função depois de
-    tornar a execução terminal, numa transação seguinte (`release_run_holds`, ordem de locks de
-    3.4); o prazo conta a partir dela, não do commit do estado terminal. Um upload excluído fica de
-    fora: a data dele já decidiu entre `deleted` e `expired`.
+    tornar a execução terminal, numa transação seguinte (`release_run_holds`,
+    ordem de locks (ADR 071)); o prazo conta a partir dela, não do commit do estado terminal. Um
+    upload excluído fica de fora: a data dele já decidiu entre `deleted` e `expired`.
     """
     release_many(session, holder_kind, [holder_id])
 

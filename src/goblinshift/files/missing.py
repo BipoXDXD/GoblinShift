@@ -105,7 +105,7 @@ def mark_missing(session: Session, object_ids: Collection[uuid.UUID]) -> int:
     Na transação de quem chama. Repetir é no-op, e um objeto que entrementes foi pedido para
     exclusão ou removido fica como está: a mudança é condicional ao estado `committed`. A
     reserva sai porque o arquivo já não ocupa disco e o expurgo, que a liberaria, nunca vai
-    tocar um objeto `missing`. Ordem de locks de 3.4: objetos em ordem de ID, pools por último.
+    tocar um objeto `missing`. Ordem de locks (ADR 071): objetos em ordem de ID, pools por último.
     """
     ids = sorted(set(object_ids))
     if not ids:

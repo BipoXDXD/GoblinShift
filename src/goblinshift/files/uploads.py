@@ -280,7 +280,7 @@ def get_uploads(
 def request_deletion(session: Session, owner_id: uuid.UUID, upload_id: uuid.UUID) -> None:
     """Torna o upload indisponível na hora; repetir é sucesso.
 
-    Ordem de locks de 3.4: Upload (`FOR UPDATE`) → StoredObject. O arquivo só sai do disco pela
+    Ordem de locks (ADR 071): Upload (`FOR UPDATE`) → StoredObject. O arquivo só sai do disco pela
     manutenção, quando não houver uso aberto. Upload incompleto não tem conteúdo confirmado: a
     retenção remove objeto e linha.
     """
@@ -358,8 +358,8 @@ def _ensure_creation_room(session: Session, owner_id: uuid.UUID, batch_size: int
     estouram, vai o de espera maior, para o cliente não voltar cedo e levar outro 429. A trava vale
     até o fim da transação e serializa só as criações de lote da mesma conta: cada lote conta e
     insere antes que o próximo conte, então dois lotes paralelos não passam juntos de um teto.
-    Ordem das travas: chave do lote (`upload_requests`) → vivos → pools do `capacity`. O objeto
-    da trava é um hash de 32 bits; uma colisão só faz duas contas esperarem uma pela outra.
+    Ordem das travas (ADR 071): chave do lote (`upload_requests`) → vivos → pools do `capacity`.
+    O objeto da trava é um hash de 32 bits; uma colisão só faz duas contas esperarem uma pela outra.
     """
     session.execute(
         select(

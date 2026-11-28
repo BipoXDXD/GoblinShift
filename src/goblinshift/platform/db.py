@@ -1,5 +1,10 @@
 """Engine, sessões, unidade de trabalho e a leitura dos erros do banco (docs/GoblinShiftPlan.md,
-3.2, 3.7)."""
+3.2, 3.7).
+
+Ordem de travas (ADR 071): Run → Attempt → Upload/Artifact → StoredObject → reserva → pool da
+conta → pool global, com IDs em ordem dentro de cada grupo. Os relógios do banco moram aqui
+(`transaction_now`, `db_wall_clock`); detalhes e relógios: ADR 071.
+"""
 
 import time
 from collections.abc import Callable, Iterator

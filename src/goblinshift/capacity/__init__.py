@@ -5,8 +5,8 @@ global, execução ativa por conta e transferências simultâneas continuam nos 
 módulo (advisory lock, índice único parcial e `transfer_slot`); este módulo cuida só do que é
 quantidade reservável.
 
-Cada função roda na transação de quem chama. Ordem das travas: pool da conta e depois o global,
-sempre, para não haver deadlock.
+Cada função roda na transação de quem chama. Ordem das travas (ADR 071): pool da conta e depois
+o global, sempre, para não haver deadlock.
 """
 
 from goblinshift.capacity.ledger import (

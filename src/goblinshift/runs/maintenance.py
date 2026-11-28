@@ -1011,7 +1011,7 @@ def _sweep_counts(sweep: MissingSweep) -> dict[str, int]:
 
 
 def _discard_locked(session: Session, run_id: uuid.UUID, attempt_id: uuid.UUID) -> list[str] | None:
-    # Ordem de locks: Run → Attempt → arquivos; Run ocupada fica para o próximo ciclo.
+    # Ordem de locks (ADR 071): Run → Attempt → arquivos; Run ocupada fica para o próximo ciclo.
     if load_run_any_owner(session, run_id, skip_locked=True) is None:
         return None
     return discard_candidates(session, attempt_id)

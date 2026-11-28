@@ -432,7 +432,7 @@ def reconcile_capacity(session: Session, *, limit: int) -> capacity.ReconcileRep
 
     Os órfãos ficam travados até a adoção: sem isso, o expurgo (`deleted`) ou a varredura
     (`missing`) confirmariam entre a leitura e o INSERT, e a reserva nova ficaria presa a um
-    objeto removido. Ordem de travas de 3.4: objetos, depois pools, a mesma do expurgo. Com
+    objeto removido. Ordem de travas (ADR 071): objetos, depois pools, a mesma do expurgo. Com
     `SKIP LOCKED`, um objeto que outro já travou fica para o próximo ciclo; e a releitura do
     READ COMMITTED depois da trava descarta o que mudou de estado entrementes.
     """

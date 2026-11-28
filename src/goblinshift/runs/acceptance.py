@@ -1,7 +1,7 @@
 """Aceitação de execuções: `POST /runs` sem HTTP (docs/GoblinShiftPlan.md, 1.6, 1.7 e 3.4).
 
 Fora de transação: formato da Idempotency-Key, parâmetros resolvidos pelo catálogo, forma das
-entradas e o hash canônico do comando. Numa transação curta, na ordem de locks de 3.4:
+entradas e o hash canônico do comando. Numa transação curta, na ordem de locks (ADR 071):
 
 1. Trava da chave de idempotência (`pg_try_advisory_xact_lock`, sem espera). Todo escritor de uma
    chave passa por ela, então outra requisição com a mesma chave em andamento é detectada na

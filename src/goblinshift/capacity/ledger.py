@@ -2,9 +2,9 @@
 
 O saldo nunca é conferido antes de escrito: cada reserva é um `UPDATE` condicional no pool
 (`reserved + :n <= max_amount`), e o `CHECK (reserved BETWEEN 0 AND max_amount)` do banco
-segura o resto. Ordem das travas, sempre: pools de conta (por `owner_id`) e depois o global. As
-funções rodam na transação de quem chama; uma exceção de capacidade exige desfazê-la, porque o
-pool da conta pode já ter sido incrementado quando o global recusa.
+segura o resto. Ordem das travas (ADR 071), sempre: pools de conta (por `owner_id`) e depois o
+global. As funções rodam na transação de quem chama; uma exceção de capacidade exige desfazê-la,
+porque o pool da conta pode já ter sido incrementado quando o global recusa.
 """
 
 import uuid

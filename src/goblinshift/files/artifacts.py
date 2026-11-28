@@ -300,7 +300,7 @@ def request_artifacts_deletion(
 ) -> None:
     """Torna os artefatos do dono indisponíveis na hora; os já excluídos ficam como estão.
 
-    Ordem de locks de 3.4: Artifact (`FOR UPDATE`, em ordem de ID) → StoredObject. O objeto só
+    Ordem de locks (ADR 071): Artifact (`FOR UPDATE`, em ordem de ID) → StoredObject. O objeto só
     vira `delete_requested` se nenhum upload ou outro artefato válido o aponta: a saída do Detox
     que reaproveita o objeto da entrada (ADR 020) não apaga o original.
     """

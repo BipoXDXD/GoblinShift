@@ -5,7 +5,7 @@ banco, e se grava a `Transition` decidida. Toda escrita é condicionada à gera�
 lidos: se outra tentativa ou o reconciliador assumiu entre a leitura e a escrita, nenhuma linha
 muda e `LostFencing` interrompe quem chamou, que para sem escrever mais nada.
 
-Ordem de locks (3.4): Run → Attempt → arquivos. A liberação de usos e da reserva de capacidade
+Ordem de locks (ADR 071): Run → Attempt → arquivos. A liberação de usos e da reserva de capacidade
 fica para uma transação seguinte (`release_run_holds`), como na publicação e na manutenção: a
 publicação só move saldo entre reservas, sem travar pool depois da Run.
 """
