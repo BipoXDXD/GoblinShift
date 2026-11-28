@@ -747,6 +747,34 @@ def test_pdf_press_com_pagina_de_upload_fora_das_entradas_responde_422_no_campo(
     assert str(alheio) not in response.text
 
 
+def test_select_v2_com_upload_fora_das_entradas_e_recusado(
+    client: TestClient, factory: sessionmaker[Session]
+) -> None:
+    # ADR 070: o intervalo da v2 cita só uploads da execução, como a página da v1.
+    account = Account(factory)
+    entrada, alheio = uuid.uuid4(), uuid.uuid4()
+    payload = {
+        "recipe_id": "pdf-press",
+        "recipe_version": 2,
+        "input_upload_ids": [str(entrada)],
+        "parameters": {
+            "operation": "select",
+            "select": [
+                {"upload_id": str(entrada), "first_page": 1, "last_page": None},
+                {"upload_id": str(alheio), "first_page": 2, "last_page": 3, "rotation": 90},
+            ],
+        },
+    }
+
+    response = post_run(client, account, payload, None, "?validate_only=true")
+
+    assert_problem(response, 422, "VALIDATION_FAILED")
+    assert [error["field"] for error in response.json()["errors"]] == [
+        "body.parameters.select.1.upload_id"
+    ]
+    assert str(alheio) not in response.text
+
+
 def test_criar_exige_o_escopo_runs_write(
     client: TestClient, factory: sessionmaker[Session], storage: FileStorage
 ) -> None:
@@ -1308,6 +1336,7 @@ def test_openapi_publica_a_variante_do_catalogo(client: TestClient) -> None:
         ("image-forge", 1),
         ("downloads-detox", 1),
         ("pdf-press", 1),
+        ("pdf-press", 2),
         ("media-mill", 1),
     ]
     assert schema["unevaluatedProperties"] is False

@@ -1,0 +1,133 @@
+{
+  "defaults": {
+    "compression": "none",
+    "operation": "merge",
+    "pages_per_document": 1,
+    "rotation": 0,
+    "select": null,
+    "strip_metadata": true
+  },
+  "variant_schema": {
+    "properties": {
+      "parameters": {
+        "additionalProperties": false,
+        "properties": {
+          "compression": {
+            "default": "none",
+            "enum": [
+              "none",
+              "lossless"
+            ],
+            "title": "Compression",
+            "type": "string"
+          },
+          "operation": {
+            "default": "merge",
+            "enum": [
+              "merge",
+              "split",
+              "select"
+            ],
+            "title": "Operation",
+            "type": "string"
+          },
+          "pages_per_document": {
+            "default": 1,
+            "maximum": 200,
+            "minimum": 1,
+            "type": "integer"
+          },
+          "rotation": {
+            "default": 0,
+            "enum": [
+              0,
+              90,
+              180,
+              270
+            ],
+            "type": "integer"
+          },
+          "select": {
+            "anyOf": [
+              {
+                "items": {
+                  "additionalProperties": false,
+                  "description": "Páginas `first_page`..`last_page` de um upload; `last_page` nulo vai até o fim.",
+                  "properties": {
+                    "first_page": {
+                      "maximum": 200,
+                      "minimum": 1,
+                      "type": "integer"
+                    },
+                    "last_page": {
+                      "anyOf": [
+                        {
+                          "maximum": 200,
+                          "minimum": 1,
+                          "type": "integer"
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ]
+                    },
+                    "rotation": {
+                      "default": 0,
+                      "enum": [
+                        0,
+                        90,
+                        180,
+                        270
+                      ],
+                      "type": "integer"
+                    },
+                    "upload_id": {
+                      "format": "uuid",
+                      "title": "Upload Id",
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "upload_id",
+                    "first_page",
+                    "last_page"
+                  ],
+                  "title": "PageRangeParameters",
+                  "type": "object"
+                },
+                "maxItems": 400,
+                "minItems": 1,
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Select"
+          },
+          "strip_metadata": {
+            "default": true,
+            "title": "Strip Metadata",
+            "type": "boolean"
+          }
+        },
+        "title": "PdfPressV2Parameters",
+        "type": "object"
+      },
+      "recipe_id": {
+        "const": "pdf-press"
+      },
+      "recipe_version": {
+        "const": 2
+      }
+    },
+    "required": [
+      "recipe_id",
+      "recipe_version",
+      "parameters"
+    ],
+    "title": "pdf-press v2",
+    "type": "object"
+  }
+}

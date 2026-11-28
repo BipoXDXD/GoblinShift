@@ -27,7 +27,13 @@ from goblinshift.processing.pdf_press.composition import (
 )
 from goblinshift.processing.pdf_press.compression import FlateRecompressor, RecompressionStats
 from goblinshift.processing.pdf_press.inspection import InspectedDocument, inspect_document
-from goblinshift.processing.pdf_press.limits import MAX_INPUTS, RECIPE_ID, VERSION, Limits
+from goblinshift.processing.pdf_press.limits import (
+    MAX_INPUTS,
+    RECIPE_ID,
+    VERSION,
+    VERSION_2,
+    Limits,
+)
 from goblinshift.processing.pdf_press.page_map import (
     PAGE_MAP_NAME,
     encode_document_preview,
@@ -49,7 +55,7 @@ from goblinshift.processing.recipe import (
     require_max_inputs,
 )
 
-__all__ = ["RECIPE_ID", "VERSION", "PdfPress"]
+__all__ = ["RECIPE_ID", "VERSION", "VERSION_2", "PdfPress"]
 
 NOT_SELECTED = ReportWarning("INPUT_NOT_SELECTED", "nenhuma página desta entrada foi selecionada")
 

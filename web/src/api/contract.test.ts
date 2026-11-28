@@ -6,6 +6,10 @@ import type { RunCommand } from "./types";
 // `oneOf` das versões do catálogo, discriminado por `recipe_id`. Uma receita nova na API
 // muda este teste de propósito, para o formulário dela ser escrito à mão (2.2).
 type Variant<K extends RunCommand["recipe_id"]> = Extract<RunCommand, { recipe_id: K }>;
+type VersionOf<K extends RunCommand["recipe_id"], V extends number> = Extract<
+  Variant<K>,
+  { recipe_version: V }
+>;
 
 describe("contrato gerado de POST /runs", () => {
   it("discrimina as variantes pelo recipe_id literal", () => {
@@ -18,7 +22,7 @@ describe("contrato gerado de POST /runs", () => {
     expectTypeOf<Variant<"csv-janitor">["recipe_version"]>().toEqualTypeOf<1 | 2>();
     expectTypeOf<Variant<"image-forge">["recipe_version"]>().toEqualTypeOf<1>();
     expectTypeOf<Variant<"downloads-detox">["recipe_version"]>().toEqualTypeOf<1>();
-    expectTypeOf<Variant<"pdf-press">["recipe_version"]>().toEqualTypeOf<1>();
+    expectTypeOf<Variant<"pdf-press">["recipe_version"]>().toEqualTypeOf<1 | 2>();
     expectTypeOf<Variant<"media-mill">["recipe_version"]>().toEqualTypeOf<1>();
   });
 
@@ -65,8 +69,8 @@ describe("contrato gerado de POST /runs", () => {
     >();
   });
 
-  it("dá ao PDF Press os próprios parâmetros, com a seleção por upload e página", () => {
-    type Parameters = Variant<"pdf-press">["parameters"];
+  it("dá ao PDF Press v1 os próprios parâmetros, com a seleção por upload e página", () => {
+    type Parameters = VersionOf<"pdf-press", 1>["parameters"];
 
     expectTypeOf<Parameters["operation"]>().toEqualTypeOf<
       "merge" | "split" | "select" | undefined
@@ -75,6 +79,27 @@ describe("contrato gerado de POST /runs", () => {
       { upload_id: string; page_number: number }[] | null | undefined
     >();
     expectTypeOf<keyof Parameters>().toEqualTypeOf<"operation" | "pages_per_document" | "select">();
+  });
+
+  it("dá ao PDF Press v2 intervalos com rotação, compressão e strip_metadata", () => {
+    type Parameters = VersionOf<"pdf-press", 2>["parameters"];
+
+    expectTypeOf<Parameters["select"]>().toEqualTypeOf<
+      | {
+          upload_id: string;
+          first_page: number;
+          last_page: number | null;
+          rotation?: 0 | 90 | 180 | 270;
+        }[]
+      | null
+      | undefined
+    >();
+    expectTypeOf<Parameters["rotation"]>().toEqualTypeOf<0 | 90 | 180 | 270 | undefined>();
+    expectTypeOf<Parameters["compression"]>().toEqualTypeOf<"none" | "lossless" | undefined>();
+    expectTypeOf<Parameters["strip_metadata"]>().toEqualTypeOf<boolean | undefined>();
+    expectTypeOf<keyof Parameters>().toEqualTypeOf<
+      "operation" | "pages_per_document" | "select" | "rotation" | "compression" | "strip_metadata"
+    >();
   });
 
   it("dá ao Media Mill os próprios parâmetros, sem index signature", () => {

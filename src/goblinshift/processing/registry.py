@@ -62,6 +62,8 @@ _DOWNLOADS_DETOX_V1: _Bound[downloads_detox.Params] = _Bound(
 _MEDIA_MILL_V1: _Bound[media_mill.Params] = _Bound(media_mill.params_from_mapping, MediaMillV1())
 
 _PDF_PRESS_V1: _Bound[pdf_press.Params] = _Bound(pdf_press.params_from_mapping, PdfPress())
+# Como no csv-janitor: a mesma receita, e o parser da v1 recusa os intervalos e as opções da v2.
+_PDF_PRESS_V2: _Bound[pdf_press.Params] = _Bound(pdf_press.params_v2_from_mapping, PdfPress())
 
 RECIPES: Mapping[RecipeKey, RegisteredRecipe] = MappingProxyType(
     {
@@ -71,5 +73,6 @@ RECIPES: Mapping[RecipeKey, RegisteredRecipe] = MappingProxyType(
         (downloads_detox.RECIPE_ID, downloads_detox.VERSION): _DOWNLOADS_DETOX_V1,
         (media_mill.RECIPE_ID, media_mill.VERSION): _MEDIA_MILL_V1,
         (pdf_press.RECIPE_ID, pdf_press.VERSION): _PDF_PRESS_V1,
+        (pdf_press.RECIPE_ID, pdf_press.VERSION_2): _PDF_PRESS_V2,
     }
 )

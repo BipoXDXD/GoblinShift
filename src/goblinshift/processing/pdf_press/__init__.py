@@ -14,6 +14,7 @@ from goblinshift.processing.pdf_press.limits import (
     MAX_TOTAL_INPUT_BYTES,
     RECIPE_ID,
     VERSION,
+    VERSION_2,
     Limits,
 )
 from goblinshift.processing.pdf_press.params import (
@@ -39,6 +40,7 @@ __all__ = [
     "RECIPE_ID",
     "ROTATIONS",
     "VERSION",
+    "VERSION_2",
     "Compression",
     "InvalidParametersError",
     "Limits",

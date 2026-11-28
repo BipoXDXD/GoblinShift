@@ -250,6 +250,7 @@ def test_catalogo_lista_as_receitas_implementadas() -> None:
         ("image-forge", 1),
         ("downloads-detox", 1),
         ("pdf-press", 1),
+        ("pdf-press", 2),
         ("media-mill", 1),
     }
 

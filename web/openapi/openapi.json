@@ -2720,6 +2720,128 @@
                       {
                         "properties": {
                           "recipe_id": {
+                            "const": "pdf-press"
+                          },
+                          "recipe_version": {
+                            "const": 2
+                          },
+                          "parameters": {
+                            "properties": {
+                              "operation": {
+                                "type": "string",
+                                "enum": [
+                                  "merge",
+                                  "split",
+                                  "select"
+                                ],
+                                "title": "Operation",
+                                "default": "merge"
+                              },
+                              "pages_per_document": {
+                                "type": "integer",
+                                "maximum": 200.0,
+                                "minimum": 1.0,
+                                "default": 1
+                              },
+                              "select": {
+                                "anyOf": [
+                                  {
+                                    "items": {
+                                      "properties": {
+                                        "upload_id": {
+                                          "type": "string",
+                                          "format": "uuid",
+                                          "title": "Upload Id"
+                                        },
+                                        "first_page": {
+                                          "type": "integer",
+                                          "maximum": 200.0,
+                                          "minimum": 1.0
+                                        },
+                                        "last_page": {
+                                          "anyOf": [
+                                            {
+                                              "type": "integer",
+                                              "maximum": 200.0,
+                                              "minimum": 1.0
+                                            },
+                                            {
+                                              "type": "null"
+                                            }
+                                          ]
+                                        },
+                                        "rotation": {
+                                          "type": "integer",
+                                          "enum": [
+                                            0,
+                                            90,
+                                            180,
+                                            270
+                                          ],
+                                          "default": 0
+                                        }
+                                      },
+                                      "additionalProperties": false,
+                                      "type": "object",
+                                      "required": [
+                                        "upload_id",
+                                        "first_page",
+                                        "last_page"
+                                      ],
+                                      "title": "PageRangeParameters",
+                                      "description": "Páginas `first_page`..`last_page` de um upload; `last_page` nulo vai até o fim."
+                                    },
+                                    "type": "array",
+                                    "maxItems": 400,
+                                    "minItems": 1
+                                  },
+                                  {
+                                    "type": "null"
+                                  }
+                                ],
+                                "title": "Select"
+                              },
+                              "rotation": {
+                                "type": "integer",
+                                "enum": [
+                                  0,
+                                  90,
+                                  180,
+                                  270
+                                ],
+                                "default": 0
+                              },
+                              "compression": {
+                                "type": "string",
+                                "enum": [
+                                  "none",
+                                  "lossless"
+                                ],
+                                "title": "Compression",
+                                "default": "none"
+                              },
+                              "strip_metadata": {
+                                "type": "boolean",
+                                "title": "Strip Metadata",
+                                "default": true
+                              }
+                            },
+                            "additionalProperties": false,
+                            "type": "object",
+                            "title": "PdfPressV2Parameters"
+                          }
+                        },
+                        "type": "object",
+                        "required": [
+                          "recipe_id",
+                          "recipe_version",
+                          "parameters"
+                        ],
+                        "title": "pdf-press v2"
+                      },
+                      {
+                        "properties": {
+                          "recipe_id": {
                             "const": "media-mill"
                           },
                           "recipe_version": {
@@ -3826,6 +3948,128 @@
                         ]
                       },
                       {
+                        "title": "pdf-press v2",
+                        "type": "object",
+                        "properties": {
+                          "recipe_id": {
+                            "const": "pdf-press"
+                          },
+                          "recipe_version": {
+                            "const": 2
+                          },
+                          "parameters": {
+                            "additionalProperties": false,
+                            "properties": {
+                              "operation": {
+                                "enum": [
+                                  "merge",
+                                  "split",
+                                  "select"
+                                ],
+                                "title": "Operation",
+                                "type": "string",
+                                "default": "merge"
+                              },
+                              "pages_per_document": {
+                                "maximum": 200,
+                                "minimum": 1,
+                                "type": "integer",
+                                "default": 1
+                              },
+                              "select": {
+                                "anyOf": [
+                                  {
+                                    "items": {
+                                      "additionalProperties": false,
+                                      "description": "Páginas `first_page`..`last_page` de um upload; `last_page` nulo vai até o fim.",
+                                      "properties": {
+                                        "upload_id": {
+                                          "format": "uuid",
+                                          "title": "Upload Id",
+                                          "type": "string"
+                                        },
+                                        "first_page": {
+                                          "maximum": 200,
+                                          "minimum": 1,
+                                          "type": "integer"
+                                        },
+                                        "last_page": {
+                                          "anyOf": [
+                                            {
+                                              "maximum": 200,
+                                              "minimum": 1,
+                                              "type": "integer"
+                                            },
+                                            {
+                                              "type": "null"
+                                            }
+                                          ]
+                                        },
+                                        "rotation": {
+                                          "enum": [
+                                            0,
+                                            90,
+                                            180,
+                                            270
+                                          ],
+                                          "type": "integer",
+                                          "default": 0
+                                        }
+                                      },
+                                      "required": [
+                                        "upload_id",
+                                        "first_page",
+                                        "last_page"
+                                      ],
+                                      "title": "PageRangeParameters",
+                                      "type": "object"
+                                    },
+                                    "maxItems": 400,
+                                    "minItems": 1,
+                                    "type": "array"
+                                  },
+                                  {
+                                    "type": "null"
+                                  }
+                                ],
+                                "title": "Select"
+                              },
+                              "rotation": {
+                                "enum": [
+                                  0,
+                                  90,
+                                  180,
+                                  270
+                                ],
+                                "type": "integer",
+                                "default": 0
+                              },
+                              "compression": {
+                                "enum": [
+                                  "none",
+                                  "lossless"
+                                ],
+                                "title": "Compression",
+                                "type": "string",
+                                "default": "none"
+                              },
+                              "strip_metadata": {
+                                "default": true,
+                                "title": "Strip Metadata",
+                                "type": "boolean"
+                              }
+                            },
+                            "title": "PdfPressV2Parameters",
+                            "type": "object"
+                          }
+                        },
+                        "required": [
+                          "recipe_id",
+                          "recipe_version",
+                          "parameters"
+                        ]
+                      },
+                      {
                         "title": "media-mill v1",
                         "type": "object",
                         "properties": {
@@ -4787,6 +5031,128 @@
                               }
                             },
                             "title": "PdfPressV1Parameters",
+                            "type": "object"
+                          }
+                        },
+                        "required": [
+                          "recipe_id",
+                          "recipe_version",
+                          "parameters"
+                        ]
+                      },
+                      {
+                        "title": "pdf-press v2",
+                        "type": "object",
+                        "properties": {
+                          "recipe_id": {
+                            "const": "pdf-press"
+                          },
+                          "recipe_version": {
+                            "const": 2
+                          },
+                          "parameters": {
+                            "additionalProperties": false,
+                            "properties": {
+                              "operation": {
+                                "enum": [
+                                  "merge",
+                                  "split",
+                                  "select"
+                                ],
+                                "title": "Operation",
+                                "type": "string",
+                                "default": "merge"
+                              },
+                              "pages_per_document": {
+                                "maximum": 200,
+                                "minimum": 1,
+                                "type": "integer",
+                                "default": 1
+                              },
+                              "select": {
+                                "anyOf": [
+                                  {
+                                    "items": {
+                                      "additionalProperties": false,
+                                      "description": "Páginas `first_page`..`last_page` de um upload; `last_page` nulo vai até o fim.",
+                                      "properties": {
+                                        "upload_id": {
+                                          "format": "uuid",
+                                          "title": "Upload Id",
+                                          "type": "string"
+                                        },
+                                        "first_page": {
+                                          "maximum": 200,
+                                          "minimum": 1,
+                                          "type": "integer"
+                                        },
+                                        "last_page": {
+                                          "anyOf": [
+                                            {
+                                              "maximum": 200,
+                                              "minimum": 1,
+                                              "type": "integer"
+                                            },
+                                            {
+                                              "type": "null"
+                                            }
+                                          ]
+                                        },
+                                        "rotation": {
+                                          "enum": [
+                                            0,
+                                            90,
+                                            180,
+                                            270
+                                          ],
+                                          "type": "integer",
+                                          "default": 0
+                                        }
+                                      },
+                                      "required": [
+                                        "upload_id",
+                                        "first_page",
+                                        "last_page"
+                                      ],
+                                      "title": "PageRangeParameters",
+                                      "type": "object"
+                                    },
+                                    "maxItems": 400,
+                                    "minItems": 1,
+                                    "type": "array"
+                                  },
+                                  {
+                                    "type": "null"
+                                  }
+                                ],
+                                "title": "Select"
+                              },
+                              "rotation": {
+                                "enum": [
+                                  0,
+                                  90,
+                                  180,
+                                  270
+                                ],
+                                "type": "integer",
+                                "default": 0
+                              },
+                              "compression": {
+                                "enum": [
+                                  "none",
+                                  "lossless"
+                                ],
+                                "title": "Compression",
+                                "type": "string",
+                                "default": "none"
+                              },
+                              "strip_metadata": {
+                                "default": true,
+                                "title": "Strip Metadata",
+                                "type": "boolean"
+                              }
+                            },
+                            "title": "PdfPressV2Parameters",
                             "type": "object"
                           }
                         },

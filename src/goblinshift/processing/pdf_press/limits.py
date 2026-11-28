@@ -5,6 +5,7 @@ from dataclasses import dataclass
 MIB = 1024 * 1024
 RECIPE_ID = "pdf-press"
 VERSION = 1
+VERSION_2 = 2
 MAX_INPUTS = 20
 # Somadas entre todas as entradas, contadas depois de abrir cada documento.
 MAX_INPUT_PAGES = 200

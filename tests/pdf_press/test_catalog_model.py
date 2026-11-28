@@ -1,22 +1,34 @@
-"""Modelo dos parâmetros do pdf-press v1 e conferência das referências a uploads (1.5, 1.6)."""
+"""Modelo dos parâmetros do pdf-press v1 e v2 e conferência das referências a uploads (1.5)."""
 
+import hashlib
 import uuid
+from datetime import UTC, datetime
+from pathlib import Path
 
+import pikepdf
 import pytest
 from pydantic import ValidationError
 
-from goblinshift.catalog import CATALOG
+from goblinshift.catalog import CATALOG, InvalidParametersError, VersionStatus
 from goblinshift.catalog.pdf_press_v1 import PdfPressV1Parameters, upload_references
 from goblinshift.catalog.references import UploadReference
+from goblinshift.catalog.versions import PDF_PRESS_V2_MERGE_DEADLINE, sunset_after_merge
+from goblinshift.processing.output_dir import FileSystemOutputDir
 from goblinshift.processing.pdf_press import (
     MAX_INPUT_PAGES,
     MAX_OUTPUT_PAGES,
+    Compression,
     Operation,
     PageRange,
     Params,
     params_from_mapping,
+    params_v2_from_mapping,
 )
+from goblinshift.processing.recipe import InputFile
+from goblinshift.processing.registry import RECIPES
 from goblinshift.runs.acceptance import InvalidRunCommandError, RunCommand, validate_run
+from tests.pdf_press import samples
+from tests.pdf_press.conftest import PDF_PRESS_RESERVED_NAMES, RecordedProgress
 
 UPLOAD_A = "4eb3e442-3f30-4d83-8d34-cb18a99a46cb"
 UPLOAD_B = "1b8f283e-32ee-4687-9bd1-ae2f75f93cc2"
@@ -196,3 +208,171 @@ def test_entradas_acima_de_20_sao_recusadas() -> None:
         validate_run(command({}, inputs))
 
     assert caught.value.errors[0].location == ("input_upload_ids",)
+
+
+# --- v2: intervalos, rotação, compressão e strip_metadata (ADR 070) ----------------------------
+
+RANGE = {"upload_id": UPLOAD_A, "first_page": 1, "last_page": 3, "rotation": 90}
+RANGE_B = {"upload_id": UPLOAD_B, "first_page": 10, "last_page": None, "rotation": 0}
+
+
+def _locations(raw: object) -> list[str]:
+    with pytest.raises(InvalidParametersError) as caught:
+        CATALOG.resolve("pdf-press", 2, raw)
+    return [".".join(error.location) for error in caught.value.errors]
+
+
+def test_pdf_press_v2_resolve_os_defaults() -> None:
+    resolved = CATALOG.resolve("pdf-press", 2, {})
+
+    assert resolved == {
+        "compression": "none",
+        "operation": "merge",
+        "pages_per_document": 1,
+        "rotation": 0,
+        "select": None,
+        "strip_metadata": True,
+    }
+
+
+def test_select_da_v2_resolvido_vira_os_params_da_biblioteca() -> None:
+    raw = {
+        "operation": "select",
+        "compression": "lossless",
+        "select": [{**RANGE, "upload_id": UPLOAD_A.upper()}, RANGE_B],
+    }
+
+    resolved = CATALOG.resolve("pdf-press", 2, raw)
+
+    assert params_v2_from_mapping(resolved) == Params(
+        Operation.SELECT,
+        select=(PageRange(UPLOAD_A, 1, 3, 90), PageRange(UPLOAD_B, 10, None, 0)),
+        compression=Compression.LOSSLESS,
+        strip_metadata=True,
+    )
+
+
+def test_rotacao_do_intervalo_tem_default_zero() -> None:
+    item = {"upload_id": UPLOAD_A, "first_page": 2, "last_page": 2}
+
+    resolved = CATALOG.resolve("pdf-press", 2, {"operation": "select", "select": [item]})
+
+    assert resolved["select"] == [{**item, "rotation": 0}]
+
+
+def test_rotacao_explicita_no_select_e_recusada_no_campo() -> None:
+    raw = {"operation": "select", "rotation": 0, "select": [RANGE]}
+
+    with pytest.raises(InvalidParametersError) as caught:
+        CATALOG.resolve("pdf-press", 2, raw)
+
+    assert [error.location for error in caught.value.errors] == [()]
+    assert "rotation só se aplica a merge e split" in str(caught.value)
+
+
+@pytest.mark.parametrize("operation", ["merge", "split"])
+def test_rotacao_global_vale_em_merge_e_split(operation: str) -> None:
+    resolved = CATALOG.resolve("pdf-press", 2, {"operation": operation, "rotation": 270})
+
+    assert resolved["rotation"] == 270
+
+
+def test_last_page_e_obrigatorio_mesmo_nulo() -> None:
+    raw = {"operation": "select", "select": [{"upload_id": UPLOAD_A, "first_page": 1}]}
+
+    assert _locations(raw) == ["select.0.last_page"]
+
+
+@pytest.mark.parametrize(
+    ("raw", "location"),
+    [
+        pytest.param({"rotation": 45}, "rotation", id="rotacao-fora-dos-angulos"),
+        pytest.param({"rotation": True}, "rotation", id="rotacao-booleana"),
+        pytest.param({"compression": "lossy"}, "compression", id="compressao-desconhecida"),
+        pytest.param({"strip_metadata": "sim"}, "strip_metadata", id="strip-texto"),
+        pytest.param(
+            {"operation": "select", "select": [{**RANGE, "first_page": 5, "last_page": 2}]},
+            "select.0",
+            id="intervalo-invertido",
+        ),
+        pytest.param(
+            {"operation": "select", "select": [{**RANGE, "rotation": 45}]},
+            "select.0.rotation",
+            id="rotacao-do-intervalo",
+        ),
+        pytest.param(
+            {"operation": "select", "select": [{**RANGE, "first_page": 0}]},
+            "select.0.first_page",
+            id="primeira-zero",
+        ),
+        pytest.param(
+            {"operation": "select", "select": [{"upload_id": UPLOAD_A, "page_number": 1}]},
+            "select.0.page_number",
+            id="item-da-v1",
+        ),
+        pytest.param(
+            {"operation": "select", "select": [RANGE] * (MAX_OUTPUT_PAGES + 1)},
+            "select",
+            id="intervalos-acima-do-teto",
+        ),
+    ],
+)
+def test_parametro_invalido_da_v2_aponta_o_campo(raw: dict[str, object], location: str) -> None:
+    assert location in _locations(raw)
+
+
+def test_v1_recusa_opcao_da_v2_no_campo() -> None:
+    with pytest.raises(InvalidParametersError) as caught:
+        CATALOG.resolve("pdf-press", 1, {"rotation": 90})
+
+    assert [error.location for error in caught.value.errors] == [("rotation",)]
+
+
+def test_upload_references_da_v2_cita_cada_intervalo() -> None:
+    parameters = CATALOG.resolve(
+        "pdf-press", 2, {"operation": "select", "select": [RANGE, RANGE_B]}
+    )
+
+    references = CATALOG.get_version("pdf-press", 2).upload_references(parameters)
+
+    assert references == (
+        UploadReference(("select", "0", "upload_id"), uuid.UUID(UPLOAD_A)),
+        UploadReference(("select", "1", "upload_id"), uuid.UUID(UPLOAD_B)),
+    )
+
+
+def test_selecao_v2_de_upload_fora_das_entradas_e_recusada_com_o_campo() -> None:
+    raw = {"operation": "select", "select": [RANGE, RANGE_B]}
+
+    with pytest.raises(InvalidRunCommandError) as caught:
+        validate_run(RunCommand("pdf-press", 2, (uuid.UUID(UPLOAD_A),), raw))
+
+    assert [e.location for e in caught.value.errors] == [("parameters", "select", "1", "upload_id")]
+
+
+def test_registro_da_v2_gira_e_comprime(tmp_path: Path) -> None:
+    data = samples.document("a", pages=2, compress=False)
+    (tmp_path / "out").mkdir()
+    source = tmp_path / "a.pdf"
+    source.write_bytes(data)
+    entry = InputFile(0, source, "a.pdf", len(data), hashlib.sha256(data).hexdigest())
+    resolved = CATALOG.resolve("pdf-press", 2, {"rotation": 90, "compression": "lossless"})
+    out = FileSystemOutputDir(tmp_path / "out", reserved_names=PDF_PRESS_RESERVED_NAMES)
+
+    report = RECIPES[("pdf-press", 2)].execute(resolved, [entry], out, RecordedProgress())
+
+    assert report.details["compression"] == "lossless"
+    with pikepdf.open(tmp_path / "out" / "merged.pdf") as pdf:
+        assert [int(page.obj.Rotate) for page in pdf.pages] == [90, 90]
+
+
+def test_v1_fica_deprecated_com_sunset_e_v2_e_a_atual() -> None:
+    v1 = CATALOG.get_version("pdf-press", 1)
+    v2 = CATALOG.get_version("pdf-press", 2)
+
+    assert v1.status is VersionStatus.DEPRECATED
+    assert v1.sunset_at == sunset_after_merge(PDF_PRESS_V2_MERGE_DEADLINE)
+    assert v1.sunset_at == datetime(2027, 4, 1, tzinfo=UTC)
+    assert v2.status is VersionStatus.CURRENT
+    assert v2.limits == v1.limits
+    assert v2.upload_references is v1.upload_references

@@ -26,6 +26,7 @@ from goblinshift.catalog.downloads_detox_v1 import DownloadsDetoxV1Parameters
 from goblinshift.catalog.image_forge_v1 import ImageForgeV1Parameters
 from goblinshift.catalog.media_mill_v1 import MediaMillV1Parameters
 from goblinshift.catalog.pdf_press_v1 import PdfPressV1Parameters, upload_references
+from goblinshift.catalog.pdf_press_v2 import PdfPressV2Parameters
 from goblinshift.catalog.references import UploadReference, no_upload_references
 from goblinshift.processing import downloads_detox, image_forge, media_mill, pdf_press
 from goblinshift.processing.csv_janitor import Limits
@@ -255,20 +256,38 @@ MEDIA_MILL_V1 = RecipeVersion(
 
 # ADR 035. O teto do lote é imposto na aceitação, como no Detox; páginas e documentos só se
 # conhecem depois de abrir os PDFs, e o executor os impõe.
+_PDF_PRESS_LIMITS: Mapping[str, int] = {
+    "max_inputs": pdf_press.MAX_INPUTS,
+    # PDF é arquivo comum para o envio (32 MiB); o lote soma até 256 MiB.
+    "max_input_bytes": COMMON_MAX_INPUT_BYTES,
+    "max_total_input_bytes": pdf_press.MAX_TOTAL_INPUT_BYTES,
+    "max_input_pages": pdf_press.MAX_INPUT_PAGES,
+    "max_output_pages": pdf_press.MAX_OUTPUT_PAGES,
+    "max_output_documents": pdf_press.MAX_OUTPUT_DOCUMENTS,
+}
+
+# Último dia de merge da v2 para o qual o Sunset da v1 vale (ADR 070), fixo como o do csv-janitor.
+PDF_PRESS_V2_MERGE_DEADLINE = date(2026, 12, 31)
+PDF_PRESS_V1_SUNSET = sunset_after_merge(PDF_PRESS_V2_MERGE_DEADLINE)
+
 PDF_PRESS_V1 = RecipeVersion(
     recipe_id=pdf_press.RECIPE_ID,
     version=pdf_press.VERSION,
-    status=VersionStatus.CURRENT,
+    status=VersionStatus.DEPRECATED,
     parameters_model=PdfPressV1Parameters,
-    limits={
-        "max_inputs": pdf_press.MAX_INPUTS,
-        # PDF é arquivo comum para o envio (32 MiB); o lote soma até 256 MiB.
-        "max_input_bytes": COMMON_MAX_INPUT_BYTES,
-        "max_total_input_bytes": pdf_press.MAX_TOTAL_INPUT_BYTES,
-        "max_input_pages": pdf_press.MAX_INPUT_PAGES,
-        "max_output_pages": pdf_press.MAX_OUTPUT_PAGES,
-        "max_output_documents": pdf_press.MAX_OUTPUT_DOCUMENTS,
-    },
+    limits=_PDF_PRESS_LIMITS,
+    upload_references=upload_references,
+    sunset_at=PDF_PRESS_V1_SUNSET,
+)
+
+# Intervalos, rotação, compressão sem perdas e strip_metadata (ADR 070). Os tetos de bytes
+# decodificados da compressão não são publicados: valem dentro do executor.
+PDF_PRESS_V2 = RecipeVersion(
+    recipe_id=pdf_press.RECIPE_ID,
+    version=pdf_press.VERSION_2,
+    status=VersionStatus.CURRENT,
+    parameters_model=PdfPressV2Parameters,
+    limits=_PDF_PRESS_LIMITS,
     upload_references=upload_references,
 )
 
@@ -279,6 +298,7 @@ CATALOG = Catalog(
         IMAGE_FORGE_V1,
         DOWNLOADS_DETOX_V1,
         PDF_PRESS_V1,
+        PDF_PRESS_V2,
         MEDIA_MILL_V1,
     ]
 )

@@ -2987,6 +2987,53 @@ export interface operations {
                     };
                 } | {
                     /** @constant */
+                    recipe_id: "pdf-press";
+                    /** @constant */
+                    recipe_version: 2;
+                    /** PdfPressV2Parameters */
+                    parameters: {
+                        /**
+                         * Operation
+                         * @default merge
+                         * @enum {string}
+                         */
+                        operation?: "merge" | "split" | "select";
+                        /** @default 1 */
+                        pages_per_document?: number;
+                        /** Select */
+                        select?: {
+                            /**
+                             * Upload Id
+                             * Format: uuid
+                             */
+                            upload_id: string;
+                            first_page: number;
+                            last_page: number | null;
+                            /**
+                             * @default 0
+                             * @enum {integer}
+                             */
+                            rotation?: 0 | 90 | 180 | 270;
+                        }[] | null;
+                        /**
+                         * @default 0
+                         * @enum {integer}
+                         */
+                        rotation?: 0 | 90 | 180 | 270;
+                        /**
+                         * Compression
+                         * @default none
+                         * @enum {string}
+                         */
+                        compression?: "none" | "lossless";
+                        /**
+                         * Strip Metadata
+                         * @default true
+                         */
+                        strip_metadata?: boolean;
+                    };
+                } | {
+                    /** @constant */
                     recipe_id: "media-mill";
                     /** @constant */
                     recipe_version: 1;
@@ -3434,6 +3481,53 @@ export interface operations {
                             upload_id: string;
                             page_number: number;
                         }[] | null;
+                    };
+                } | {
+                    /** @constant */
+                    recipe_id: "pdf-press";
+                    /** @constant */
+                    recipe_version: 2;
+                    /** PdfPressV2Parameters */
+                    parameters: {
+                        /**
+                         * Operation
+                         * @default merge
+                         * @enum {string}
+                         */
+                        operation?: "merge" | "split" | "select";
+                        /** @default 1 */
+                        pages_per_document?: number;
+                        /** Select */
+                        select?: {
+                            /**
+                             * Upload Id
+                             * Format: uuid
+                             */
+                            upload_id: string;
+                            first_page: number;
+                            last_page: number | null;
+                            /**
+                             * @default 0
+                             * @enum {integer}
+                             */
+                            rotation?: 0 | 90 | 180 | 270;
+                        }[] | null;
+                        /**
+                         * @default 0
+                         * @enum {integer}
+                         */
+                        rotation?: 0 | 90 | 180 | 270;
+                        /**
+                         * Compression
+                         * @default none
+                         * @enum {string}
+                         */
+                        compression?: "none" | "lossless";
+                        /**
+                         * Strip Metadata
+                         * @default true
+                         */
+                        strip_metadata?: boolean;
                     };
                 } | {
                     /** @constant */
@@ -4032,6 +4126,53 @@ export interface operations {
                             upload_id: string;
                             page_number: number;
                         }[] | null;
+                    };
+                } | {
+                    /** @constant */
+                    recipe_id: "pdf-press";
+                    /** @constant */
+                    recipe_version: 2;
+                    /** PdfPressV2Parameters */
+                    parameters: {
+                        /**
+                         * Operation
+                         * @default merge
+                         * @enum {string}
+                         */
+                        operation?: "merge" | "split" | "select";
+                        /** @default 1 */
+                        pages_per_document?: number;
+                        /** Select */
+                        select?: {
+                            /**
+                             * Upload Id
+                             * Format: uuid
+                             */
+                            upload_id: string;
+                            first_page: number;
+                            last_page: number | null;
+                            /**
+                             * @default 0
+                             * @enum {integer}
+                             */
+                            rotation?: 0 | 90 | 180 | 270;
+                        }[] | null;
+                        /**
+                         * @default 0
+                         * @enum {integer}
+                         */
+                        rotation?: 0 | 90 | 180 | 270;
+                        /**
+                         * Compression
+                         * @default none
+                         * @enum {string}
+                         */
+                        compression?: "none" | "lossless";
+                        /**
+                         * Strip Metadata
+                         * @default true
+                         */
+                        strip_metadata?: boolean;
                     };
                 } | {
                     /** @constant */

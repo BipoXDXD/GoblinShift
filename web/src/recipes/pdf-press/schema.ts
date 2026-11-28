@@ -2,11 +2,11 @@ import { z } from "zod";
 
 import { formIssue, type FormField } from "../../components/a11y/ErrorSummary";
 import { TEXT } from "../../text";
-import type { RecipeDraft, RecipeInput, RecipeParameters } from "../types";
+import type { RecipeDraft, RecipeInput, RecipeParametersAt } from "../types";
 
 // Formulário da variante pdf-press v1. Tipos e opções vêm do código gerado da spec; defaults e
 // limites, que o tipo não carrega, vêm de GET /catalog em tempo de execução (settings.ts).
-type Parameters = RecipeParameters<"pdf-press">;
+type Parameters = RecipeParametersAt<"pdf-press", 1>;
 type Operation = NonNullable<Parameters["operation"]>;
 
 export const OPERATIONS = ["merge", "split", "select"] as const satisfies readonly Operation[];
