@@ -386,10 +386,10 @@ describe("Execução: detalhe por arquivo", () => {
       ]);
     });
 
-    it("imagem do Image Forge v2: o WebP tem rótulo", async () => {
-      const group = await comparisonOf({ ...image, format_after: "webp" });
+    it("imagem do Image Forge v2: WebP e GIF têm rótulo", async () => {
+      const group = await comparisonOf({ ...image, format_before: "gif", format_after: "webp" });
 
-      expect(definitions(group)).toContainEqual(["Formato", "MPO → para WebP"]);
+      expect(definitions(group)).toContainEqual(["Formato", "GIF → para WebP"]);
     });
 
     it("CSV: registros antes e depois, e a linha de contagens só com o que explica a diferença", async () => {
