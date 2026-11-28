@@ -164,6 +164,10 @@ export default defineConfig({
     video: "off",
     screenshot: "off",
     actionTimeout: 5_000,
+    // O build registra o service worker do compartilhamento (ADR 064). Ele tem um handler de
+    // `fetch`, e o Playwright não intercepta o que passa por service worker: a API falsa
+    // (context.route) deixaria de ver os pedidos da página depois da primeira carga.
+    serviceWorkers: "block",
   },
   projects: E2E.vps ? VPS_PROJECTS : LOCAL_PROJECTS,
   ...(E2E.remote

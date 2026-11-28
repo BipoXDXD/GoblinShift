@@ -416,6 +416,26 @@ export const SCREENS: readonly Screen[] = [
     },
   },
   {
+    // Sem service worker no E2E (serviceWorkers: "block"), a caixa de entrada fica vazia: a
+    // página mostra o vencido com todas as receitas, o estado com mais conteúdo.
+    name: "Compartilhamento vencido",
+    open: async (page: Page): Promise<void> => {
+      await page.goto("/compartilhar?id=nao-existe");
+      await expect(
+        page.getByRole("list", { name: "Receitas para estes arquivos" }).getByRole("link"),
+      ).toHaveCount(5);
+    },
+  },
+  {
+    name: "Oficina com o compartilhamento indisponível",
+    open: async (page: Page): Promise<void> => {
+      await page.goto("/?compartilhamento=indisponivel");
+      await expect(
+        page.getByRole("status").filter({ hasText: "Os arquivos compartilhados não chegaram" }),
+      ).toBeVisible();
+    },
+  },
+  {
     name: "Página não encontrada",
     open: async (page: Page): Promise<void> => {
       await page.goto("/nao-existe");

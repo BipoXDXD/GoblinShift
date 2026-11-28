@@ -164,6 +164,29 @@ server {
         add_header Cache-Control no-cache always;
         include /etc/nginx/snippets/spa-headers.conf;
     }
+    # Service worker (ADR 064): nome fixo e sem cache, como o index.html, para um deploy novo valer
+    # na próxima navegação. O que não existir é 404, nunca o index.html como JavaScript.
+    location = /sw.js {
+        try_files $uri =404;
+        add_header Cache-Control no-cache always;
+        include /etc/nginx/snippets/spa-headers.conf;
+    }
+    # Destino do `share_target` do manifest. O GET (para onde o service worker redireciona) é a
+    # SPA. O POST só chega aqui sem service worker: o estático responde 405 e um corpo acima de
+    # 64k, 413; nos dois casos a Oficina explica que o compartilhamento não está disponível. Os
+    # arquivos nunca vão ao servidor por aqui (fora do fluxo de intenções e cotas).
+    location = /compartilhar {
+        client_max_body_size 64k;
+        error_page 405 413 = @share_unavailable;
+        try_files /index.html =404;
+        add_header Cache-Control no-cache always;
+        include /etc/nginx/snippets/spa-headers.conf;
+    }
+    location @share_unavailable {
+        absolute_redirect off;
+        return 303 /?compartilhamento=indisponivel;
+        include /etc/nginx/snippets/spa-headers.conf;
+    }
     # robots.txt (e outro .txt ou .xml que vier a existir na raiz) servido de verdade; o que não
     # existir é 404, nunca o index.html com 200 (soft 404 para os buscadores).
     location ~ ^/[^/]+\.(?:txt|xml)$ {

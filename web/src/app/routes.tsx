@@ -117,6 +117,14 @@ export function createRoutes({ uploadServices, now, notice }: AppServices): Rout
           },
         },
         {
+          path: PATHS.share,
+          handle: titled(TEXT.share.title),
+          lazy: async () => {
+            const { SharePage } = await import("../share/SharePage");
+            return { Component: SharePage };
+          },
+        },
+        {
           path: PATHS.run,
           handle: titled(TEXT.run.title),
           lazy: async () => {

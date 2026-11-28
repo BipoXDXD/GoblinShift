@@ -10,6 +10,7 @@ import {
   type Catalog,
   type CatalogVersion,
 } from "../catalog/api";
+import { SHARED_PARAM } from "../app/paths";
 import { ANNOUNCE_DELAY_MS, LiveRegion } from "../components/a11y/LiveRegion";
 import { FailureNotice } from "../components/feedback/FailureNotice";
 import type { Preset } from "../presets/api";
@@ -48,6 +49,7 @@ export function WorkbenchPage({ recipeId, uploadServices }: WorkbenchPageProps):
       key={`${recipe.id}:${source?.kind ?? ""}:${source?.id ?? ""}`}
       recipe={recipe}
       source={source}
+      sharedId={search.get(SHARED_PARAM)}
       uploadServices={uploadServices}
     />
   );
@@ -57,6 +59,8 @@ interface CatalogGateProps {
   readonly recipe: RecipeModule;
   /** Preset (`?preset=`) ou execução (`?execucao=`) que pré-preenche os parâmetros. */
   readonly source: SourceRef | null;
+  /** Compartilhamento (`?compartilhado=`) cujos arquivos a Bancada recebe ao abrir (ADR 064). */
+  readonly sharedId: string | null;
   readonly uploadServices: UploadServices;
 }
 
@@ -68,7 +72,7 @@ interface CatalogGateProps {
  * tivesse o seu, o `h1` remontaria quando o catálogo chega e o FocusHeading tomaria o foco de quem
  * já estivesse usando a página (o seletor de tema, por exemplo).
  */
-function CatalogGate({ recipe, source, uploadServices }: CatalogGateProps): ReactElement {
+function CatalogGate({ recipe, source, sharedId, uploadServices }: CatalogGateProps): ReactElement {
   const client = useApiClient();
   const loaded = useParameterSource(source);
   const catalog = useQuery({
@@ -77,7 +81,14 @@ function CatalogGate({ recipe, source, uploadServices }: CatalogGateProps): Reac
     // Muda só com um deploy; o navegador revalida pelo ETag a cada carga da página.
     staleTime: Infinity,
   });
-  const { announcement, body } = gateBody({ recipe, source, uploadServices, catalog, loaded });
+  const { announcement, body } = gateBody({
+    recipe,
+    source,
+    sharedId,
+    uploadServices,
+    catalog,
+    loaded,
+  });
   return (
     <SourceAnnouncer source={source} message={announcement}>
       <div className="flex flex-col gap-8">
@@ -94,7 +105,7 @@ interface GateBodyInput extends CatalogGateProps {
 }
 
 /** O que vai abaixo do título: carregando, falha da receita ou a Bancada, e o aviso a anunciar. */
-function gateBody({ recipe, source, uploadServices, catalog, loaded }: GateBodyInput): {
+function gateBody({ recipe, source, sharedId, uploadServices, catalog, loaded }: GateBodyInput): {
   readonly announcement: string | null;
   readonly body: ReactNode;
 } {
@@ -145,6 +156,7 @@ function gateBody({ recipe, source, uploadServices, catalog, loaded }: GateBodyI
         form={prefilled.form}
         notice={prefilled.notice}
         sourcePreset={prefilled.preset}
+        sharedId={sharedId}
         uploadServices={uploadServices}
       />
     ),
