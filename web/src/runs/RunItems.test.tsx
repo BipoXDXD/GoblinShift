@@ -373,7 +373,7 @@ describe("Execução: detalhe por arquivo", () => {
       expect(definitions(group)).toEqual([
         ["Dimensões", "2.400 × 1.200 → para 1.600 × 800"],
         ["Formato", "MPO → para JPEG"],
-        ["Tamanho", "5 MiB → para 819,2 KiB"],
+        ["Tamanho", "5 MB → para 819,2 KB"],
       ]);
     });
 

@@ -1,6 +1,7 @@
 # ADR 036. Media Mill: FFmpeg mínimo compilado na imagem do executor, allowlist antes do FFmpeg e tetos de tempo por chamada
 
 - **Estado:** aceito na implementação do Media Mill (2026-10-15); pior caso medido na VPS em 2026-11-05 (ver Consequências)
+- **Atualizado pelo [ADR 062](062-teto-de-50-mib-por-arquivo.md):** o teto comum é 50 MiB.
 - **Plano:** [1.5](../GoblinShiftPlan.md#s1-5), [1.6](../GoblinShiftPlan.md#s1-6), [1.7](../GoblinShiftPlan.md#s1-7), [2.3](../GoblinShiftPlan.md#s2-3), [3.6](../GoblinShiftPlan.md#s3-6)
 - **Relacionado:** [ADR 004](004-container-gvisor-por-tentativa.md), [ADR 005](005-area-do-executor-em-filesystem-fixo.md), [ADR 018](018-pillow-na-imagem-do-executor.md), [ADR 019](019-layout-de-out-pacote-e-papeis.md)
 

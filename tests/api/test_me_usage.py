@@ -105,7 +105,7 @@ def test_conta_nova_tem_limites_de_1_7_e_consumo_zero(
         "input_bytes_per_24h": 2 * GIB,
         "storage_bytes": 4 * GIB,
         "active_runs": 1,
-        "file_bytes": 32 * MIB,
+        "file_bytes": 50 * MIB,
         "video_file_bytes": 256 * MIB,
         "batch_files": 100,
         "batch_bytes": 512 * MIB,

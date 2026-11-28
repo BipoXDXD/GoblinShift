@@ -137,7 +137,7 @@ describe("runInputs", () => {
       runInputsWithLimits(entries, { maxInputs: 5, maxTotalBytes: 1_500, maxFileBytes: null }),
     ).toEqual({
       ok: false,
-      message: "Os arquivos somam 2 KiB; o máximo por execução é 1,5 KiB.",
+      message: "Os arquivos somam 2 KB; o máximo por execução é 1,5 KB.",
     });
   });
 });
@@ -183,6 +183,20 @@ describe("runInputs com teto por arquivo", () => {
     expect(runInputsWithLimits(entries, limits(maxFileBytes)).ok).toBe(ok);
   });
 
+  it('arquivo um byte acima do teto de 50 MiB: a recusa mostra "50 MB" e os bytes exatos', () => {
+    const fiftyMib = 50 * 1_024 ** 2;
+    const file = new File(["x"], "foto.png");
+    // O tamanho de um File não muda depois de criado; 50 MiB de conteúdo pesariam no jsdom.
+    Object.defineProperty(file, "size", { value: fiftyMib + 1 });
+    const entries: UploadEntry[] = [{ localId: "a", file, state: ready("1") }];
+
+    expect(runInputsWithLimits(entries, limits(fiftyMib))).toEqual({
+      ok: false,
+      message:
+        "foto.png tem 52.428.801 bytes; o máximo por arquivo nesta receita é 50 MB (52.428.800 bytes).",
+    });
+  });
+
   it("a mensagem cita o arquivo e o teto; cancelado não conta", () => {
     const entries = [
       entry("a", ready("1"), "a.mp4", "123"),
@@ -192,7 +206,7 @@ describe("runInputs com teto por arquivo", () => {
 
     expect(runInputsWithLimits(entries, limits(1_500))).toEqual({
       ok: false,
-      message: "grande.mp4 tem 2 KiB; o máximo por arquivo nesta receita é 1,5 KiB.",
+      message: "grande.mp4 tem 2 KB; o máximo por arquivo nesta receita é 1,5 KB.",
     });
   });
 });
