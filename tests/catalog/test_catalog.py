@@ -241,6 +241,7 @@ def test_catalogo_lista_as_receitas_implementadas_na_versao_1() -> None:
     assert keys == {
         ("csv-janitor", 1),
         ("image-forge", 1),
+        ("image-forge", 2),
         ("downloads-detox", 1),
         ("pdf-press", 1),
         ("media-mill", 1),

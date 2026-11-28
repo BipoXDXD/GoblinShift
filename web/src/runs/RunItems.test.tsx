@@ -386,6 +386,12 @@ describe("Execução: detalhe por arquivo", () => {
       ]);
     });
 
+    it("imagem do Image Forge v2: o WebP tem rótulo", async () => {
+      const group = await comparisonOf({ ...image, format_after: "webp" });
+
+      expect(definitions(group)).toContainEqual(["Formato", "MPO → para WebP"]);
+    });
+
     it("CSV: registros antes e depois, e a linha de contagens só com o que explica a diferença", async () => {
       const counts = { records_read: 120, filtered_out: 3, duplicates_removed: 19, written: 98 };
       setup({
@@ -477,7 +483,7 @@ describe("Execução: detalhe por arquivo", () => {
 
     it.each([
       ["tipo", { kind: "zip" }],
-      ["formato", { ...image, format_after: "webp" }],
+      ["formato", { ...image, format_after: "avif" }],
     ])(
       "comparação com %s que a interface não conhece não derruba a tela",
       async (_, comparison) => {

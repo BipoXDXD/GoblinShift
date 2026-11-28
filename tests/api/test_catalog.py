@@ -28,11 +28,11 @@ def bearer(token: str) -> dict[str, str]:
     return {"Authorization": f"Bearer {token}"}
 
 
-def version_of(body: dict[str, object], recipe_id: str) -> dict[str, object]:
+def version_of(body: dict[str, object], recipe_id: str, number: int = 1) -> dict[str, object]:
     recipes = body["recipes"]
     assert isinstance(recipes, list)
     [recipe] = [recipe for recipe in recipes if recipe["recipe_id"] == recipe_id]
-    [version] = recipe["versions"]
+    [version] = [version for version in recipe["versions"] if version["version"] == number]
     assert isinstance(version, dict)
     return version
 

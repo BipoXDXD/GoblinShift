@@ -2866,6 +2866,60 @@ export interface operations {
                     };
                 } | {
                     /** @constant */
+                    recipe_id: "image-forge";
+                    /** @constant */
+                    recipe_version: 2;
+                    /** ImageForgeV2Parameters */
+                    parameters: {
+                        /** @default 1600 */
+                        max_width?: number;
+                        /** @default 1600 */
+                        max_height?: number;
+                        /**
+                         * OutputFormatV2
+                         * @default preserve
+                         * @enum {string}
+                         */
+                        output_format?: "preserve" | "jpeg" | "png" | "webp";
+                        /**
+                         * Jpeg Quality
+                         * @default 85
+                         */
+                        jpeg_quality?: number;
+                        /**
+                         * Jpeg Background
+                         * @default #FFFFFF
+                         */
+                        jpeg_background?: string;
+                        /**
+                         * Make Thumbnails
+                         * @default false
+                         */
+                        make_thumbnails?: boolean;
+                        /**
+                         * FitMode
+                         * @default contain
+                         * @enum {string}
+                         */
+                        fit?: "contain" | "cover" | "pad" | "scale";
+                        /**
+                         * Scale Percent
+                         * @default 100
+                         */
+                        scale_percent?: number;
+                        /**
+                         * Webp Quality
+                         * @default 80
+                         */
+                        webp_quality?: number;
+                        /**
+                         * Webp Lossless
+                         * @default false
+                         */
+                        webp_lossless?: boolean;
+                    };
+                } | {
+                    /** @constant */
                     recipe_id: "downloads-detox";
                     /** @constant */
                     recipe_version: 1;
@@ -3247,6 +3301,60 @@ export interface operations {
                          * @default false
                          */
                         make_thumbnails?: boolean;
+                    };
+                } | {
+                    /** @constant */
+                    recipe_id: "image-forge";
+                    /** @constant */
+                    recipe_version: 2;
+                    /** ImageForgeV2Parameters */
+                    parameters: {
+                        /** @default 1600 */
+                        max_width?: number;
+                        /** @default 1600 */
+                        max_height?: number;
+                        /**
+                         * OutputFormatV2
+                         * @default preserve
+                         * @enum {string}
+                         */
+                        output_format?: "preserve" | "jpeg" | "png" | "webp";
+                        /**
+                         * Jpeg Quality
+                         * @default 85
+                         */
+                        jpeg_quality?: number;
+                        /**
+                         * Jpeg Background
+                         * @default #FFFFFF
+                         */
+                        jpeg_background?: string;
+                        /**
+                         * Make Thumbnails
+                         * @default false
+                         */
+                        make_thumbnails?: boolean;
+                        /**
+                         * FitMode
+                         * @default contain
+                         * @enum {string}
+                         */
+                        fit?: "contain" | "cover" | "pad" | "scale";
+                        /**
+                         * Scale Percent
+                         * @default 100
+                         */
+                        scale_percent?: number;
+                        /**
+                         * Webp Quality
+                         * @default 80
+                         */
+                        webp_quality?: number;
+                        /**
+                         * Webp Lossless
+                         * @default false
+                         */
+                        webp_lossless?: boolean;
                     };
                 } | {
                     /** @constant */
@@ -3779,6 +3887,60 @@ export interface operations {
                          * @default false
                          */
                         make_thumbnails?: boolean;
+                    };
+                } | {
+                    /** @constant */
+                    recipe_id: "image-forge";
+                    /** @constant */
+                    recipe_version: 2;
+                    /** ImageForgeV2Parameters */
+                    parameters: {
+                        /** @default 1600 */
+                        max_width?: number;
+                        /** @default 1600 */
+                        max_height?: number;
+                        /**
+                         * OutputFormatV2
+                         * @default preserve
+                         * @enum {string}
+                         */
+                        output_format?: "preserve" | "jpeg" | "png" | "webp";
+                        /**
+                         * Jpeg Quality
+                         * @default 85
+                         */
+                        jpeg_quality?: number;
+                        /**
+                         * Jpeg Background
+                         * @default #FFFFFF
+                         */
+                        jpeg_background?: string;
+                        /**
+                         * Make Thumbnails
+                         * @default false
+                         */
+                        make_thumbnails?: boolean;
+                        /**
+                         * FitMode
+                         * @default contain
+                         * @enum {string}
+                         */
+                        fit?: "contain" | "cover" | "pad" | "scale";
+                        /**
+                         * Scale Percent
+                         * @default 100
+                         */
+                        scale_percent?: number;
+                        /**
+                         * Webp Quality
+                         * @default 80
+                         */
+                        webp_quality?: number;
+                        /**
+                         * Webp Lossless
+                         * @default false
+                         */
+                        webp_lossless?: boolean;
                     };
                 } | {
                     /** @constant */

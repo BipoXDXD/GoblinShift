@@ -2402,6 +2402,101 @@
                       {
                         "properties": {
                           "recipe_id": {
+                            "const": "image-forge"
+                          },
+                          "recipe_version": {
+                            "const": 2
+                          },
+                          "parameters": {
+                            "properties": {
+                              "max_width": {
+                                "type": "integer",
+                                "maximum": 4096.0,
+                                "minimum": 16.0,
+                                "default": 1600
+                              },
+                              "max_height": {
+                                "type": "integer",
+                                "maximum": 4096.0,
+                                "minimum": 16.0,
+                                "default": 1600
+                              },
+                              "output_format": {
+                                "type": "string",
+                                "enum": [
+                                  "preserve",
+                                  "jpeg",
+                                  "png",
+                                  "webp"
+                                ],
+                                "title": "OutputFormatV2",
+                                "default": "preserve"
+                              },
+                              "jpeg_quality": {
+                                "type": "integer",
+                                "maximum": 95.0,
+                                "minimum": 60.0,
+                                "title": "Jpeg Quality",
+                                "default": 85
+                              },
+                              "jpeg_background": {
+                                "type": "string",
+                                "pattern": "^#[0-9A-Fa-f]{6}$",
+                                "title": "Jpeg Background",
+                                "default": "#FFFFFF"
+                              },
+                              "make_thumbnails": {
+                                "type": "boolean",
+                                "title": "Make Thumbnails",
+                                "default": false
+                              },
+                              "fit": {
+                                "type": "string",
+                                "enum": [
+                                  "contain",
+                                  "cover",
+                                  "pad",
+                                  "scale"
+                                ],
+                                "title": "FitMode",
+                                "default": "contain"
+                              },
+                              "scale_percent": {
+                                "type": "integer",
+                                "maximum": 100.0,
+                                "minimum": 1.0,
+                                "title": "Scale Percent",
+                                "default": 100
+                              },
+                              "webp_quality": {
+                                "type": "integer",
+                                "maximum": 95.0,
+                                "minimum": 60.0,
+                                "title": "Webp Quality",
+                                "default": 80
+                              },
+                              "webp_lossless": {
+                                "type": "boolean",
+                                "title": "Webp Lossless",
+                                "default": false
+                              }
+                            },
+                            "additionalProperties": false,
+                            "type": "object",
+                            "title": "ImageForgeV2Parameters"
+                          }
+                        },
+                        "type": "object",
+                        "required": [
+                          "recipe_id",
+                          "recipe_version",
+                          "parameters"
+                        ],
+                        "title": "image-forge v2"
+                      },
+                      {
+                        "properties": {
+                          "recipe_id": {
                             "const": "downloads-detox"
                           },
                           "recipe_version": {
@@ -3319,6 +3414,101 @@
                         ]
                       },
                       {
+                        "title": "image-forge v2",
+                        "type": "object",
+                        "properties": {
+                          "recipe_id": {
+                            "const": "image-forge"
+                          },
+                          "recipe_version": {
+                            "const": 2
+                          },
+                          "parameters": {
+                            "additionalProperties": false,
+                            "properties": {
+                              "max_width": {
+                                "maximum": 4096,
+                                "minimum": 16,
+                                "type": "integer",
+                                "default": 1600
+                              },
+                              "max_height": {
+                                "maximum": 4096,
+                                "minimum": 16,
+                                "type": "integer",
+                                "default": 1600
+                              },
+                              "output_format": {
+                                "enum": [
+                                  "preserve",
+                                  "jpeg",
+                                  "png",
+                                  "webp"
+                                ],
+                                "title": "OutputFormatV2",
+                                "type": "string",
+                                "default": "preserve"
+                              },
+                              "jpeg_quality": {
+                                "default": 85,
+                                "maximum": 95,
+                                "minimum": 60,
+                                "title": "Jpeg Quality",
+                                "type": "integer"
+                              },
+                              "jpeg_background": {
+                                "default": "#FFFFFF",
+                                "pattern": "^#[0-9A-Fa-f]{6}$",
+                                "title": "Jpeg Background",
+                                "type": "string"
+                              },
+                              "make_thumbnails": {
+                                "default": false,
+                                "title": "Make Thumbnails",
+                                "type": "boolean"
+                              },
+                              "fit": {
+                                "enum": [
+                                  "contain",
+                                  "cover",
+                                  "pad",
+                                  "scale"
+                                ],
+                                "title": "FitMode",
+                                "type": "string",
+                                "default": "contain"
+                              },
+                              "scale_percent": {
+                                "default": 100,
+                                "maximum": 100,
+                                "minimum": 1,
+                                "title": "Scale Percent",
+                                "type": "integer"
+                              },
+                              "webp_quality": {
+                                "default": 80,
+                                "maximum": 95,
+                                "minimum": 60,
+                                "title": "Webp Quality",
+                                "type": "integer"
+                              },
+                              "webp_lossless": {
+                                "default": false,
+                                "title": "Webp Lossless",
+                                "type": "boolean"
+                              }
+                            },
+                            "title": "ImageForgeV2Parameters",
+                            "type": "object"
+                          }
+                        },
+                        "required": [
+                          "recipe_id",
+                          "recipe_version",
+                          "parameters"
+                        ]
+                      },
+                      {
                         "title": "downloads-detox v1",
                         "type": "object",
                         "properties": {
@@ -4091,6 +4281,101 @@
                               }
                             },
                             "title": "ImageForgeV1Parameters",
+                            "type": "object"
+                          }
+                        },
+                        "required": [
+                          "recipe_id",
+                          "recipe_version",
+                          "parameters"
+                        ]
+                      },
+                      {
+                        "title": "image-forge v2",
+                        "type": "object",
+                        "properties": {
+                          "recipe_id": {
+                            "const": "image-forge"
+                          },
+                          "recipe_version": {
+                            "const": 2
+                          },
+                          "parameters": {
+                            "additionalProperties": false,
+                            "properties": {
+                              "max_width": {
+                                "maximum": 4096,
+                                "minimum": 16,
+                                "type": "integer",
+                                "default": 1600
+                              },
+                              "max_height": {
+                                "maximum": 4096,
+                                "minimum": 16,
+                                "type": "integer",
+                                "default": 1600
+                              },
+                              "output_format": {
+                                "enum": [
+                                  "preserve",
+                                  "jpeg",
+                                  "png",
+                                  "webp"
+                                ],
+                                "title": "OutputFormatV2",
+                                "type": "string",
+                                "default": "preserve"
+                              },
+                              "jpeg_quality": {
+                                "default": 85,
+                                "maximum": 95,
+                                "minimum": 60,
+                                "title": "Jpeg Quality",
+                                "type": "integer"
+                              },
+                              "jpeg_background": {
+                                "default": "#FFFFFF",
+                                "pattern": "^#[0-9A-Fa-f]{6}$",
+                                "title": "Jpeg Background",
+                                "type": "string"
+                              },
+                              "make_thumbnails": {
+                                "default": false,
+                                "title": "Make Thumbnails",
+                                "type": "boolean"
+                              },
+                              "fit": {
+                                "enum": [
+                                  "contain",
+                                  "cover",
+                                  "pad",
+                                  "scale"
+                                ],
+                                "title": "FitMode",
+                                "type": "string",
+                                "default": "contain"
+                              },
+                              "scale_percent": {
+                                "default": 100,
+                                "maximum": 100,
+                                "minimum": 1,
+                                "title": "Scale Percent",
+                                "type": "integer"
+                              },
+                              "webp_quality": {
+                                "default": 80,
+                                "maximum": 95,
+                                "minimum": 60,
+                                "title": "Webp Quality",
+                                "type": "integer"
+                              },
+                              "webp_lossless": {
+                                "default": false,
+                                "title": "Webp Lossless",
+                                "type": "boolean"
+                              }
+                            },
+                            "title": "ImageForgeV2Parameters",
                             "type": "object"
                           }
                         },

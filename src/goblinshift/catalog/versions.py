@@ -23,6 +23,7 @@ from pydantic import BaseModel, ValidationError
 from goblinshift.catalog.csv_janitor_v1 import CsvJanitorV1Parameters
 from goblinshift.catalog.downloads_detox_v1 import DownloadsDetoxV1Parameters
 from goblinshift.catalog.image_forge_v1 import ImageForgeV1Parameters
+from goblinshift.catalog.image_forge_v2 import ImageForgeV2Parameters
 from goblinshift.catalog.media_mill_v1 import MediaMillV1Parameters
 from goblinshift.catalog.pdf_press_v1 import PdfPressV1Parameters, upload_references
 from goblinshift.catalog.references import UploadReference, no_upload_references
@@ -188,6 +189,15 @@ IMAGE_FORGE_V1 = RecipeVersion(
     },
 )
 
+# Ao lado da v1, com os mesmos limites (ADR 066): a v1 continua aceita até a Bancada mudar.
+IMAGE_FORGE_V2 = RecipeVersion(
+    recipe_id=image_forge.RECIPE_ID,
+    version=image_forge.VERSION_2,
+    status=VersionStatus.CURRENT,
+    parameters_model=ImageForgeV2Parameters,
+    limits=IMAGE_FORGE_V1.limits,
+)
+
 # O teto do lote fica abaixo dos 480 MiB de conteúdo de saída (1.7): o Detox copia cada entrada
 # aceita. A aceitação o impõe (`max_total_input_bytes` → 422) antes de reservar o teto de saída.
 DOWNLOADS_DETOX_V1 = RecipeVersion(
@@ -243,7 +253,16 @@ PDF_PRESS_V1 = RecipeVersion(
     upload_references=upload_references,
 )
 
-CATALOG = Catalog([CSV_JANITOR_V1, IMAGE_FORGE_V1, DOWNLOADS_DETOX_V1, PDF_PRESS_V1, MEDIA_MILL_V1])
+CATALOG = Catalog(
+    [
+        CSV_JANITOR_V1,
+        IMAGE_FORGE_V1,
+        IMAGE_FORGE_V2,
+        DOWNLOADS_DETOX_V1,
+        PDF_PRESS_V1,
+        MEDIA_MILL_V1,
+    ]
+)
 
 
 def _field_errors(error: ValidationError) -> list[FieldError]:

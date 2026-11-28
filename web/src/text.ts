@@ -376,7 +376,7 @@ export const TEXT = {
         records: "Registros",
         pages: "Páginas",
         audio: "Áudio",
-        formats: { jpeg: "JPEG", png: "PNG", mpo: "MPO" },
+        formats: { jpeg: "JPEG", png: "PNG", mpo: "MPO", webp: "WebP" },
         codecs: {
           aac: "AAC",
           pcm_s16le: "PCM 16 bits",
