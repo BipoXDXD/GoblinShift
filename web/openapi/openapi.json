@@ -1870,6 +1870,18 @@
             },
             "description": "Service Unavailable"
           },
+          "303": {
+            "description": "Navegação do navegador que falhou: volta à tela da execução com ?falha=<code>.",
+            "headers": {
+              "Location": {
+                "description": "Tela da execução de origem: /execucoes/<uuid>?falha=<code>.",
+                "required": true,
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          },
           "404": {
             "content": {
               "application/problem+json": {

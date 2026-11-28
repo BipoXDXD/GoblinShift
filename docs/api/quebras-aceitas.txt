@@ -1,0 +1,10 @@
+# Quebras de contrato aceitas em /api/v1 (--err-ignore do oasdiff; ADR 061).
+#
+# O job "Contrato" roda scripts/openapi-breaking.sh, que reprova mudança incompatível em /api/v1.
+# Mudança incompatível vai para /api/v2. A exceção entra aqui, e só com um ADR próprio que a
+# justifique: a linha logo acima de cada entrada é "# docs/adr/<arquivo>.md", e o ADR existe
+# (tests/test_ci_contrato_compativel.py confere).
+#
+# Cada entrada é o método e o caminho do endpoint seguidos do texto que o oasdiff imprime para a
+# quebra, numa linha só. O oasdiff ignora a quebra quando uma linha contém os dois. Não escreva
+# endpoint real nos comentários: uma linha de comentário também casaria.
