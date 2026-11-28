@@ -58,6 +58,46 @@ def test_marcador_do_ultimo_upload_bom_fica_num_diretorio_privado_da_unit() -> N
     assert '"$STATE_DIRECTORY/last-upload-ok"' in (BACKUP_DIR / "pg-backup.sh").read_text()
 
 
+# O mesmo endurecimento da unit da aceitação (deploy/acceptance/goblinshift-acceptance.service),
+# fora o que o backup não precisa: nenhuma capability (roda como goblinshift) e sem netlink.
+HARDENING = {
+    "UMask": "0077",
+    "CapabilityBoundingSet": "",
+    "PrivateDevices": "yes",
+    "ProtectKernelTunables": "yes",
+    "ProtectKernelModules": "yes",
+    "ProtectKernelLogs": "yes",
+    "ProtectControlGroups": "yes",
+    "ProtectClock": "yes",
+    "ProtectHostname": "yes",
+    "RestrictNamespaces": "yes",
+    "RestrictRealtime": "yes",
+    "LockPersonality": "yes",
+    "RestrictAddressFamilies": "AF_UNIX AF_INET AF_INET6",
+    "SystemCallArchitectures": "native",
+    "NoNewPrivileges": "yes",
+    "PrivateTmp": "yes",
+    "ProtectHome": "yes",
+    "ProtectSystem": "full",
+}
+
+
+def test_unit_do_backup_tem_o_endurecimento_da_aceitacao() -> None:
+    service = unit("goblinshift-pg-backup.service")["Service"]
+
+    assert {key: service.get(key) for key in HARDENING} == HARDENING
+
+
+def test_backup_repete_depois_de_falha_com_limite() -> None:
+    """Uma falha logo depois da atualização da plataforma (Docker reiniciando) não perde o dia."""
+    backup = unit("goblinshift-pg-backup.service")
+
+    assert backup["Service"]["Restart"] == "on-failure"
+    assert backup["Service"]["RestartSec"] == "15min"
+    assert backup["Unit"]["StartLimitIntervalSec"] == "6h"
+    assert backup["Unit"]["StartLimitBurst"] == "4"
+
+
 def test_timer_e_diario_sem_sorteio_e_recupera_execucao_perdida() -> None:
     timer = unit("goblinshift-pg-backup.timer")["Timer"]
 

@@ -87,3 +87,12 @@ O `pg_dump` de um volume recriado vazio, com o esquema refeito pelo migrate, sai
   - o marcador intacto quando o upload falha.
 
   `tests/backup/test_backup_config.py` fixa o `StateDirectory` da unit. `tests/backup/test_install.py` roda o script instalado, confere o dono e o modo do marcador e simula a unit antiga após falha no daemon-reload. Os testes de upload exercitam falhas de `date` e `mv` depois de criar o temporário.
+
+## Atualização de 2026-11-28: unit endurecida e repetição limitada depois de falha
+
+- **Problema:** o timer dispara às 03:05 UTC, logo depois da atualização da plataforma. Uma falha passageira nesse horário, como o Docker reiniciando, perdia o backup do dia. A unit também tinha menos endurecimento que a da aceitação (`deploy/acceptance/goblinshift-acceptance.service`).
+- **Repetição:** `Restart=on-failure` com `RestartSec=15min`, limitada por `StartLimitIntervalSec=6h` e `StartLimitBurst=4`. Uma falha ganha até 3 novas tentativas, de 15 em 15 minutos. Se as 4 partidas falharem, a unit para de repetir e fica `failed` até o timer do dia seguinte. Cada tentativa que falha pinga `/fail` no healthchecks.io. Um dia ruim pode gerar até 4 alertas, e uma tentativa que dá certo depois pinga sucesso.
+- **Endurecimento:** `UMask=0077`, `CapabilityBoundingSet=` vazio (o serviço roda como `goblinshift` e não precisa de nenhuma capability), `PrivateDevices`, `ProtectKernelTunables`, `ProtectKernelModules`, `ProtectKernelLogs`, `ProtectControlGroups`, `ProtectClock`, `ProtectHostname`, `RestrictNamespaces`, `RestrictRealtime`, `LockPersonality`, `SystemCallArchitectures=native` e `RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6` (socket do Docker e `curl`). `ProtectSystem` continua `full`, e não `strict`, porque o socket do Docker fica em `/run`.
+- **Diferença para a aceitação:** a unit da aceitação permite `AF_NETLINK` por causa do `getaddrinfo` do glibc. O backup fica sem ele. Se o journal mostrar falha de resolução de nome depois da reinstalação, a correção é acrescentar `AF_NETLINK` à unit e ao `tests/backup/test_backup_config.py`.
+- **Custo:** a unit nova só vale depois que o dono roda o `deploy/backup/install.sh` de novo na VPS, a partir de um checkout temporário da `main`. Na sequência, ele roda `systemd-analyze verify` e `systemd-analyze security goblinshift-pg-backup.service`.
+- **Compliance:** `tests/backup/test_backup_config.py` fixa o endurecimento e os limites da repetição.
