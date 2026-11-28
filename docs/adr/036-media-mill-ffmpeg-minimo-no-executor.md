@@ -85,6 +85,8 @@ Tudo o que um vídeo produz fica no rascunho até o fim; só então vai para `ou
 - Cada vídeo recebe o próprio `TimeBudget` de 180 s, criado em `mill_one` (o ponto único de construção da v1 e da v2). O prazo de cada chamada passa a ser o menor entre o teto dela, o que sobra do vídeo e o que sobra da execução.
 - Prazo do vídeo zerado antes de uma chamada recusa o vídeo sem rodar a ferramenta. Chamada interrompida pelo prazo do vídeo também recusa só aquele vídeo: `MEDIA_TOO_LARGE`, "processar este vídeo passou de 180 s no total". Chamada interrompida pelo orçamento da execução continua falhando a execução inteira.
 - A conta: 180 + 300. Um vídeo hostil gasta no máximo 180 s e deixa pelo menos 300 s dos 480 s para os outros. O pior caso medido na VPS (5 vídeos de 300 s em 16 s) não chega perto do prazo, e o teto não entra no schema dos parâmetros: o snapshot do catálogo não muda.
+- **Limite da garantia:** dois vídeos hostis gastam 360 s e ainda cabem. A partir do terceiro (540 s > 480 s), o orçamento acaba e a execução inteira cai em `RESOURCE_LIMIT_EXCEEDED`. O tempo da tentativa nunca estoura; o que deixa de valer é só a garantia de que apenas o vídeo hostil é recusado.
+- **Exceção do último vídeo:** se o prazo do vídeo e o orçamento da execução se esgotarem juntos no último vídeo do lote, o prazo do vídeo é conferido primeiro: ele é recusado (`MEDIA_TOO_LARGE`) e a execução termina normalmente, porque não sobra chamada para esbarrar no orçamento.
 
 ## Como verificar
 

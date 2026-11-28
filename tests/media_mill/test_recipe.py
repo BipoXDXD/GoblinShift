@@ -646,12 +646,21 @@ class FakeClock:
         return self.now
 
 
-def test_video_sem_prazo_e_recusado_sem_rodar_a_ferramenta(tmp_path: Path) -> None:
+def _runner_on_fake_clock(work: Path) -> tuple[FakeClock, _Runner]:
+    """`_Runner` com orçamento de 480 s e prazo de vídeo de 180 s no mesmo relógio falso.
+
+    As ferramentas não existem: os testes passam a linha de comando pronta.
+    """
     clock = FakeClock(0)
     tools = Tools(ffmpeg=Path("/nao/existe/ffmpeg"), ffprobe=Path("/nao/existe/ffprobe"))
     runner = _Runner(
-        tools, TimeBudget(480, clock), CallTimeouts(), tmp_path, video=TimeBudget(180, clock)
+        tools, TimeBudget(480, clock), CallTimeouts(), work, video=TimeBudget(180, clock)
     )
+    return clock, runner
+
+
+def test_video_sem_prazo_e_recusado_sem_rodar_a_ferramenta(tmp_path: Path) -> None:
+    clock, runner = _runner_on_fake_clock(tmp_path)
     runner.run(["true"], cap_s=20, name="ffprobe")
     clock.now = 181
 
@@ -665,11 +674,7 @@ def test_video_sem_prazo_e_recusado_sem_rodar_a_ferramenta(tmp_path: Path) -> No
 
 
 def test_chamada_cortada_pelo_prazo_do_video_recusa_so_o_video(tmp_path: Path) -> None:
-    clock = FakeClock(0)
-    tools = Tools(ffmpeg=Path("/nao/existe/ffmpeg"), ffprobe=Path("/nao/existe/ffprobe"))
-    runner = _Runner(
-        tools, TimeBudget(480, clock), CallTimeouts(), tmp_path, video=TimeBudget(180, clock)
-    )
+    clock, runner = _runner_on_fake_clock(tmp_path)
     clock.now = 179.5  # sobra 0,5 s do vídeo, abaixo do teto da etapa e do orçamento
 
     with pytest.raises(MediaRejected) as rejected:

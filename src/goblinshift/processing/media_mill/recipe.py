@@ -8,8 +8,8 @@ saída órfã em `out/`, que a coleta do worker recusaria por não estar no rela
 Um vídeo recusado vira `ItemRejected` e o lote continua (1.1). Cada vídeo tem prazo próprio
 (`CallTimeouts.video_s`): passar dele recusa só aquele vídeo, e o resto do orçamento fica para os
 outros. Esgotar o orçamento da execução é falha da execução inteira (`RESOURCE_LIMIT_EXCEEDED`), e
-a cópia para `out/` fica fora da tradução de
-erros: um `ENOSPC` ou `OUTPUT_LIMIT_EXCEEDED` derruba a execução em vez de virar rejeição.
+a cópia para `out/` fica fora da tradução de erros: um `ENOSPC` ou `OUTPUT_LIMIT_EXCEEDED` derruba
+a execução em vez de virar rejeição.
 
 As duas versões rodam o mesmo pipeline, `_Mill`, sobre um `MillPlan` (`plan.py`): um conserto de
 segurança vale para as duas de uma vez. `MediaMillV1` e `MediaMillV2` só montam o plano. A v2
