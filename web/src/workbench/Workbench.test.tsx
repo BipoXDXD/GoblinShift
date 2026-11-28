@@ -1238,6 +1238,21 @@ describe("Bancada: colar arquivos", () => {
     expect(screen.getByText("Nenhum arquivo escolhido")).toBeInTheDocument();
   });
 
+  it("testar com exemplo depois de colar demais tira o aviso da colagem", async () => {
+    const { fetchSample } = fakeSampleFetch({ body: "nome\nAna\n" });
+    const { user } = await setup({ fetchSample });
+    const six = ["1", "2", "3", "4", "5", "6"].map((n) => csv(`${n}.csv`));
+    fireEvent.paste(document, { clipboardData: clipboard(six) });
+    const message =
+      "Você colou 6 arquivos; esta receita aceita até 5 por execução. Nada foi enviado: cole menos arquivos de cada vez.";
+    expect(await screen.findAllByText(message)).not.toHaveLength(0);
+
+    await user.click(screen.getByRole("button", { name: "Testar com arquivo de exemplo" }));
+
+    await waitUntilSent(1);
+    expect(screen.queryByText(message)).toBeNull();
+  });
+
   it("colar fora da Bancada não faz nada", async () => {
     const { api, unmount } = await setup();
     unmount();
