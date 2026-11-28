@@ -187,8 +187,30 @@ export const TEXT = {
     backHome: "Oficina",
     filesHeading: "Arquivos de entrada",
     chooseFiles: "Escolher arquivos",
-    chooseFilesHint: "Pode escolher vários de uma vez, ou soltar os arquivos aqui.",
+    chooseFilesHint:
+      "Pode escolher vários de uma vez, soltar aqui ou colar com Ctrl+V (⌘V no Mac).",
+    pasted: (count: number) =>
+      count === 1 ? "1 arquivo colado." : `${String(count)} arquivos colados.`,
+    pasteTooMany: (count: number, max: number) =>
+      `Você colou ${String(count)} arquivos; esta receita aceita até ${String(max)} por execução. Nada foi enviado: cole menos arquivos de cada vez.`,
     dropHere: "Solte para adicionar.",
+    chooseFolder: "Escolher pasta",
+    folderAdded: (count: number) =>
+      count === 1
+        ? "1 arquivo da pasta adicionado."
+        : `${String(count)} arquivos da pasta adicionados.`,
+    folderTooBig: (max: number) =>
+      `A pasta tem mais de ${String(max)} arquivos; esta receita aceita até ${String(max)} por execução. Escolha uma pasta menor ou os arquivos um a um.`,
+    folderTooManyEntries:
+      "A pasta tem pastas e itens demais para ler de uma vez. Escolha uma pasta menor ou os arquivos um a um.",
+    pasteCanceled: "Colagem cancelada: a Bancada está ocupada.",
+    folderEmpty: "A pasta não tem arquivos para enviar.",
+    folderSkipped: (count: number) =>
+      `${String(count)} arquivo(s) oculto(s) ou de sistema ficaram de fora.`,
+    folderUnreadable: (count: number) =>
+      count === 1
+        ? "1 item não pôde ser lido e ficou de fora."
+        : `${String(count)} itens não puderam ser lidos e ficaram de fora.`,
     filesChosen: (count: number) =>
       count === 0
         ? "Nenhum arquivo escolhido"
