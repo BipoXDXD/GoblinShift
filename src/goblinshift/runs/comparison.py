@@ -27,6 +27,7 @@ class ImageFormat(StrEnum):
     JPEG = "jpeg"
     PNG = "png"
     MPO = "mpo"
+    WEBP = "webp"  # só sai pelo Image Forge v2
 
 
 class AudioCodec(StrEnum):

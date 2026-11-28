@@ -3,9 +3,17 @@
 Não é anonimização: só confirma que EXIF (com GPS), XMP, ICC e textos não chegam à saída.
 """
 
+import io
+import struct
 import zlib
+from typing import Any
+
+import pytest
+from PIL import Image
 
 from goblinshift.processing.image_forge import OutputFormat, Params
+from goblinshift.processing.image_forge.encoding import SaveFormat, encode
+from goblinshift.processing.image_forge.params import WHITE
 from tests.image_forge import icc, media
 from tests.image_forge.conftest import Workspace, only_ok
 
@@ -86,3 +94,77 @@ def test_png_convertido_para_jpeg_sai_limpo(work: Workspace) -> None:
     work.add("b.png", loaded_png())
     only_ok(work.run(Params(output_format=OutputFormat.JPEG)))
     assert_clean_jpeg(work.output("images/b.jpg"))
+
+
+# --- WebP da v2: gravado direto pelo `encode`, a partir de uma imagem cheia de metadados.
+
+
+def riff_chunks(data: bytes) -> list[bytes]:
+    """FourCCs do contêiner RIFF do WebP, na ordem."""
+    assert data[:4] == b"RIFF" and data[8:12] == b"WEBP"
+    chunks, offset = [], 12
+    while offset + 8 <= len(data):
+        fourcc = data[offset : offset + 4]
+        (size,) = struct.unpack_from("<I", data, offset + 4)
+        chunks.append(fourcc)
+        offset += 8 + size + (size & 1)
+    return chunks
+
+
+def webp_with_metadata() -> Image.Image:
+    """WebP P3 com EXIF e XMP, reaberto: o `info` do Pillow traz os três."""
+    data = media.webp(
+        media.solid("RGB", (16, 16), (90, 120, 150)),
+        lossless=True,
+        exif=media.exif(orientation=1, with_gps=True),
+        icc_profile=icc.rgb_profile(icc.DISPLAY_P3, "Display P3"),
+        xmp=f"<x:xmpmeta>{CANARY}</x:xmpmeta>".encode(),
+    )
+    image = Image.open(io.BytesIO(data))
+    image.load()
+    assert {"exif", "icc_profile", "xmp"} <= set(image.info)
+    return image
+
+
+def encoded_webp(image: Image.Image, **options: Any) -> bytes:
+    buffer = io.BytesIO()
+    encode(image, SaveFormat.WEBP, buffer, jpeg_quality=85, jpeg_background=WHITE, **options)
+    return buffer.getvalue()
+
+
+@pytest.mark.parametrize("lossless", [False, True])
+def test_webp_sai_sem_exif_icc_nem_xmp(lossless: bool) -> None:
+    data = encoded_webp(webp_with_metadata(), webp_lossless=lossless)
+
+    assert set(riff_chunks(data)) <= {b"VP8 ", b"VP8L", b"VP8X", b"ALPH"}
+    assert CANARY.encode() not in data
+    reopened = Image.open(io.BytesIO(data))
+    assert not {"exif", "icc_profile", "xmp"} & set(reopened.info)
+
+
+def test_webp_sem_perda_preserva_os_pixels() -> None:
+    image = Image.new("RGBA", (8, 8))
+    image.putdata([(x * 30, y * 30, 200, 40 + x + y) for y in range(8) for x in range(8)])
+
+    reopened = Image.open(io.BytesIO(encoded_webp(image, webp_lossless=True)))
+
+    assert reopened.convert("RGBA").tobytes() == image.tobytes()
+
+
+def test_webp_de_cinza_com_alfa_sai_rgba() -> None:
+    data = encoded_webp(media.solid("LA", (4, 4), (200, 100)), webp_lossless=True)
+    reopened = Image.open(io.BytesIO(data))
+    assert reopened.mode == "RGBA"
+    assert reopened.getpixel((0, 0)) == (200, 200, 200, 100)
+
+
+def test_webp_de_cinza_sai_rgb() -> None:
+    data = encoded_webp(media.solid("L", (4, 4), 77), webp_lossless=True)
+    reopened = Image.open(io.BytesIO(data))
+    assert reopened.mode == "RGB"
+
+
+def test_webp_e_deterministico() -> None:
+    image = media.solid("RGB", (32, 32), (10, 200, 30))
+    assert encoded_webp(image, webp_quality=70) == encoded_webp(image, webp_quality=70)
+    assert SaveFormat.WEBP.extension == ".webp"

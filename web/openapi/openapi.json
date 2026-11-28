@@ -5834,7 +5834,8 @@
         "enum": [
           "jpeg",
           "png",
-          "mpo"
+          "mpo",
+          "webp"
         ],
         "title": "ImageFormat"
       },

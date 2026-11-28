@@ -636,7 +636,7 @@ export interface components {
          * ImageFormat
          * @enum {string}
          */
-        ImageFormat: "jpeg" | "png" | "mpo";
+        ImageFormat: "jpeg" | "png" | "mpo" | "webp";
         /**
          * ItemNoticeCode
          * @description Fatos sobre o item que a interface mostra, mas que não são aviso (A2: não mudam o estado
