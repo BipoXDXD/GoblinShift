@@ -5,6 +5,8 @@ emissor do `run.finished` do `gs-admin`, para a composição poder mudar de mód
 Os pontos de troca são os que não mudam com o módulo: o `OTLPSpanExporter` da telemetria (abrir e
 fechar o tracing), os segredos lidos em `Settings` e os nomes que cada processo usa no próprio
 módulo. Sem banco: o engine aponta para a porta 1 e nunca conecta.
+
+O escopo dos spans do processo fica em `test_worker_tracer.py`; aqui, só a ordem.
 """
 
 from collections.abc import Callable, Iterator, Sequence
@@ -20,7 +22,7 @@ from opentelemetry.trace import Tracer
 from sqlalchemy import Engine
 from sqlalchemy.orm import Session, sessionmaker
 
-from goblinshift.entrypoints import admin_cli, maintenance, worker
+from goblinshift.entrypoints import admin_cli, bootstrap, maintenance, worker
 from goblinshift.entrypoints.api.app import create_app
 from goblinshift.entrypoints.maintenance import Cycle
 from goblinshift.entrypoints.shutdown import ShutdownFlag
@@ -31,17 +33,13 @@ from goblinshift.platform.telemetry import UserHasher
 from goblinshift.runs.finished import RunFinishedReporter
 from tests.span_exporters import BATCH_DELAY_MS
 
-# Escopo dos spans de worker, manutenção e `gs-admin` desde sempre.
-PROCESS_SCOPE = "goblinshift.entrypoints.worker"
-PROBE_SPAN = "sonda da composição"
-
 
 class Events:
     """Linha do tempo dos efeitos da subida e da parada, na ordem em que aconteceram."""
 
-    def __init__(self) -> None:
+    def __init__(self, monkeypatch: pytest.MonkeyPatch) -> None:
         self.seen: list[str] = []
-        self.exporters: list[InMemorySpanExporter] = []
+        self._monkeypatch = monkeypatch
 
     def add(self, event: str) -> None:
         self.seen.append(event)
@@ -56,17 +54,7 @@ class Events:
                 super().shutdown()
 
         self.add("tracing abre")
-        created = _Recording()
-        self.exporters.append(created)
-        return created
-
-    def scopes(self, name: str) -> list[str | None]:
-        return [
-            span.instrumentation_scope.name if span.instrumentation_scope else None
-            for exporter in self.exporters
-            for span in exporter.get_finished_spans()
-            if span.name == name
-        ]
+        return _Recording()
 
     def engine_maker(self) -> Callable[[Settings], Engine]:
         """`make_engine` de verdade (não conecta), com a criação e o `dispose` na linha do tempo."""
@@ -80,7 +68,7 @@ class Events:
                 self.add("engine dispose")
                 dispose(close)
 
-            engine.dispose = recorded_dispose  # type: ignore[method-assign]
+            self._monkeypatch.setattr(engine, "dispose", recorded_dispose)
             return engine
 
         return make
@@ -97,7 +85,7 @@ class Events:
 
 @pytest.fixture
 def events(monkeypatch: pytest.MonkeyPatch) -> Iterator[Events]:
-    timeline = Events()
+    timeline = Events(monkeypatch)
     monkeypatch.setenv("OTEL_EXPORTER_OTLP_ENDPOINT", "http://coletor.invalid")
     monkeypatch.setenv("OTEL_BSP_SCHEDULE_DELAY", BATCH_DELAY_MS)
     monkeypatch.setattr(telemetry, "OTLPSpanExporter", timeline.exporter)
@@ -166,7 +154,6 @@ def test_worker_abre_e_fecha_na_ordem_de_sempre(
     events: Events, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
     shutdown = ShutdownFlag()
-    tracers: list[Tracer] = []
 
     class Listener:
         def __init__(self, _engine: object, _connect_timeout_s: int) -> None:
@@ -181,21 +168,14 @@ def test_worker_abre_e_fecha_na_ordem_de_sempre(
         def wait(self, _timeout_s: float) -> bool:
             return False
 
-    def reporter(
-        factory: sessionmaker[Session], hasher: UserHasher, tracer: Tracer
-    ) -> RunFinishedReporter:
-        tracers.append(tracer)
-        return events.reporter_maker()(factory, hasher, tracer)
-
     def one_turn(*_args: object) -> bool:
         events.add("volta")
-        tracers[0].start_span(PROBE_SPAN).end()
         shutdown.request()
         return True
 
     monkeypatch.setattr(worker, "make_engine", events.engine_maker())
     monkeypatch.setattr(worker, "QueueListener", Listener)
-    monkeypatch.setattr(worker, "RunFinishedReporter", reporter)
+    monkeypatch.setattr(worker, "RunFinishedReporter", events.reporter_maker())
     monkeypatch.setattr(worker, "_work_once", one_turn)
 
     worker.serve(_settings(tmp_path), Mock(), shutdown)
@@ -212,7 +192,6 @@ def test_worker_abre_e_fecha_na_ordem_de_sempre(
         "engine dispose",
         "tracing fecha",
     ]
-    assert events.scopes(PROBE_SPAN) == [PROCESS_SCOPE]
 
 
 # Manutenção -------------------------------------------------------------------------------------
@@ -231,7 +210,6 @@ def test_manutencao_abre_e_fecha_na_ordem_de_sempre(
         events.add("volta")
         assert [name for name, _cycle in cycles] == ["execuções", "contas"]
         assert should_stop() is False
-        tracer.start_span(PROBE_SPAN).end()
         shutdown.request()
 
     monkeypatch.setattr(maintenance, "make_engine", events.engine_maker())
@@ -250,27 +228,34 @@ def test_manutencao_abre_e_fecha_na_ordem_de_sempre(
         "engine dispose",
         "tracing fecha",
     ]
-    assert events.scopes(PROBE_SPAN) == [PROCESS_SCOPE]
 
 
 # gs-admin ---------------------------------------------------------------------------------------
 
 
 def test_emissor_do_admin_le_o_segredo_antes_de_abrir_o_tracing(
-    events: Events, tmp_path: Path
+    events: Events, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
+    """Pelo `_run_finished_reporter` do `gs-admin`, que é privado.
+
+    Os comandos públicos que abrem o emissor (`block`, `request-deletion`) escrevem no banco antes
+    e depois dele; sem Postgres, este é o ponto mais perto do comando que ainda abre o emissor.
+    """
     settings = _settings(tmp_path)
     factory: sessionmaker[Session] = sessionmaker()
     context = admin_cli._Context(factory=factory, settings=settings, clock=lambda: 0.0)
+    monkeypatch.setattr(bootstrap, "RunFinishedReporter", events.reporter_maker())
 
-    with admin_cli._run_finished_reporter(context) as finished:
+    with admin_cli._run_finished_reporter(context):
         events.add("comando")
-        assert isinstance(finished, RunFinishedReporter)
-        finished_tracer: Tracer = finished._tracer
-        finished_tracer.start_span(PROBE_SPAN).end()
 
-    assert events.seen == ["segredo user.hash", "tracing abre", "comando", "tracing fecha"]
-    assert events.scopes(PROBE_SPAN) == [PROCESS_SCOPE]
+    assert events.seen == [
+        "segredo user.hash",
+        "tracing abre",
+        "reporter",
+        "comando",
+        "tracing fecha",
+    ]
 
 
 # API --------------------------------------------------------------------------------------------
@@ -293,6 +278,11 @@ def test_api_libera_o_banco_antes_de_fechar_o_tracing(
         events.add("serve")
         assert client.get("/openapi.json").status_code == 200
 
-    assert events.seen[0] == "segredo user.hash"
-    assert "tracing abre" in events.seen
-    assert events.seen[-3:] == ["serve", "engine dispose", "tracing fecha"]
+    assert events.seen == [
+        "segredo user.hash",
+        "segredo do banco",
+        "tracing abre",
+        "serve",
+        "engine dispose",
+        "tracing fecha",
+    ]

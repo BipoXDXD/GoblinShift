@@ -1,5 +1,9 @@
-"""Composição comum de `gs-worker`, `gs-maintenance` e `gs-admin`: o Runner da configuração, o
-tracer do processo e o emissor do `run.finished` (3.4, 3.7).
+"""Composição comum dos processos fora da API (3.4, 3.7).
+
+- `build_runner`: o Runner da configuração, de `gs-worker` e `gs-maintenance`;
+- `process_tracer`: o tracer do processo, de `gs-worker` e `gs-maintenance`, e do `gs-admin` pelo
+  emissor abaixo;
+- `run_finished_reporter`: o emissor do `run.finished`, só do `gs-admin`.
 """
 
 from collections.abc import Iterator
