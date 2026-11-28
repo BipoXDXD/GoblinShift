@@ -9,8 +9,11 @@ de armazenamento roda no schema migrado e acerta exatamente uma linha.
 import re
 import shutil
 import subprocess
+import sys
+import textwrap
 from pathlib import Path
 
+import psycopg
 import pytest
 from testcontainers.community.postgres import PostgresContainer
 
@@ -23,6 +26,8 @@ COOLIFY = ROOT / "deploy" / "coolify"
 COMPOSE = ROOT / "compose.yaml"
 NGINX_TEMPLATE = ROOT / "docker" / "nginx" / "templates" / "default.conf.template"
 OPENOBSERVE_README = ROOT / "deploy" / "openobserve" / "README.md"
+README = ROOT / "README.md"
+ROLLBACK = ROOT / "docs" / "runbooks" / "rollback.md"
 # `${VAR:?mensagem}`: a mensagem vai até a chave que fecha.
 _REQUIRED_MESSAGE = re.compile(r"\$\{\w+:\?(?P<message>[^}]*)\}")
 _DEV_ONLY = ("dev-secrets.sh", "secrets/app.env")
@@ -99,3 +104,94 @@ def test_sql_do_teto_global_atualiza_uma_linha(
     assert result.returncode == 0, result.stderr
     assert "(1 row)" in result.stdout
     assert variables["bytes"] in result.stdout
+
+
+def _db_password_section() -> str:
+    readme = README.read_text(encoding="utf-8")
+    start = readme.index("### Senha do banco")
+    return readme[start : readme.index("\n## ", start)]
+
+
+def test_senha_do_banco_nao_mostra_o_segredo_nem_deixa_shell_aberto() -> None:
+    section = _db_password_section()
+
+    shown = [
+        line
+        for line in section.splitlines()
+        if re.search(r"\bcat db_password(\.new)?\b(?!\s*>)", line) and ">" not in line
+    ]
+    assert shown == []
+    assert "sudo -u goblinshift -i" not in section
+
+
+@pytest.mark.integration
+def test_verificador_scram_do_roteiro_troca_a_senha(
+    postgres: PostgresContainer, tmp_path: Path
+) -> None:
+    section = _db_password_section()
+    # O bloco fica recuado dentro da lista do Markdown; renderizado, o recuo some.
+    [script] = re.findall(r"python3 - \S+ <<'PY'\n(.*?)^ *PY$", section, re.M | re.S)
+    [sql] = re.findall(
+        r"psql_gs -v verifier=\"\$verifier\" <<'SQL'\n(.*?)^ *SQL$", section, re.M | re.S
+    )
+    password = "a" * 64
+    secret = tmp_path / "db_password.new"
+    secret.write_text(password + "\n")
+    verifier = subprocess.run(  # noqa: S603 - o script é o do roteiro, sem shell
+        [sys.executable, "-I", "-", str(secret)],
+        input=textwrap.dedent(script),
+        capture_output=True,
+        text=True,
+        check=True,
+    ).stdout.strip()
+    assert password not in verifier
+    docker = shutil.which("docker")
+    assert docker is not None
+    container_id = postgres.get_wrapped_container().id
+
+    def psql(statements: str, *variables: str) -> None:
+        result = subprocess.run(  # noqa: S603 - argumentos montados aqui, sem shell
+            [
+                *(docker, "exec", "-i", container_id, "psql", "-U", postgres.username),
+                *("-d", postgres.dbname, "-v", "ON_ERROR_STOP=1", *variables),
+            ],
+            input=statements,
+            capture_output=True,
+            text=True,
+            check=False,
+            timeout=60,
+        )
+        assert result.returncode == 0, result.stderr
+
+    psql("DROP ROLE IF EXISTS goblinshift; CREATE ROLE goblinshift LOGIN;")
+    psql(textwrap.dedent(sql), "-v", f"verifier={verifier}")
+
+    with psycopg.connect(
+        host=postgres.get_container_host_ip(),
+        port=int(postgres.get_exposed_port(5432)),
+        user="goblinshift",
+        password=password,
+        dbname=postgres.dbname,
+    ) as connection:
+        assert connection.execute("SELECT current_user").fetchone() == ("goblinshift",)
+
+
+def test_provisionamento_nao_depende_de_editor_definido() -> None:
+    text = OPENOBSERVE_README.read_text(encoding="utf-8")
+
+    assert re.findall(r'"?\$EDITOR"?', text) == []
+    assert "sudoedit -u goblinshift /srv/goblinshift/secrets/openobserve.env" in text
+
+
+def test_revert_do_rollback_mantem_as_migrations() -> None:
+    text = ROLLBACK.read_text(encoding="utf-8")
+    commands = re.findall(r"git revert -[^`\n]*", text)
+
+    assert commands and all("--no-commit" in command for command in commands)
+    assert "git checkout HEAD -- migrations/versions/" in text
+
+
+def test_rollback_manda_repetir_a_limpeza_ate_o_aviso_sumir() -> None:
+    text = ROLLBACK.read_text(encoding="utf-8")
+
+    assert 'até a mensagem "chegou ao limite" não aparecer mais' in text

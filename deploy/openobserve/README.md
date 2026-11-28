@@ -254,7 +254,7 @@ O OpenObserve só escuta em `127.0.0.1:5080` da VPS. No notebook:
 ```bash
 # 1. Segredos locais (uma vez), fora do repositório, legíveis só por você
 install -d -m 700 ~/.config/goblinshift
-$EDITOR ~/.config/goblinshift/alertas.env      # as chaves da tabela acima
+"${EDITOR:-nano}" ~/.config/goblinshift/alertas.env   # as chaves da tabela acima
 chmod 600 ~/.config/goblinshift/alertas.env
 
 # 2. Túnel, num terminal à parte (fica aberto)
@@ -272,7 +272,7 @@ Também dá para rodar na própria VPS, sem túnel, a partir do [checkout tempor
 
 ```bash
 sudo -u goblinshift install -m 600 /dev/null /srv/goblinshift/secrets/openobserve.env
-sudo -u goblinshift "$EDITOR" /srv/goblinshift/secrets/openobserve.env   # as duas chaves, copiadas do Coolify
+sudoedit -u goblinshift /srv/goblinshift/secrets/openobserve.env   # as duas chaves, copiadas do Coolify
 cd "$gs_tmp/repo/deploy"
 sudo -u goblinshift python3 -B -m openobserve provision \
   --secrets-file /srv/goblinshift/secrets/openobserve.env --secrets-file /srv/goblinshift/secrets/alertas.env

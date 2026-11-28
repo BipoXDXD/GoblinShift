@@ -9,7 +9,13 @@ Não há botão de "voltar versão". O workflow [Coolify release](../../.github/
 O rollback é, então, um commit novo que desfaz o anterior:
 
 1. Ache o merge que trouxe o defeito (`git log --first-parent main`).
-2. Numa branch nova a partir da `main` atualizada, reverta o merge (`git revert -m 1 <sha-do-merge>`) e abra um PR próprio, dizendo no corpo o que está sendo revertido e por quê.
+2. Numa branch nova a partir da `main` atualizada, reverta o merge mantendo as migrations (o porquê está em "O schema não volta junto") e abra um PR próprio, dizendo no corpo o que está sendo revertido e por quê:
+
+   ```bash
+   git revert -m 1 --no-commit <sha-do-merge>
+   git checkout HEAD -- migrations/versions/
+   git commit
+   ```
 3. O PR passa pela CI e pela revisão como qualquer outro. Depois do merge, a CI da `main` roda e o `coolify.yml` publica o novo HEAD, que é o código anterior.
 
 Enquanto o revert não chega à produção, a versão com defeito continua no ar. Se o defeito for de segurança ou estiver corrompendo dados, avalie parar o serviço afetado no Coolify durante a espera (o `worker`, por exemplo, para não aceitar Runs novas).
@@ -18,11 +24,11 @@ Enquanto o revert não chega à produção, a versão com defeito continua no ar
 
 Reverter o código não reverte o banco. As migrations seguem expand/contract ([plano, 3.8](../GoblinShiftPlan.md#s3-8); `tests/test_migrations_contract.py`): uma revisão nova só acrescenta, e o código anterior continua funcionando com o schema mais novo.
 
-- **Banco à frente da imagem.** O `migrate` da imagem anterior encontra o banco numa revisão que não conhece. Pelo ADR 056 ele avisa (WARN no stderr, com a revisão do banco e o head da imagem) e sai com 0 sem migrar, e `api` e `worker` sobem normalmente. Confira o aviso no log: `sudo docker logs --tail 100 goblinshift-migrate-1`.
+- **O revert não apaga migration.** O banco já foi carimbado com a revisão que o merge trouxe. Se o revert tirasse o arquivo de `migrations/versions/`, a imagem nova não conheceria essa revisão: pelo ADR 056 o `migrate` só avisa (WARN no stderr, com a revisão do banco e o head da imagem) e sai com 0 sem migrar, e continuaria assim em toda publicação seguinte, porque a próxima migration escrita na `main` partiria do head antigo e nunca alcançaria o banco. Por isso o passo 2 devolve `migrations/versions/` ao estado do HEAD antes do commit: a revisão continua no histórico, o `migrate` encontra o banco no head e não faz nada, e as migrations seguintes encadeiam a partir dela. Se mesmo assim aparecer o WARN no log (`sudo docker logs --tail 100 goblinshift-migrate-1`), o revert levou alguma revisão junto: corrija antes de publicar outra migration.
 - **Downgrade em produção é recusado.** Com `GS_ENVIRONMENT=production`, `migrations/env.py` (`_check_production_destination`) recusa todo `alembic downgrade` e qualquer destino diferente do head da imagem, com "em produção o migrate só sobe para o head; descer o schema é restaurar o backup". Não tente contornar.
-- **Revisão de contract.** Se a revisão que entrou com o defeito não é expand (remove ou renomeia coluna ou tabela, marcada com `# contract: <motivo>`), o código anterior pode não funcionar com o schema novo. Nesse caso o rollback exige restaurar o banco a partir do backup para uma revisão compatível, com perda do que foi gravado depois do dump. O roteiro de restauração ainda não está escrito; até lá, siga o [ADR 022](../adr/022-backup-externo.md) e a seção "Backup do PostgreSQL (fora da VPS)" do [README](../../README.md#backup-do-postgresql-fora-da-vps), e depois da restauração limpe os arquivos sem linha com `gs-admin orphan-files --delete-orphans --yes` (README, "Arquivos órfãos no storage").
+- **Revisão de contract.** Se a revisão que entrou com o defeito não é expand (remove ou renomeia coluna ou tabela, marcada com `# contract: <motivo>`), o código anterior pode não funcionar com o schema novo. Nesse caso o rollback exige restaurar o banco a partir do backup para uma revisão compatível, com perda do que foi gravado depois do dump. O roteiro de restauração ainda não está escrito; até lá, siga o [ADR 022](../adr/022-backup-externo.md) e a seção "Backup do PostgreSQL (fora da VPS)" do [README](../../README.md#backup-do-postgresql-fora-da-vps), e depois da restauração limpe os arquivos sem linha com `gs-admin orphan-files --delete-orphans --yes` (README, "Arquivos órfãos no storage"). Cada execução apaga no máximo `--limit` arquivos: repita até a mensagem "chegou ao limite" não aparecer mais. Arquivos modificados nas últimas 6 horas (o `--min-age-hours` padrão) ficam de fora nessa passada; rode de novo depois de 6 horas, ou já com um `--min-age-hours` menor, mas só com `api`, `worker` e `maintenance` parados, para nenhuma gravação em curso passar por órfã.
 
-Antes de reverter, confira se o merge trouxe migration: `git show --stat <sha-do-merge> -- migrations/versions/`. Sem migration, o revert é só código.
+Antes de reverter, confira se o merge trouxe migration: `git show --stat <sha-do-merge> -- migrations/versions/`. Sem migration, o `git checkout` do passo 2 não muda nada e o revert é só código.
 
 ## O que conferir depois
 
