@@ -77,6 +77,7 @@ from goblinshift.identity.providers import (
     GOOGLE_JWKS_URL,
     GOOGLE_SCOPE,
     GOOGLE_TOKEN_URL,
+    MalformedProviderResponseError,
     ProviderName,
     github_identity,
     google_identity,
@@ -98,9 +99,19 @@ MAX_RETURN_TO_CHARS = 512
 DEFAULT_RETURN_TO = "/"
 REAUTH_PROMPT = "select_account"
 # Falhas esperadas de um provedor externo ou de um callback forjado. Qualquer outra exceção é
-# defeito nosso e segue para o handler de erro 500. `TimeoutError` é o prazo total; `TypeError`
-# vem do Authlib lendo JSON válido com forma errada (a JWKS em lista ou `null`).
-LOGIN_ERRORS = (OAuthError, JoseError, HTTPError, ValueError, TimeoutError, TypeError)
+# defeito nosso e segue para o handler de erro 500. `TimeoutError` é o prazo total;
+# `MalformedProviderResponseError`, o JSON válido com forma errada (`_consume_provider`).
+LOGIN_ERRORS = (
+    OAuthError,
+    JoseError,
+    HTTPError,
+    ValueError,
+    TimeoutError,
+    MalformedProviderResponseError,
+)
+# O que o Authlib levanta ao ler um token ou uma JWKS com forma errada (a JWKS em lista ou `null`,
+# o `token_type` numérico).
+_SHAPE_ERRORS = (KeyError, AttributeError, TypeError)
 # Prazo do callback inteiro (token, JWKS, `/user`) em múltiplos de `oauth_http_timeout_s`, que o
 # httpx aplica a cada fase de cada chamada.
 LOGIN_FETCH_TIMEOUT_FACTOR = 2
@@ -194,9 +205,23 @@ def _limit_state_lifetime(app: Any) -> None:
     app.framework.expires_in = int(LOGIN_STATE_TTL.total_seconds())
 
 
+async def _consume_provider[T](call: Awaitable[T]) -> T:
+    """Uma chamada do Authlib que lê a resposta do provedor; só ela fica neste `try`.
+
+    O erro de forma vira erro de domínio aqui, na fronteira: o mesmo tipo de erro no resto do
+    callback é defeito nosso e segue para o 500.
+    """
+    try:
+        return await call
+    except _SHAPE_ERRORS as exc:
+        raise MalformedProviderResponseError(type(exc).__name__) from exc
+
+
 async def _read_google_identity(oauth_app: Any, request: Request) -> ExternalIdentity:
-    token = await oauth_app.authorize_access_token(
-        request, claims_options=_google_claims_options(oauth_app.client_id)
+    token = await _consume_provider(
+        oauth_app.authorize_access_token(
+            request, claims_options=_google_claims_options(oauth_app.client_id)
+        )
     )
     # Sem `id_token` o Authlib não valida nada e não devolve `userinfo`.
     userinfo = token.get("userinfo")
@@ -221,9 +246,12 @@ def _google_claims_options(client_id: str) -> dict[str, Any]:
 
 
 async def _read_github_identity(oauth_app: Any, request: Request) -> ExternalIdentity:
-    token = await oauth_app.authorize_access_token(request)
-    # O token só existe nesta função: nunca é gravado nem registrado no log.
-    response = await oauth_app.get(GITHUB_USER_URL, token=token, headers={"Accept": GITHUB_ACCEPT})
+    token = await _consume_provider(oauth_app.authorize_access_token(request))
+    # O token só existe nesta função: nunca é gravado nem registrado no log. O Authlib lê o
+    # `token_type` dele ao montar o pedido, então a chamada também consome dado do provedor.
+    response = await _consume_provider(
+        oauth_app.get(GITHUB_USER_URL, token=token, headers={"Accept": GITHUB_ACCEPT})
+    )
     response.raise_for_status()
     return github_identity(response.content)
 

@@ -8,6 +8,7 @@ from fastapi.testclient import TestClient
 from sqlalchemy import select
 from sqlalchemy.orm import Session, sessionmaker
 
+from goblinshift.entrypoints.api import auth_login
 from goblinshift.identity.providers import (
     GITHUB_ISSUER,
     GITHUB_USER_URL,
@@ -164,6 +165,47 @@ def test_github_user_malicioso_e_recusado(
     assert sessions.started == []
     assert accounts(factory) == []
     assert audit_events(factory) == [("LOGIN_FAILED", "failure", None)]
+
+
+@pytest.mark.parametrize(
+    "token",
+    [
+        {"token_type": "bearer"},
+        {"access_token": "gho_x", "token_type": "mac"},
+        {"access_token": "gho_x", "token_type": 5},
+    ],
+    ids=["sem-access-token", "token-type-mac", "token-type-numero"],
+)
+def test_token_do_github_com_forma_errada_vira_o_erro_generico(
+    client: TestClient,
+    fake: FakeProviders,
+    sessions: StoredSessions,
+    factory: sessionmaker[Session],
+    login_app: FastAPI,
+    token: dict[str, object],
+) -> None:
+    open_signup(login_app)
+    fake.token_body = json.dumps(token).encode()
+
+    response = login(client, fake, "github")
+
+    assert_login_failed(response)
+    assert sessions.started == []
+    assert accounts(factory) == []
+    assert audit_events(factory) == [("LOGIN_FAILED", "failure", None)]
+
+
+def test_type_error_do_nosso_codigo_nao_vira_recusa_de_login(
+    client: TestClient, fake: FakeProviders, login_app: FastAPI, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # Só o erro de forma da resposta do provedor é recusa; um defeito nosso segue para o 500.
+    def broken(body: bytes) -> None:
+        raise TypeError("defeito nosso")
+
+    open_signup(login_app)
+    monkeypatch.setattr(auth_login, "github_identity", broken)
+
+    assert login(client, fake, "github").status_code == 500
 
 
 def test_teto_do_corpo_do_github_cabe_um_usuario_real() -> None:

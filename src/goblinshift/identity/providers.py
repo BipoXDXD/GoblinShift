@@ -62,6 +62,14 @@ class InvalidProviderIdentityError(ValueError):
     """O provedor devolveu uma identidade que não passa no modelo estrito."""
 
 
+class MalformedProviderResponseError(Exception):
+    """JSON válido do provedor (token, JWKS) com uma forma que a biblioteca OAuth não lê.
+
+    Nasce na fronteira em que a resposta é consumida, no lugar do `KeyError`, `AttributeError` ou
+    `TypeError` da biblioteca: o mesmo erro fora dessa fronteira é defeito nosso e vira 500.
+    """
+
+
 class _GoogleClaims(BaseModel):
     # Os demais claims (`aud`, `exp`, `nonce`...) já foram validados pelo Authlib.
     model_config = ConfigDict(strict=True, extra="ignore")
