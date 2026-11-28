@@ -577,6 +577,32 @@ jobs:
           subject-name: ghcr.io/bipoxdxd/goblinshift
           subject-digest: ${{ steps.build.outputs.digest }}
           push-to-registry: false
+      # SBOM SPDX de cada plataforma, gerado pelo Trivy no índice que passou no scan e atestado
+      # no mesmo sujeito (#366, L11 h; ADR 075). Roda também no PR para falhar cedo; o
+      # publish-images confere só a proveniência, e o SBOM é informativo.
+      - name: Gerar o SBOM SPDX das plataformas AMD64 e ARM64
+        env:
+          INDEX_DIGEST: ${{ steps.build.outputs.digest }}
+        run: |
+          for platform in linux/amd64 linux/arm64; do
+            scripts/ci-oci.sh sbom app "$INDEX_DIGEST" "$platform"
+          done
+      - name: Atestar o SBOM AMD64 do índice
+        if: github.event_name == 'push'
+        uses: actions/attest-sbom@c604332985a26aa8cf1bdc465b92731239ec6b9e # v4.1.0
+        with:
+          subject-name: ghcr.io/bipoxdxd/goblinshift
+          subject-digest: ${{ steps.build.outputs.digest }}
+          sbom-path: ${{ runner.temp }}/sbom-app-amd64.spdx.json
+          push-to-registry: false
+      - name: Atestar o SBOM ARM64 do índice
+        if: github.event_name == 'push'
+        uses: actions/attest-sbom@c604332985a26aa8cf1bdc465b92731239ec6b9e # v4.1.0
+        with:
+          subject-name: ghcr.io/bipoxdxd/goblinshift
+          subject-digest: ${{ steps.build.outputs.digest }}
+          sbom-path: ${{ runner.temp }}/sbom-app-arm64.spdx.json
+          push-to-registry: false
       - id: layout
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
@@ -636,6 +662,32 @@ jobs:
           subject-name: ghcr.io/bipoxdxd/goblinshift-executor
           subject-digest: ${{ steps.build.outputs.digest }}
           push-to-registry: false
+      # SBOM SPDX de cada plataforma, gerado pelo Trivy no índice que passou no scan e atestado
+      # no mesmo sujeito (#366, L11 h; ADR 075). Roda também no PR para falhar cedo; o
+      # publish-images confere só a proveniência, e o SBOM é informativo.
+      - name: Gerar o SBOM SPDX das plataformas AMD64 e ARM64
+        env:
+          INDEX_DIGEST: ${{ steps.build.outputs.digest }}
+        run: |
+          for platform in linux/amd64 linux/arm64; do
+            scripts/ci-oci.sh sbom executor "$INDEX_DIGEST" "$platform"
+          done
+      - name: Atestar o SBOM AMD64 do índice
+        if: github.event_name == 'push'
+        uses: actions/attest-sbom@c604332985a26aa8cf1bdc465b92731239ec6b9e # v4.1.0
+        with:
+          subject-name: ghcr.io/bipoxdxd/goblinshift-executor
+          subject-digest: ${{ steps.build.outputs.digest }}
+          sbom-path: ${{ runner.temp }}/sbom-executor-amd64.spdx.json
+          push-to-registry: false
+      - name: Atestar o SBOM ARM64 do índice
+        if: github.event_name == 'push'
+        uses: actions/attest-sbom@c604332985a26aa8cf1bdc465b92731239ec6b9e # v4.1.0
+        with:
+          subject-name: ghcr.io/bipoxdxd/goblinshift-executor
+          subject-digest: ${{ steps.build.outputs.digest }}
+          sbom-path: ${{ runner.temp }}/sbom-executor-arm64.spdx.json
+          push-to-registry: false
       - id: layout
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
@@ -694,6 +746,32 @@ jobs:
         with:
           subject-name: ghcr.io/bipoxdxd/goblinshift-web
           subject-digest: ${{ steps.build.outputs.digest }}
+          push-to-registry: false
+      # SBOM SPDX de cada plataforma, gerado pelo Trivy no índice que passou no scan e atestado
+      # no mesmo sujeito (#366, L11 h; ADR 075). Roda também no PR para falhar cedo; o
+      # publish-images confere só a proveniência, e o SBOM é informativo.
+      - name: Gerar o SBOM SPDX das plataformas AMD64 e ARM64
+        env:
+          INDEX_DIGEST: ${{ steps.build.outputs.digest }}
+        run: |
+          for platform in linux/amd64 linux/arm64; do
+            scripts/ci-oci.sh sbom web "$INDEX_DIGEST" "$platform"
+          done
+      - name: Atestar o SBOM AMD64 do índice
+        if: github.event_name == 'push'
+        uses: actions/attest-sbom@c604332985a26aa8cf1bdc465b92731239ec6b9e # v4.1.0
+        with:
+          subject-name: ghcr.io/bipoxdxd/goblinshift-web
+          subject-digest: ${{ steps.build.outputs.digest }}
+          sbom-path: ${{ runner.temp }}/sbom-web-amd64.spdx.json
+          push-to-registry: false
+      - name: Atestar o SBOM ARM64 do índice
+        if: github.event_name == 'push'
+        uses: actions/attest-sbom@c604332985a26aa8cf1bdc465b92731239ec6b9e # v4.1.0
+        with:
+          subject-name: ghcr.io/bipoxdxd/goblinshift-web
+          subject-digest: ${{ steps.build.outputs.digest }}
+          sbom-path: ${{ runner.temp }}/sbom-web-arm64.spdx.json
           push-to-registry: false
       - id: layout
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
