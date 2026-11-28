@@ -8,6 +8,12 @@ arquivo, conteúdo, tokens ou o IP inteiro: o IP é truncado (/24 em IPv4, /48 e
 Só eventos de quem tem credencial válida (mais o login, já limitado por IP no Nginx) são
 auditados: um atacante sem credencial cai no 401, e não consegue inundar a tabela.
 
+O `LOGIN_FAILED` sem conta (callback forjado, falha no provedor) não tem credencial nenhuma: tem
+teto global de `MAX_ANONYMOUS_LOGIN_FAILURES_PER_MINUTE` linhas por minuto
+(`record_anonymous_login_failure`). A recusa de uma conta conhecida (bloqueada, pendente) é sempre
+gravada, porque o operador a acha pelo código de referência no recurso contra o bloqueio. Provedor
+desligado é erro de configuração, não tentativa de login, e não é auditado.
+
 O `CSRF_FAILED` é agregado: no máximo uma linha por conta a cada `CSRF_FAILURE_AUDIT_INTERVAL`
 (`record_csrf_failure`). Um site hostil faz o navegador da vítima repetir mutações com o cookie
 dela, e cada recusa gravaria uma linha; no ritmo da borda, a entrada superaria a retenção.
@@ -21,7 +27,7 @@ from ipaddress import IPv4Address, IPv4Network, IPv6Address, IPv6Network, ip_add
 from typing import Any
 from uuid import UUID
 
-from sqlalchemy import ColumnElement, exists, insert, literal, null, select
+from sqlalchemy import ColumnElement, exists, func, insert, literal, null, select
 from sqlalchemy.orm import Session
 
 from goblinshift.identity.tables import audit_event
@@ -30,6 +36,9 @@ IPV4_PREFIX = 24
 IPV6_PREFIX = 48
 # Janela da agregação do `CSRF_FAILED`: uma linha por conta neste intervalo.
 CSRF_FAILURE_AUDIT_INTERVAL = timedelta(minutes=1)
+# Teto global do `LOGIN_FAILED` sem conta (D6 do plano login-e-borda); acima dele, só o log.
+MAX_ANONYMOUS_LOGIN_FAILURES_PER_MINUTE = 30
+ANONYMOUS_LOGIN_FAILURE_WINDOW = timedelta(minutes=1)
 
 
 class AuditEventType(StrEnum):
@@ -157,6 +166,50 @@ def record_csrf_failure(session: Session, *, user_id: UUID, ip: str | None, now:
     return inserted is not None
 
 
+def record_anonymous_login_failure(
+    session: Session, *, ip: str | None, request_id: UUID, now: datetime, limit: int
+) -> bool:
+    """Grava o `LOGIN_FAILED` sem conta, salvo se já houver `limit` deles no último minuto;
+    devolve se gravou. Roda na transação de quem chama.
+
+    Um só `INSERT ... SELECT ... WHERE (contagem limitada) < limit`, com as mesmas colunas de
+    `record`. A contagem para em `limit` e lê só `user_id IS NULL`: a recusa de conta conhecida
+    não gasta o teto. A janela é aberta no início (`occurred_at > now - 1 min`), como a do
+    `record_csrf_failure`, e a busca usa o índice de `occurred_at`.
+
+    Requisições simultâneas gravam acima do teto, porque nenhuma vê a outra antes do commit: o
+    estouro é limitado pelas requisições em voo (tokens do threadpool vezes processos da API). A
+    corrida é aceita, porque o teto protege o tamanho da tabela.
+    """
+    values = _event_values(
+        event=AuditEventType.LOGIN_FAILED,
+        user_id=None,
+        ip=ip,
+        outcome=AuditOutcome.FAILURE,
+        now=now,
+        request_id=request_id,
+    )
+    recent = (
+        select(literal(1))
+        .select_from(audit_event)
+        .where(
+            audit_event.c.event_type == AuditEventType.LOGIN_FAILED.value,
+            audit_event.c.user_id.is_(None),
+            audit_event.c.occurred_at > now - ANONYMOUS_LOGIN_FAILURE_WINDOW,
+        )
+        .limit(limit)
+        .subquery()
+    )
+    recent_count = select(func.count()).select_from(recent).scalar_subquery()
+    row = select(*(_as_column(name, value) for name, value in values.items())).where(
+        recent_count < limit
+    )
+    inserted = session.execute(
+        insert(audit_event).from_select(list(values), row).returning(audit_event.c.id)
+    ).first()
+    return inserted is not None
+
+
 def _event_values(
     *,
     event: AuditEventType,
@@ -167,7 +220,7 @@ def _event_values(
     request_id: UUID | None = None,
     details: Mapping[str, object] | None = None,
 ) -> dict[str, Any]:
-    # Um lugar só monta as colunas do evento, para `record` e para a agregação do CSRF.
+    # Um lugar só monta as colunas do evento, para `record` e para os gravados com teto.
     return {
         "user_id": user_id,
         "event_type": event.value,

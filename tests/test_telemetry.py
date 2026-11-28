@@ -47,7 +47,7 @@ from sqlalchemy import Engine, create_engine, text
 from sqlalchemy.event import listen as real_listen
 from sqlalchemy.exc import OperationalError
 
-from goblinshift.entrypoints import maintenance, worker
+from goblinshift.entrypoints import bootstrap, maintenance
 from goblinshift.entrypoints.api import health
 from goblinshift.entrypoints.api.app import create_app
 from goblinshift.entrypoints.api.runs import _current_traceparent
@@ -843,9 +843,9 @@ def test_worker_nao_escolhe_a_fila_da_api(monkeypatch: pytest.MonkeyPatch) -> No
     def no_provider(*args: object, **kwargs: object) -> None:
         calls.append((args, kwargs))
 
-    monkeypatch.setattr(worker, "make_tracer_provider", no_provider)
+    monkeypatch.setattr(bootstrap, "make_tracer_provider", no_provider)
 
-    with worker.process_tracer(TEST_SETTINGS, "goblinshift-worker"):
+    with bootstrap.process_tracer(TEST_SETTINGS, "goblinshift-worker"):
         pass
 
     assert calls == [((TEST_SETTINGS, "goblinshift-worker"), {})]
@@ -861,8 +861,8 @@ def test_manutencao_nao_escolhe_a_fila_da_api(monkeypatch: pytest.MonkeyPatch) -
         calls.append((args, kwargs))
         raise ProviderRequestedError
 
-    # A manutenção cria o provider pelo `process_tracer` do worker.
-    monkeypatch.setattr(worker, "make_tracer_provider", stop_at_provider)
+    # A manutenção cria o provider pelo `process_tracer` de `entrypoints/bootstrap.py`.
+    monkeypatch.setattr(bootstrap, "make_tracer_provider", stop_at_provider)
     # Parada já pedida: se o provider vier por outro caminho, o `serve` sai na hora e o teste
     # falha, em vez de ficar no laço da manutenção.
     shutdown = ShutdownFlag()

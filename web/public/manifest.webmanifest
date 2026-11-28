@@ -3,13 +3,45 @@
   "short_name": "GoblinShift",
   "description": "Arquivos em lote, limpos pelas goblins da oficina.",
   "lang": "pt-BR",
+  "id": "/",
   "start_url": "/",
-  "display": "browser",
+  "scope": "/",
+  "display": "minimal-ui",
   "background_color": "#231813",
   "theme_color": "#231813",
   "icons": [
     { "src": "/favicon.svg", "sizes": "any", "type": "image/svg+xml" },
     { "src": "/icon-192.png", "sizes": "192x192", "type": "image/png" },
     { "src": "/icon-512.png", "sizes": "512x512", "type": "image/png" }
-  ]
+  ],
+  "share_target": {
+    "action": "/compartilhar",
+    "method": "POST",
+    "enctype": "multipart/form-data",
+    "params": {
+      "files": [
+        {
+          "name": "arquivos",
+          "accept": [
+            ".csv",
+            "text/csv",
+            ".jpg",
+            ".jpeg",
+            ".png",
+            ".mpo",
+            "image/jpeg",
+            "image/png",
+            ".pdf",
+            "application/pdf",
+            ".mp4",
+            ".mov",
+            ".webm",
+            "video/mp4",
+            "video/quicktime",
+            "video/webm"
+          ]
+        }
+      ]
+    }
+  }
 }

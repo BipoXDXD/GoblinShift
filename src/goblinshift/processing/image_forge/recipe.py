@@ -23,7 +23,7 @@ from goblinshift.processing.image_forge.params import WHITE, OutputFormat, Param
 from goblinshift.processing.image_forge.preparation import Prepared, prepare
 from goblinshift.processing.image_forge.rejection import ImageRejected
 from goblinshift.processing.names import safe_stem
-from goblinshift.processing.previews import PendingPreview, attach_previews, write_previews
+from goblinshift.processing.previews import PendingPreview, process_each, report_with_previews
 from goblinshift.processing.recipe import (
     DetailValue,
     InputFile,
@@ -56,16 +56,14 @@ class ImageForgeV1:
         self, params: Params, inputs: Sequence[InputFile], out: OutputDir, progress: Progress
     ) -> Report:
         require_max_inputs(inputs, self._max_inputs, "imagens")
-        items: list[ItemOk | ItemRejected] = []
-        pending: list[PendingPreview] = []
-        for source in inputs:
-            items.append(self._forge_one(source, params, out, pending))
-            progress.item_done(source.position)
+        processed = process_each(
+            inputs, lambda source, pending: self._forge_one(source, params, out, pending), progress
+        )
         details: dict[str, DetailValue] = {
             "resampling": RESAMPLING_NAME,
             "thumbnail_box": self._limits.thumbnail_box,
         }
-        return Report(attach_previews(items, write_previews(out, pending)), details=details)
+        return report_with_previews(processed, out, details=details)
 
     def _forge_one(
         self, source: InputFile, params: Params, out: OutputDir, pending: list[PendingPreview]

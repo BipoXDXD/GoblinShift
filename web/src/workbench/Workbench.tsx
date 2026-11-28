@@ -39,17 +39,27 @@ import type { Preset } from "../presets/api";
 import type { RecipeForm, RecipeModule } from "../recipes/registry";
 import type { RecipeDraft, RecipeId, RecipeInput } from "../recipes/types";
 import { createRun } from "../runs/commands";
+import { SharedFilesPrompt } from "../share/SharedFilesPrompt";
+import { ShareNotice } from "../share/ShareNotice";
+import { useSharedFiles } from "../share/useSharedFiles";
 import { TEXT } from "../text";
 import { useUploadBatch, type UploadEntry, type UploadServices } from "../upload/useUploadBatch";
 import { orderEntries, runInputs, uploadAnnouncement, type RunInputs } from "./inputs";
 import { DeletionFailures } from "./DeletionFailures";
 import { SavePreset } from "./SavePreset";
 import { UpdatePreset } from "./UpdatePreset";
+import type { FolderPick } from "../upload/folderFiles";
 import { UploadEntryView } from "./UploadEntryView";
+import { usePasteFiles } from "./usePasteFiles";
 
 const FILES_FIELD_ID = "bancada-arquivos";
 // O resumo de erros cita o campo de arquivos pelo título da seção, não pelo botão de escolher.
 const FILES_FIELD: FormField = { fieldId: FILES_FIELD_ID, label: TEXT.workbench.filesHeading };
+
+/** Resultado de uma colagem ou pasta: o que entrou e ficou de fora, ou a recusa no campo. */
+type PickNotice =
+  | { readonly tone: "info"; readonly message: string }
+  | { readonly tone: "error"; readonly message: string };
 
 type PendingRemoval =
   | { readonly kind: "one"; readonly localId: string; readonly name: string }
@@ -64,6 +74,8 @@ interface WorkbenchProps {
   readonly notice?: ReactNode;
   /** O preset cujos parâmetros abriram o formulário, que "Atualizar preset" substitui. */
   readonly sourcePreset?: Preset | null;
+  /** Compartilhamento cujos arquivos entram no lote ao abrir (ADR 064); `null` sem nenhum. */
+  readonly sharedId?: string | null;
 }
 
 interface Submission {
@@ -82,14 +94,17 @@ export function Workbench({
   uploadServices,
   notice = null,
   sourcePreset = null,
+  sharedId = null,
 }: WorkbenchProps): ReactElement {
   const client = useApiClient();
   const navigate = useNavigate();
   const batch = useUploadBatch(uploadServices);
+  const shared = useSharedFiles(sharedId, batch.add);
   const [order, setOrder] = useState<readonly string[]>([]);
   const [draft, setDraft] = useState<RecipeDraft<RecipeId>>(form.initialDraft);
   const [attempt, setAttempt] = useState(0);
   const [pendingRemoval, setPendingRemoval] = useState<PendingRemoval | null>(null);
+  const [pickNotice, setPickNotice] = useState<PickNotice | null>(null);
   const focusFilesAfterRemoval = useRef(false);
   const filesHeadingId = useId();
   const parametersHeadingId = useId();
@@ -149,6 +164,60 @@ export function Workbench({
     }
   }, [pendingRemoval]);
 
+  const chooseFiles = (files: readonly File[]): void => {
+    setPickNotice(null);
+    batch.add(files);
+  };
+
+  // Acima do teto de entradas nada sobe: enviar parte em silêncio deixaria a pessoa sem saber o
+  // que ficou de fora, e enviar tudo só adiaria a recusa para o Executar.
+  const pasteFiles = (files: readonly File[]): void => {
+    const max = form.inputLimits.maxInputs;
+    if (files.length > max) {
+      setPickNotice({ tone: "error", message: TEXT.workbench.pasteTooMany(files.length, max) });
+      return;
+    }
+    setPickNotice({ tone: "info", message: TEXT.workbench.pasted(files.length) });
+    batch.add(files);
+  };
+
+  // `added` diz quantos arquivos entraram: "colados" ou "da pasta adicionados".
+  const receiveFolder = (pick: FolderPick, added: (count: number) => string): void => {
+    if (pick.overflow !== null) {
+      const message =
+        pick.overflow === "files"
+          ? TEXT.workbench.folderTooBig(form.inputLimits.maxInputs)
+          : TEXT.workbench.folderTooManyEntries;
+      setPickNotice({ tone: "error", message });
+      return;
+    }
+    const message = [
+      pick.files.length === 0 ? TEXT.workbench.folderEmpty : added(pick.files.length),
+      ...(pick.skippedHidden > 0 ? [TEXT.workbench.folderSkipped(pick.skippedHidden)] : []),
+      ...(pick.skippedUnreadable > 0
+        ? [TEXT.workbench.folderUnreadable(pick.skippedUnreadable)]
+        : []),
+    ].join(" ");
+    if (pick.files.length === 0) {
+      setPickNotice({ tone: "error", message });
+      return;
+    }
+    setPickNotice({ tone: "info", message });
+    batch.add(pick.files);
+  };
+
+  usePasteFiles(pendingRemoval === null && !mutation.isPending, {
+    maxFiles: form.inputLimits.maxInputs,
+    onFiles: pasteFiles,
+    onFolder: (pick) => {
+      receiveFolder(pick, TEXT.workbench.pasted);
+    },
+    onCanceled: () => {
+      setPickNotice({ tone: "info", message: TEXT.workbench.pasteCanceled });
+    },
+  });
+  const pickError = pickNotice?.tone === "error" ? pickNotice.message : null;
+
   const onSubmit = (event: SubmitEvent<HTMLFormElement>): void => {
     event.preventDefault();
     if (mutation.isPending) {
@@ -176,6 +245,7 @@ export function Workbench({
   return (
     <div className="flex flex-col gap-8">
       {notice}
+      {shared.expired && <ShareNotice>{TEXT.share.expired}</ShareNotice>}
       <form noValidate onSubmit={onSubmit} className="flex flex-col gap-8">
         <ErrorSummary issues={issues} attempt={attempt} />
         {/* Duas colunas a partir de 1024 px (D9): arquivos fluida, parâmetros com largura fixa. A
@@ -190,9 +260,20 @@ export function Workbench({
               label={TEXT.workbench.chooseFiles}
               description={`${TEXT.workbench.chooseFilesHint} ${limitsHint(form)}`}
               {...(recipe.accept === null ? {} : { accept: recipe.accept })}
-              error={fieldErrors.get(FILES_FIELD_ID) ?? null}
+              error={fieldErrors.get(FILES_FIELD_ID) ?? pickError}
               chosenCount={entries.length}
-              onFiles={batch.add}
+              onFiles={chooseFiles}
+              folder={{
+                maxFiles: form.inputLimits.maxInputs,
+                onPick: (pick) => {
+                  receiveFolder(pick, TEXT.workbench.folderAdded);
+                },
+              }}
+              notice={pickNotice?.tone === "info" ? pickNotice.message : null}
+            />
+            <SharedFilesPrompt
+              shared={shared}
+              onDone={() => document.getElementById(FILES_FIELD_ID)?.focus()}
             />
             {entries.length === 0 ? (
               <EmptyState
@@ -236,6 +317,8 @@ export function Workbench({
             )}
             <DeletionFailures failures={batch.failedDeletions} onRetry={batch.retryDeletions} />
             <LiveRegion message={announcement} visuallyHidden />
+            {/* A recusa fica visível no campo de arquivos; aqui ela só é anunciada. */}
+            <LiveRegion message={pickError} visuallyHidden />
           </section>
           <div className="flex flex-col gap-6 lg:w-112 lg:flex-none">
             <Card as="section" aria-labelledby={parametersHeadingId}>

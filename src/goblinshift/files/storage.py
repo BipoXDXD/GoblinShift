@@ -91,7 +91,10 @@ class ContentTooLargeError(StorageError):
 
 @dataclass(frozen=True)
 class ObjectStat:
+    """Tamanho e `st_mtime` (epoch, em s) do objeto."""
+
     size_bytes: int
+    modified_at: float
 
 
 @dataclass(frozen=True)
@@ -205,7 +208,7 @@ class FileStorage:
             os.close(parent_fd)
         if not S_ISREG(info.st_mode):
             raise ObjectTamperedError(key)
-        return ObjectStat(size_bytes=info.st_size)
+        return ObjectStat(size_bytes=info.st_size, modified_at=info.st_mtime)
 
     def is_mounted(self) -> bool:
         """A sentinela de montagem existe na raiz, como arquivo comum.

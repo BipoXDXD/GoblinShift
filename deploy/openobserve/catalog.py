@@ -150,6 +150,9 @@ CAUSE_COLUMNS: tuple[str, ...] = (
     "alert_run_without_reservation",
     "alert_executor_start_failed",
     "alert_input_tampered",
+    "alert_google_auth_time_missing",
+    "alert_login_state_cap",
+    "alert_login_failure_audit_cap",
     "api_saturation_rejected",
 )
 
@@ -292,6 +295,17 @@ SPAN_CAUSES: tuple[_SpanCause, ...] = (
         destination=DestinationKey.WARNING,
     ),
     _SpanCause(
+        "causa-login-anonimo-no-teto",
+        "Login sem autenticação no teto da aplicação. O teto global de estados de login vivos "
+        "recusou inícios novos (login_state_cap): enquanto durar, ninguém consegue começar um "
+        "login, e quem já estava no provedor termina. Ou o teto de LOGIN_FAILED sem conta por "
+        "minuto deixou recusas só no log (login_failure_audit_cap). Veja o runbook em "
+        "deploy/openobserve/README.md.",
+        period_minutes=10,
+        silence_minutes=180,
+        destination=DestinationKey.WARNING,
+    ),
+    _SpanCause(
         "causa-executor-nao-iniciou",
         "Executor não chegou a rodar em três tentativas ou mais nos últimos 10 min: as Runs "
         "terminam em INFRA_POISON. São duas causas, e o log do worker diz qual. O executor-ctl "
@@ -313,6 +327,16 @@ SPAN_CAUSES: tuple[_SpanCause, ...] = (
         period_minutes=10,
         silence_minutes=60,
         destination=DestinationKey.URGENT,
+    ),
+    _SpanCause(
+        "causa-google-sem-auth-time",
+        "Login no Google sem auth_time: a recência da sessão cai na hora do callback, e um "
+        "navegador já logado no Google abre DELETE /me e a emissão de chave sem senha. Ligue "
+        "Session age claims no Google Auth Platform (ADR 065); veja o runbook em "
+        "deploy/openobserve/README.md.",
+        period_minutes=10,
+        silence_minutes=180,
+        destination=DestinationKey.WARNING,
     ),
     _SpanCause(
         "causa-api-saturada",
