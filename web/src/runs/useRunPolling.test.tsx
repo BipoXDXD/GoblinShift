@@ -140,17 +140,54 @@ describe("useRunPolling", () => {
     expect(requestCount()).toBe(2);
   });
 
-  it("fica parado com a aba oculta e consulta ao voltar se a espera já passou", async () => {
+  it("segue consultando com a aba escondida, no mínimo a cada 10 s", async () => {
     const { client, requestCount } = fakeClient([
       () => ({ run: run("running", "processing"), retryAfterMs: 2_000 }),
     ]);
-    setup(client);
-    await advance(0);
-
     act(() => {
       focusManager.setFocused(false);
     });
+    setup(client);
+    await advance(0);
+    expect(requestCount()).toBe(1);
+
+    await advance(9_999);
+    expect(requestCount()).toBe(1);
+
+    await advance(1);
+    expect(requestCount()).toBe(2);
     await advance(10_000);
+    expect(requestCount()).toBe(3);
+  });
+
+  it("com a aba escondida, o Retry-After maior que 10 s continua mandando", async () => {
+    const { client, requestCount } = fakeClient([
+      () => ({ run: run("queued"), retryAfterMs: 15_000 }),
+    ]);
+    act(() => {
+      focusManager.setFocused(false);
+    });
+    setup(client);
+    await advance(0);
+
+    await advance(14_999);
+    expect(requestCount()).toBe(1);
+
+    await advance(1);
+    expect(requestCount()).toBe(2);
+  });
+
+  it("consulta ao voltar para a aba se a espera já passou", async () => {
+    const { client, requestCount } = fakeClient([
+      () => ({ run: run("running", "processing"), retryAfterMs: 2_000 }),
+    ]);
+    act(() => {
+      focusManager.setFocused(false);
+    });
+    setup(client);
+    await advance(0);
+
+    await advance(5_000);
     expect(requestCount()).toBe(1);
 
     act(() => {

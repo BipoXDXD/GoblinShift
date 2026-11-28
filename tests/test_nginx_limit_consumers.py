@@ -11,6 +11,8 @@ import json
 import re
 from pathlib import Path
 
+from tests.test_coolify_healthchecks import _probed_path
+
 ROOT = Path(__file__).resolve().parent.parent
 NGINX_TEMPLATE = ROOT / "docker" / "nginx" / "templates" / "default.conf.template"
 SCENARIOS = ROOT / "deploy" / "load" / "scenarios"
@@ -76,10 +78,20 @@ def test_prova_de_troca_sem_queda_consulta_abaixo_do_limite_do_readyz() -> None:
     assert 1 / float(match.group(1)) <= _zone_rate_per_second("readyz")
 
 
-def test_healthcheck_do_nginx_consulta_abaixo_do_limite_do_readyz() -> None:
-    """O healthcheck do Nginx consulta o próprio `/readyz`, de 127.0.0.1."""
+def test_healthcheck_do_nginx_consulta_abaixo_do_limite_da_location_sondada() -> None:
+    """O healthcheck do Nginx consulta o próprio proxy, de 127.0.0.1, a cada intervalo.
+
+    Vale para a location que ele sonda: se ela tiver `limit_req`, o ritmo da sonda cabe na zona;
+    sem `limit_req`, não há limite a respeitar.
+    """
     nginx = json.loads(COOLIFY_APP.read_text(encoding="utf-8"))["services"]["nginx"]
     interval = re.fullmatch(r"(\d+)s", nginx["healthcheck"]["interval"])
     assert interval is not None
+    path = _probed_path(nginx)
+    template = NGINX_TEMPLATE.read_text(encoding="utf-8")
+    block = re.search(rf"location = {re.escape(path)} \{{(.*?)\}}", template, flags=re.DOTALL)
+    assert block is not None, f"template sem location = {path}"
 
-    assert 1 / int(interval.group(1)) <= _zone_rate_per_second("readyz")
+    zone = re.search(r"limit_req zone=(\w+)", block.group(1))
+    if zone is not None:
+        assert 1 / int(interval.group(1)) <= _zone_rate_per_second(zone.group(1))

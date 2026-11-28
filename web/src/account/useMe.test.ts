@@ -43,6 +43,28 @@ describe("refreshAccountOn", () => {
     expect(invalidate).toHaveBeenCalledWith({ queryKey: ME_QUERY_KEY, refetchType: "active" });
   });
 
+  it("401 de outra leitura esquece os dados da conta antes de reler o /me", () => {
+    const { client, invalidate } = spyClient();
+    client.setQueryData(["runs", "recent"], { data: ["run-de-A"] });
+    invalidate.mockImplementation(() => {
+      expect(client.getQueryData(["runs", "recent"])).toBeUndefined();
+      return Promise.resolve();
+    });
+
+    refreshAccountOn(client)(problemError("AUTHENTICATION_REQUIRED", 401), ["runs", "recent"]);
+
+    expect(invalidate).toHaveBeenCalledTimes(1);
+  });
+
+  it("TERMS_NOT_ACCEPTED não esquece os dados da conta", () => {
+    const { client } = spyClient();
+    client.setQueryData(["runs", "recent"], { data: ["run-de-A"] });
+
+    refreshAccountOn(client)(problemError("TERMS_NOT_ACCEPTED", 403), ["runs", "recent"]);
+
+    expect(client.getQueryData(["runs", "recent"])).toEqual({ data: ["run-de-A"] });
+  });
+
   it("falha de uma ação (sem queryKey) também relê o /me", () => {
     const { client, invalidate } = spyClient();
 

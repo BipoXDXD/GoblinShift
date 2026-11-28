@@ -1,14 +1,13 @@
 import { Check, Copy, TriangleAlert } from "lucide-react";
-import { useEffect, useId, useRef, useState, type ReactElement } from "react";
+import { useEffect, useId, useRef, type ReactElement } from "react";
 
 import { LiveRegion } from "../components/a11y/LiveRegion";
 import { Button } from "../components/ui/Button";
 import { TEXT } from "../text";
 import type { CreatedApiKey } from "./api";
+import { useCopyToClipboard } from "./useCopyToClipboard";
 
 const T = TEXT.account.keys;
-
-type CopyState = "idle" | "copied" | "failed";
 
 interface NewKeyRevealProps {
   readonly apiKey: CreatedApiKey;
@@ -25,20 +24,10 @@ export function NewKeyReveal({ apiKey, onDone }: NewKeyRevealProps): ReactElemen
   const fieldId = useId();
   const warningId = useId();
   const heading = useRef<HTMLHeadingElement>(null);
-  const [copy, setCopy] = useState<CopyState>("idle");
+  const { state: copy, copy: copyText } = useCopyToClipboard();
   useEffect(() => {
     heading.current?.focus();
   }, []);
-
-  const copyToken = async (): Promise<void> => {
-    try {
-      await navigator.clipboard.writeText(apiKey.token);
-      setCopy("copied");
-    } catch {
-      // Sem permissão ou sem a API de área de transferência: o campo continua selecionável.
-      setCopy("failed");
-    }
-  };
 
   return (
     <section
@@ -70,7 +59,7 @@ export function NewKeyReveal({ apiKey, onDone }: NewKeyRevealProps): ReactElemen
         />
       </div>
       <div className="flex flex-col gap-3 sm:flex-row">
-        <Button type="button" variant="secondary" onClick={() => void copyToken()}>
+        <Button type="button" variant="secondary" onClick={() => void copyText(apiKey.token)}>
           {copy === "copied" ? (
             <Check aria-hidden="true" className="size-4" />
           ) : (
@@ -82,18 +71,8 @@ export function NewKeyReveal({ apiKey, onDone }: NewKeyRevealProps): ReactElemen
           {T.done}
         </Button>
       </div>
-      <LiveRegion message={copyMessage(copy)} />
+      <LiveRegion message={copy === "copied" ? T.copied : null} />
+      <LiveRegion message={copy === "failed" ? T.copyFailed : null} politeness="assertive" />
     </section>
   );
-}
-
-function copyMessage(state: CopyState): string | null {
-  switch (state) {
-    case "idle":
-      return null;
-    case "copied":
-      return T.copied;
-    case "failed":
-      return T.copyFailed;
-  }
 }

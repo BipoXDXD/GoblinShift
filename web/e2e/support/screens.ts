@@ -198,6 +198,24 @@ export const SCREENS: readonly Screen[] = [
     },
     "Em andamento",
   ),
+  {
+    // O toggle ligado (D3): a escolha salva e a permissão dada, sem o diálogo do navegador.
+    name: "Execução em andamento com aviso",
+    open: async (page: Page, api: FakeApi): Promise<void> => {
+      await page.addInitScript(() => {
+        window.localStorage.setItem("gs-run-alerts", "on");
+        Object.defineProperty(Notification, "permission", { get: () => "granted" });
+      });
+      await new ExecucaoPage(page).open(
+        api.seedRun({
+          status: "running",
+          deadline_at: LATER,
+          progress: { phase: "processing", processed: 1, total: 3 },
+        }),
+      );
+      await expect(page.getByRole("button", { name: "Aviso ligado" })).toBeVisible();
+    },
+  },
   runScreen(
     "Execução concluída",
     { status: "succeeded", progress: { phase: null, processed: 2, total: 2 } },

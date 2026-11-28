@@ -11,19 +11,21 @@ interface RenderRoutesOptions {
   readonly client: ApiClient;
   /** Entradas antes de `path` no histórico, para testar o Voltar. */
   readonly visited?: readonly string[];
+  /** Outro QueryClient, como o do app (`createAppQueryClient`); por padrão, um sem retry. */
+  readonly queryClient?: QueryClient;
 }
 
-/** Renderiza as rotas num router em memória, com o cliente da API e um QueryClient novos. */
+/** Renderiza as rotas num router em memória, com o cliente da API e um QueryClient novo. */
 export function renderRoutes({
   routes,
   path,
   client,
   visited = [],
+  queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } }),
 }: RenderRoutesOptions): RenderResult & {
   readonly router: ReturnType<typeof createMemoryRouter>;
   readonly queryClient: QueryClient;
 } {
-  const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
   const router = createMemoryRouter(routes, {
     initialEntries: [...visited, path],
     initialIndex: visited.length,
