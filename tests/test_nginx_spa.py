@@ -87,7 +87,7 @@ def _yaml(path: Path) -> Any:
 def test_estagio_node_do_build_e_fixado_por_digest() -> None:
     texto = DOCKERFILE.read_text()
     assert re.search(
-        r"^FROM node:24\.\d+\.\d+-trixie-slim@sha256:[0-9a-f]{64} AS build$", texto, re.MULTILINE
+        r"^FROM node:26\.\d+\.\d+-trixie-slim@sha256:[0-9a-f]{64} AS build$", texto, re.MULTILINE
     )
 
 
