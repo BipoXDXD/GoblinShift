@@ -116,6 +116,25 @@ def test_preset_do_detox_executa_com_os_parametros_guardados(
     assert stored_run(factory, response.json()["id"]).recipe_id == "downloads-detox"
 
 
+def test_preset_v1_abre_e_executa_depois_da_v2(
+    client: TestClient, factory: sessionmaker[Session], storage: FileStorage
+) -> None:
+    # Com a v2 do Detox publicada, a v1 fica deprecated: o preset salvo nela continua abrindo e
+    # rodando como v1 até o Sunset, e as respostas avisam a data (1.6, ADR 067).
+    account = Account(factory)
+    sunset = "Thu, 01 Apr 2027 00:00:00 GMT"
+    preset = create_preset(client, account, "downloads-detox", name_mode="indexed")
+
+    opened = client.get(f"{PRESETS}/{preset['id']}", headers=account.headers)
+    response = run_preset(client, account, preset["id"], ready_inputs(factory, storage, account.id))
+
+    assert opened.status_code == 200, opened.text
+    assert (opened.json()["recipe_version"], opened.headers["sunset"]) == (1, sunset)
+    assert response.status_code == 202, response.text
+    assert (response.json()["recipe_version"], response.headers["sunset"]) == (1, sunset)
+    assert stored_run(factory, response.json()["id"]).parameters["name_mode"] == "indexed"
+
+
 def test_replay_com_a_mesma_chave_devolve_a_mesma_execucao(
     client: TestClient, factory: sessionmaker[Session], storage: FileStorage
 ) -> None:

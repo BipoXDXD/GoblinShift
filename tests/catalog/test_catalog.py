@@ -474,3 +474,8 @@ def test_detox_v1_fica_deprecated_e_v2_e_a_atual_com_os_mesmos_limites() -> None
 
 def test_detox_v2_resolve_os_mesmos_defaults_da_v1() -> None:
     assert CATALOG.resolve("downloads-detox", 2, {}) == CATALOG.resolve("downloads-detox", 1, {})
+
+
+def test_sunset_de_merge_que_cai_em_dezembro_vira_o_ano() -> None:
+    # 15/09 + 90 dias = 14/12: o mês seguinte é janeiro do ano seguinte.
+    assert sunset_after_merge(date(2026, 9, 15)) == datetime(2027, 1, 1, tzinfo=UTC)
