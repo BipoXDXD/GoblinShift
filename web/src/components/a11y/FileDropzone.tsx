@@ -1,9 +1,24 @@
-import { Upload } from "lucide-react";
-import { useState, type ChangeEvent, type DragEvent, type ReactElement } from "react";
+import { FolderOpen, Upload } from "lucide-react";
+import {
+  useEffect,
+  useRef,
+  useState,
+  type ChangeEvent,
+  type DragEvent,
+  type ReactElement,
+} from "react";
 
 import { TEXT } from "../../text";
+import {
+  collectEntries,
+  folderEntries,
+  pickFromFolderInput,
+  supportsFolderPicker,
+  type FolderPick,
+} from "../../workbench/folderFiles";
 import { buttonClassName } from "../ui/Button";
 import { FieldError } from "./Field";
+import { LiveRegion } from "./LiveRegion";
 
 interface FileDropzoneProps {
   readonly id: string;
@@ -15,6 +30,16 @@ interface FileDropzoneProps {
   /** Quantos arquivos já estão na Bancada; o texto ao lado do botão diz isso em pt-BR. */
   readonly chosenCount: number;
   readonly onFiles: (files: readonly File[]) => void;
+  /**
+   * Pasta inteira: o botão "Escolher pasta" (onde o navegador tem `webkitdirectory`) e a pasta
+   * solta sobre a área chegam em `onPick` já filtradas e conferidas contra `maxFiles`.
+   */
+  readonly folder?: {
+    readonly maxFiles: number;
+    readonly onPick: (pick: FolderPick) => void;
+  };
+  /** Resultado da última escolha (por exemplo, o que ficou de fora), anunciado e visível. */
+  readonly notice?: string | null;
 }
 
 /**
@@ -33,8 +58,29 @@ export function FileDropzone({
   accept,
   chosenCount,
   onFiles,
+  folder,
+  notice = null,
 }: FileDropzoneProps): ReactElement {
   const [dragging, setDragging] = useState(false);
+  const [folderPicker] = useState(supportsFolderPicker);
+  const folderInput = useRef<HTMLInputElement>(null);
+  const mounted = useRef(true);
+  const latestFolder = useRef(folder);
+  useEffect(() => {
+    latestFolder.current = folder;
+  });
+  useEffect(() => {
+    mounted.current = true;
+    return () => {
+      mounted.current = false;
+    };
+  }, []);
+  // O React não conhece o atributo `webkitdirectory`; a propriedade do DOM é a mesma coisa.
+  useEffect(() => {
+    if (folderInput.current !== null) {
+      folderInput.current.webkitdirectory = true;
+    }
+  });
   const descriptionId = description === undefined ? null : `${id}-descricao`;
   const errorId = error === undefined || error === null || error === "" ? null : `${id}-erro`;
   const statusId = `${id}-estado`;
@@ -50,6 +96,15 @@ export function FileDropzone({
     }
   };
 
+  const onFolderChange = (event: ChangeEvent<HTMLInputElement>): void => {
+    const input = event.currentTarget;
+    const files = Array.from(input.files ?? []);
+    input.value = "";
+    if (folder !== undefined && files.length > 0) {
+      folder.onPick(pickFromFolderInput(files, folder.maxFiles));
+    }
+  };
+
   const onDragOver = (event: DragEvent<HTMLDivElement>): void => {
     if (carriesFiles(event)) {
       event.preventDefault();
@@ -60,6 +115,17 @@ export function FileDropzone({
   const onDrop = (event: DragEvent<HTMLDivElement>): void => {
     event.preventDefault();
     setDragging(false);
+    // Os itens só valem durante o evento: as entradas saem daqui antes de qualquer espera.
+    const roots = folder === undefined ? null : folderEntries(event.dataTransfer.items);
+    if (folder !== undefined && roots !== null) {
+      void collectEntries(roots, folder.maxFiles).then((pick) => {
+        // O poço pode ter saído enquanto a pasta era lida: nada de envio de uma tela que já fechou.
+        if (mounted.current) {
+          latestFolder.current?.onPick(pick);
+        }
+      });
+      return;
+    }
     const files = Array.from(event.dataTransfer.files);
     if (files.length > 0) {
       onFiles(files);
@@ -100,9 +166,27 @@ export function FileDropzone({
             onChange={onChange}
           />
         </label>
+        {folder !== undefined && folderPicker && (
+          <label className={`file-picker relative ${buttonClassName({ variant: "secondary" })}`}>
+            <FolderOpen aria-hidden="true" className="size-4" />
+            {TEXT.workbench.chooseFolder}
+            <input
+              ref={folderInput}
+              id={`${id}-pasta`}
+              type="file"
+              multiple
+              className="sr-only"
+              aria-describedby={describedBy.join(" ")}
+              onChange={onFolderChange}
+            />
+          </label>
+        )}
         <p id={statusId} className="text-sm text-fg-muted">
           {TEXT.workbench.filesChosen(chosenCount)}
         </p>
+      </div>
+      <div className="text-sm text-fg">
+        <LiveRegion message={notice} />
       </div>
       {dragging && (
         // Só quem arrasta com o mouse vê a dica; o leitor de tela usa o input.

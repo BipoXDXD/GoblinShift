@@ -194,6 +194,22 @@ export const TEXT = {
     pasteTooMany: (count: number, max: number) =>
       `Você colou ${String(count)} arquivos; esta receita aceita até ${String(max)} por execução. Nada foi enviado: cole menos arquivos de cada vez.`,
     dropHere: "Solte para adicionar.",
+    chooseFolder: "Escolher pasta",
+    folderAdded: (count: number) =>
+      count === 1
+        ? "1 arquivo da pasta adicionado."
+        : `${String(count)} arquivos da pasta adicionados.`,
+    folderTooBig: (max: number) =>
+      `A pasta tem mais de ${String(max)} arquivos; esta receita aceita até ${String(max)} por execução. Nada foi enviado: escolha uma pasta menor ou os arquivos um a um.`,
+    folderEmpty: "A pasta não tem arquivos para enviar.",
+    folderSkipped: (count: number) =>
+      count === 1
+        ? "1 item oculto ou de sistema ficou de fora."
+        : `${String(count)} itens ocultos ou de sistema ficaram de fora.`,
+    folderUnreadable: (count: number) =>
+      count === 1
+        ? "1 item não pôde ser lido e ficou de fora."
+        : `${String(count)} itens não puderam ser lidos e ficaram de fora.`,
     filesChosen: (count: number) =>
       count === 0
         ? "Nenhum arquivo escolhido"

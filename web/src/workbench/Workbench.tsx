@@ -45,6 +45,7 @@ import { orderEntries, runInputs, uploadAnnouncement, type RunInputs } from "./i
 import { DeletionFailures } from "./DeletionFailures";
 import { SavePreset } from "./SavePreset";
 import { UpdatePreset } from "./UpdatePreset";
+import type { FolderPick } from "./folderFiles";
 import { UploadEntryView } from "./UploadEntryView";
 import { usePasteFiles } from "./usePasteFiles";
 
@@ -52,7 +53,7 @@ const FILES_FIELD_ID = "bancada-arquivos";
 // O resumo de erros cita o campo de arquivos pelo título da seção, não pelo botão de escolher.
 const FILES_FIELD: FormField = { fieldId: FILES_FIELD_ID, label: TEXT.workbench.filesHeading };
 
-/** Resultado de uma colagem: anúncio do que entrou ou recusa visível no campo de arquivos. */
+/** Resultado de uma colagem ou pasta: o que entrou e ficou de fora, ou a recusa no campo. */
 type PickNotice =
   | { readonly tone: "info"; readonly message: string }
   | { readonly tone: "error"; readonly message: string };
@@ -172,7 +173,36 @@ export function Workbench({
     setPickNotice({ tone: "info", message: TEXT.workbench.pasted(files.length) });
     batch.add(files);
   };
-  usePasteFiles(pendingRemoval === null && !mutation.isPending, pasteFiles);
+
+  const receiveFolder = (pick: FolderPick, pasted: boolean): void => {
+    const max = form.inputLimits.maxInputs;
+    if (pick.overflow) {
+      setPickNotice({ tone: "error", message: TEXT.workbench.folderTooBig(max) });
+      return;
+    }
+    const added = pasted ? TEXT.workbench.pasted : TEXT.workbench.folderAdded;
+    const message = [
+      pick.files.length === 0 ? TEXT.workbench.folderEmpty : added(pick.files.length),
+      ...(pick.skippedHidden > 0 ? [TEXT.workbench.folderSkipped(pick.skippedHidden)] : []),
+      ...(pick.skippedUnreadable > 0
+        ? [TEXT.workbench.folderUnreadable(pick.skippedUnreadable)]
+        : []),
+    ].join(" ");
+    if (pick.files.length === 0) {
+      setPickNotice({ tone: "error", message });
+      return;
+    }
+    setPickNotice({ tone: "info", message });
+    batch.add(pick.files);
+  };
+
+  usePasteFiles(pendingRemoval === null && !mutation.isPending, {
+    maxFiles: form.inputLimits.maxInputs,
+    onFiles: pasteFiles,
+    onFolder: (pick) => {
+      receiveFolder(pick, true);
+    },
+  });
   const pickError = pickNotice?.tone === "error" ? pickNotice.message : null;
 
   const onSubmit = (event: SubmitEvent<HTMLFormElement>): void => {
@@ -219,6 +249,13 @@ export function Workbench({
               error={fieldErrors.get(FILES_FIELD_ID) ?? pickError}
               chosenCount={entries.length}
               onFiles={chooseFiles}
+              folder={{
+                maxFiles: form.inputLimits.maxInputs,
+                onPick: (pick) => {
+                  receiveFolder(pick, false);
+                },
+              }}
+              notice={pickNotice?.tone === "info" ? pickNotice.message : null}
             />
             {entries.length === 0 ? (
               <EmptyState
@@ -262,8 +299,8 @@ export function Workbench({
             )}
             <DeletionFailures failures={batch.failedDeletions} onRetry={batch.retryDeletions} />
             <LiveRegion message={announcement} visuallyHidden />
-            {/* A recusa fica visível no campo; aqui ela e o "colado" são só anunciados. */}
-            <LiveRegion message={pickNotice?.message ?? null} visuallyHidden />
+            {/* A recusa fica visível no campo de arquivos; aqui ela só é anunciada. */}
+            <LiveRegion message={pickError} visuallyHidden />
           </section>
           <div className="flex flex-col gap-6 lg:w-112 lg:flex-none">
             <Card as="section" aria-labelledby={parametersHeadingId}>
