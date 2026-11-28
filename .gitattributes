@@ -3,3 +3,5 @@ tests/csv_janitor/fixtures/** -text
 # Contrato exportado da API e tipos gerados dele (fatia 7): não se editam à mão.
 web/openapi/openapi.json linguist-generated
 web/src/api/schema.d.ts linguist-generated
+# Amostras da Bancada (scripts/make_samples.py): bytes exatos, conferidos pelo gerador.
+web/src/workbench/samples/** -text
