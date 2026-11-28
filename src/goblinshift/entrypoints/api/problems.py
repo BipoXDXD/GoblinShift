@@ -294,6 +294,16 @@ class ApiProblem(Exception):  # noqa: N818
         return PROBLEMS[self.code].status
 
 
+def session_no_longer_valid_problem() -> ApiProblem:
+    """401 da credencial aceita na autenticação que deixou de valer antes da escrita.
+
+    Bloqueio, exclusão ou logout confirmado entre a autenticação e a transação da rota.
+    """
+    return ApiProblem(
+        ProblemCode.AUTHENTICATION_REQUIRED, "A sessão não vale mais para esta conta."
+    )
+
+
 def _require_retry_after(code: ProblemCode, headers: Mapping[str, str] | None) -> None:
     if PROBLEMS[code].status not in _RETRY_AFTER_STATUSES:
         return

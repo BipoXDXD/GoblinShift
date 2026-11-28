@@ -23,7 +23,7 @@ from goblinshift.entrypoints.api.dependencies import (
     RunFinished,
     Storage,
 )
-from goblinshift.entrypoints.api.problems import ApiProblem, ProblemCode
+from goblinshift.entrypoints.api.problems import session_no_longer_valid_problem
 from goblinshift.identity import (
     AuditEventType,
     AuditOutcome,
@@ -60,9 +60,7 @@ def delete_me(
                 now=now,
             )
     except UnknownAccountError:
-        raise ApiProblem(
-            ProblemCode.AUTHENTICATION_REQUIRED, "A sessão não vale mais para esta conta."
-        ) from None
+        raise session_no_longer_valid_problem() from None
     # O cancelamento abre as próprias transações curtas; por isso recebe a fábrica de Sessions.
     factory: sessionmaker[Session] = request.app.state.session_factory
     cancel_active_run(factory, storage, principal.owner_id, on_finished=finished.report)

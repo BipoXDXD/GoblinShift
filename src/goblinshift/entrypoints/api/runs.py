@@ -47,6 +47,7 @@ from goblinshift.entrypoints.api.problems import (
     ApiProblem,
     ProblemCode,
     problem_responses,
+    session_no_longer_valid_problem,
 )
 from goblinshift.entrypoints.api.wide_event import record_run_accepted
 from goblinshift.files.errors import InputNotAvailableError
@@ -503,9 +504,7 @@ def _accept(
         raise environment_storage_problem() from None
     except UnknownAccountError:
         # Bloqueio ou exclusão chegou depois da autenticação: a credencial deixou de valer.
-        raise ApiProblem(
-            ProblemCode.AUTHENTICATION_REQUIRED, "A sessão não vale mais para esta conta."
-        ) from None
+        raise session_no_longer_valid_problem() from None
     return _respond_accepted(owner_id, accepted, session, request, response)
 
 

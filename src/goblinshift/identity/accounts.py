@@ -331,10 +331,12 @@ def lock_active_account(session: Session, owner_id: UUID) -> None:
 
     Quem cria recurso da conta (Run, upload, preset) chama isto dentro da própria transação: o
     Principal foi lido noutra, e o bloqueio ou o pedido de exclusão pode ter sido confirmado entre
-    as duas. O `FOR SHARE` espera o `UPDATE` de `block_account`, `request_account_deletion` e do
-    `logout-all` (`sessions.revoke_all_credentials`) e, depois do commit deles, relê a linha e a
-    recusa; o `FOR KEY SHARE` das FKs para a conta não conflita com ele. Conta que não existe,
-    bloqueada, pendente ou com exclusão pedida levanta `UnknownAccountError`.
+    as duas. O `FOR SHARE` espera o `UPDATE` de `block_account` e de `request_account_deletion` e,
+    depois do commit deles, relê a linha e a recusa. Também espera o `FOR NO KEY UPDATE` do
+    `logout-all` (`sessions.revoke_all_credentials`), mas este não muda `status` nem
+    `deletion_requested_at`: depois do commit dele, a chamada passa. O `FOR KEY SHARE` das FKs
+    para a conta não conflita com ele. Conta que não existe, bloqueada, pendente ou com exclusão
+    pedida levanta `UnknownAccountError`.
     """
     account = session.execute(
         select(app_user.c.id)
