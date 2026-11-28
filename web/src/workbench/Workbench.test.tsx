@@ -1,4 +1,4 @@
-import { act, screen, waitFor, within } from "@testing-library/react";
+import { act, fireEvent, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { describe, expect, it } from "vitest";
 import { z } from "zod";
@@ -1003,5 +1003,127 @@ describe("Bancada do PDF Press", () => {
       operation: "select",
       select: [{ upload_id: uploadIdFor(2), page_number: 1 }],
     });
+  });
+});
+
+/** Área de transferência falsa: o jsdom não tem `DataTransfer`. */
+function clipboard(files: readonly File[], text: string | null = null) {
+  const types = [...(files.length > 0 ? ["Files"] : []), ...(text === null ? [] : ["text/plain"])];
+  return {
+    files,
+    types,
+    items: [],
+    getData: (type: string) => (type === "text/plain" ? (text ?? "") : ""),
+  };
+}
+
+function uploadIntents(requests: readonly Request[]): Request[] {
+  return requests.filter(
+    (request) => request.method === "POST" && new URL(request.url).pathname === "/api/v1/uploads",
+  );
+}
+
+describe("Bancada: colar arquivos", () => {
+  it("diz que dá para colar com Ctrl+V", async () => {
+    await setup();
+
+    expect(screen.getByLabelText("Escolher arquivos")).toHaveAccessibleDescription(
+      /colar com Ctrl\+V \(⌘V no Mac\)/,
+    );
+  });
+
+  it("colar arquivos adiciona à lista e anuncia", async () => {
+    await setup();
+
+    const notPrevented = fireEvent.paste(document, {
+      clipboardData: clipboard([csv("a.csv"), csv("b.csv")]),
+    });
+
+    expect(notPrevented).toBe(false);
+    await waitUntilSent(2);
+    expect(screen.getByRole("list", { name: "Ordem de processamento" })).toHaveTextContent(
+      /a\.csv.*b\.csv/,
+    );
+    expect(
+      screen.getAllByRole("status").some((region) => region.textContent === "2 arquivos colados."),
+    ).toBe(true);
+  });
+
+  it("a imagem colada ganha nome próprio, que não se repete na sessão", async () => {
+    await setup({ recipe: "image-forge" });
+    const print = () => new File(["png"], "image.png", { type: "image/png" });
+
+    fireEvent.paste(document, { clipboardData: clipboard([print()]) });
+    fireEvent.paste(document, { clipboardData: clipboard([print()]) });
+
+    await waitUntilSent(2);
+    const list = screen.getByRole("list", { name: "Ordem de processamento" });
+    expect(list).toHaveTextContent("colado-1.png");
+    expect(list).toHaveTextContent("colado-2.png");
+  });
+
+  it("colar texto num campo não adiciona arquivo", async () => {
+    const { user, api } = await setup();
+    await user.click(screen.getByRole("button", { name: "Salvar preset" }));
+    const name = screen.getByRole("textbox", { name: "Nome do preset" });
+
+    const notPrevented = fireEvent.paste(name, { clipboardData: clipboard([], "Meu preset") });
+
+    expect(notPrevented).toBe(true);
+    expect(uploadIntents(api.requests)).toHaveLength(0);
+    expect(screen.getByText("Nenhum arquivo escolhido")).toBeInTheDocument();
+  });
+
+  it("colar num campo com texto e arquivo juntos fica com o texto", async () => {
+    const { api } = await setup();
+    const columns = screen.getByRole("textbox", { name: "Colunas finais, na ordem" });
+
+    const notPrevented = fireEvent.paste(columns, {
+      clipboardData: clipboard([csv("planilha.csv")], "nome,email"),
+    });
+
+    expect(notPrevented).toBe(true);
+    expect(uploadIntents(api.requests)).toHaveLength(0);
+  });
+
+  it("colar arquivo com um diálogo aberto não mexe na Bancada atrás dele", async () => {
+    const { user, api } = await setup();
+    await user.click(screen.getByRole("button", { name: "Salvar preset" }));
+    const name = screen.getByRole("textbox", { name: "Nome do preset" });
+
+    const notPrevented = fireEvent.paste(name, { clipboardData: clipboard([csv("a.csv")]) });
+
+    expect(notPrevented).toBe(true);
+    expect(uploadIntents(api.requests)).toHaveLength(0);
+  });
+
+  it("colar mais arquivos que o teto avisa sem enviar nenhum", async () => {
+    const { api } = await setup();
+    const six = ["1", "2", "3", "4", "5", "6"].map((n) => csv(`${n}.csv`));
+
+    fireEvent.paste(document, { clipboardData: clipboard(six) });
+
+    const message =
+      "Você colou 6 arquivos; esta receita aceita até 5 por execução. Nada foi enviado: cole menos arquivos de cada vez.";
+    await waitFor(() => {
+      expect(screen.getAllByRole("status").some((region) => region.textContent === message)).toBe(
+        true,
+      );
+    });
+    expect(screen.getByLabelText("Escolher arquivos")).toHaveAccessibleDescription(
+      expect.stringContaining(message),
+    );
+    expect(uploadIntents(api.requests)).toHaveLength(0);
+    expect(screen.getByText("Nenhum arquivo escolhido")).toBeInTheDocument();
+  });
+
+  it("colar fora da Bancada não faz nada", async () => {
+    const { api, unmount } = await setup();
+    unmount();
+
+    const notPrevented = fireEvent.paste(document, { clipboardData: clipboard([csv("a.csv")]) });
+
+    expect(notPrevented).toBe(true);
+    expect(uploadIntents(api.requests)).toHaveLength(0);
   });
 });

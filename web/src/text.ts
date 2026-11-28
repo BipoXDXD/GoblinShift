@@ -187,7 +187,12 @@ export const TEXT = {
     backHome: "Oficina",
     filesHeading: "Arquivos de entrada",
     chooseFiles: "Escolher arquivos",
-    chooseFilesHint: "Pode escolher vários de uma vez, ou soltar os arquivos aqui.",
+    chooseFilesHint:
+      "Pode escolher vários de uma vez, soltar aqui ou colar com Ctrl+V (⌘V no Mac).",
+    pasted: (count: number) =>
+      count === 1 ? "1 arquivo colado." : `${String(count)} arquivos colados.`,
+    pasteTooMany: (count: number, max: number) =>
+      `Você colou ${String(count)} arquivos; esta receita aceita até ${String(max)} por execução. Nada foi enviado: cole menos arquivos de cada vez.`,
     dropHere: "Solte para adicionar.",
     filesChosen: (count: number) =>
       count === 0
