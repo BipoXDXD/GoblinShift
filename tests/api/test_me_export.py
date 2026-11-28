@@ -11,15 +11,18 @@ from uuid import UUID
 import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
-from sqlalchemy import select, update
+from sqlalchemy import select, text, update
 from sqlalchemy.orm import Session, sessionmaker
 
+from goblinshift.entrypoints.api import me_export
 from goblinshift.entrypoints.api.dependencies import current_time
 from goblinshift.identity import AuditEventType, AuditOutcome, record_audit_event
+from goblinshift.identity.accounts import MAX_LISTED_KEYS, issue_key
+from goblinshift.identity.principal import Scope
 from goblinshift.identity.tables import api_key, app_user, web_session
 from goblinshift.platform.db import unit_of_work
 from goblinshift.presets.drafts import parse_draft
-from goblinshift.presets.store import create_preset
+from goblinshift.presets.store import create_preset, list_presets
 from tests.api.files_support import bearer
 from tests.api.session_support import open_session, session_headers
 from tests.api.support import assert_problem
@@ -226,3 +229,42 @@ def test_exportacao_vale_sem_o_aceite_dos_termos_vigentes(
     response = client.get(EXPORT, headers=signed_in(app, owner))
 
     assert response.status_code == 200, response.text
+
+
+def test_exportacao_le_tudo_numa_transacao_repeatable_read_somente_leitura(
+    app: FastAPI,
+    client: TestClient,
+    factory: sessionmaker[Session],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A última leitura (presets) pergunta ao Postgres o modo da transação em que roda."""
+    owner = new_user(factory)
+    seen: list[tuple[str, str]] = []
+
+    def spy(session: Session, owner_id: UUID) -> Any:
+        isolation = session.execute(text("SHOW transaction_isolation")).scalar_one()
+        read_only = session.execute(text("SHOW transaction_read_only")).scalar_one()
+        seen.append((isolation, read_only))
+        return list_presets(session, owner_id)
+
+    monkeypatch.setattr(me_export, "list_presets", spy)
+
+    response = client.get(EXPORT, headers=signed_in(app, owner))
+
+    assert response.status_code == 200, response.text
+    assert seen == [("repeatable read", "on")]
+
+
+def test_exportacao_traz_todas_as_chaves_acima_do_teto_da_listagem(
+    app: FastAPI, client: TestClient, factory: sessionmaker[Session]
+) -> None:
+    """O `gs-admin issue-key` não passa pelo teto da sessão; a exportação traz todas (art. 19)."""
+    owner = new_user(factory)
+    with unit_of_work(factory) as session:
+        for _ in range(MAX_LISTED_KEYS + 1):
+            issue_key(session, owner_id=owner, scopes=frozenset(Scope), now=NOW, days=30)
+
+    response = client.get(EXPORT, headers=signed_in(app, owner))
+
+    assert response.status_code == 200, response.text
+    assert len(response.json()["api_keys"]) == MAX_LISTED_KEYS + 1

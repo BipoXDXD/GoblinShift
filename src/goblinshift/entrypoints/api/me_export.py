@@ -138,7 +138,7 @@ def export_me(request: Request, principal: RecentSessionPrincipal, session: DbSe
         generated_at = db_now(session)
         account = find_account(session, owner_id)
         limits, usage = read_limits_and_usage(session, owner_id, defaults, include_active_run=True)
-        keys = list_keys(session, owner_id, generated_at)
+        keys = list_keys(session, owner_id, generated_at, limit=None)
         sessions = list_sessions(session, owner_id)
         events = list_audit_events(session, owner_id)
         runs = export_runs(session, owner_id)

@@ -51,6 +51,7 @@ export function ExportSection(): ReactElement {
             type="button"
             variant="secondary"
             aria-disabled={download.isPending}
+            aria-busy={download.isPending}
             onClick={() => {
               if (!download.isPending) {
                 download.mutate();

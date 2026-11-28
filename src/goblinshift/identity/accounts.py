@@ -466,8 +466,11 @@ def _issue_locked(
     )
 
 
-def list_keys(session: Session, owner_id: UUID, now: datetime) -> list[KeySummary]:
-    """Chaves da conta até `MAX_LISTED_KEYS`: ativas primeiro, depois das mais novas às antigas.
+def list_keys(
+    session: Session, owner_id: UUID, now: datetime, *, limit: int | None = MAX_LISTED_KEYS
+) -> list[KeySummary]:
+    """Chaves da conta até `limit` (`MAX_LISTED_KEYS` na tela): ativas primeiro, depois das mais
+    novas às antigas. `None` traz todas: a exportação da conta (art. 19) não corta nenhuma.
 
     Revogadas e vencidas ficam na tabela até `KEY_RETENTION` depois do fim. A emissão pela sessão
     para em `MAX_STORED_KEYS`, que cabe inteiro na lista, mas o `gs-admin issue-key` não passa por
@@ -489,7 +492,7 @@ def list_keys(session: Session, owner_id: UUID, now: datetime) -> list[KeySummar
         )
         .where(api_key.c.owner_id == owner_id)
         .order_by(is_inactive, api_key.c.created_at.desc(), api_key.c.id.desc())
-        .limit(MAX_LISTED_KEYS)
+        .limit(limit)
     ).all()
     return [
         KeySummary(

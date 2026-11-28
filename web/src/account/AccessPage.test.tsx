@@ -1101,6 +1101,23 @@ describe("Acesso: seus dados", () => {
     expect(sent(api.requests, "GET /api/v1/me/export")).toHaveLength(1);
   });
 
+  it("enquanto prepara, o botão fica ocupado e não repete o pedido", async () => {
+    const held = heldResponse();
+    const { api, user } = setup({ "GET /api/v1/me/export": held.handler });
+    const region = await section("Seus dados");
+
+    await user.click(within(region).getByRole("button", { name: "Baixar meus dados (JSON)" }));
+
+    const busy = await within(region).findByRole("button", { name: "Preparando…" });
+    expect(busy).toHaveAttribute("aria-busy", "true");
+    expect(busy).toHaveAttribute("aria-disabled", "true");
+    await user.click(busy);
+    held.answer(jsonResponse(EXPORTED));
+    const ready = await within(region).findByRole("button", { name: "Baixar meus dados (JSON)" });
+    expect(ready).not.toHaveAttribute("aria-busy", "true");
+    expect(sent(api.requests, "GET /api/v1/me/export")).toHaveLength(1);
+  });
+
   it("pede login recente no REAUTH_REQUIRED", async () => {
     const { user } = setup({
       "GET /api/v1/me/export": () => problemResponse(401, "REAUTH_REQUIRED"),
