@@ -164,6 +164,20 @@ def test_collapse_junta_espacos_internos_e_preserva_quebra_de_linha() -> None:
     assert output(table, params) == 'a,b\r\n"x y\r\nz",  k  \r\n'
 
 
+@pytest.mark.parametrize(
+    "line_break",
+    ["\x85", "\u2028", "\u2029", "\x0b", "\x0c", "\x1c", "\x1d", "\x1e", "\x1f"],
+    ids=["NEL", "LS", "PS", "VT", "FF", "FS", "GS", "RS", "US"],
+)
+def test_collapse_preserva_quebras_de_linha_unicode(line_break: str) -> None:
+    # str.splitlines() quebra a linha em cada um destes (e US separa registros): ficam como estão.
+    params = Params(collapse_whitespace_columns=("a",))
+
+    collapsed = output(f"a\r\nx  {line_break}  y\r\n", params)
+
+    assert collapsed == output(f"a\r\nx {line_break} y\r\n", Params())
+
+
 def test_collapse_troca_espaco_unicode_por_espaco_simples() -> None:
     params = Params(collapse_whitespace_columns=("a",))
 

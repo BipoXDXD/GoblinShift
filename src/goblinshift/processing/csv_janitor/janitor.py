@@ -33,8 +33,9 @@ WARNING_COLUMN_NAME_CHARS = 120
 _ELLIPSIS = "…"
 # Marca de UTF-8 que o Excel exige para não abrir a saída como Windows-1252.
 UTF8_BOM = "\ufeff".encode()
-# Espaço Unicode que não seja CR nem LF: as quebras de linha dentro do campo ficam.
-_INTERNAL_WHITESPACE = re.compile(r"[^\S\r\n]+")
+# Espaço Unicode que não quebre a linha: as quebras de `str.splitlines()` (CR, LF, VT, FF, FS,
+# GS, RS, NEL, LS, PS) e o US, separador de registro, ficam dentro do campo.
+_INTERNAL_WHITESPACE = re.compile(r"[^\S\r\n\x0b\x0c\x1c-\x1f\x85\u2028\u2029]+")
 
 _CASE: Mapping[CaseMode, Callable[[str], str]] = {
     # Operações Unicode do Python fixado, sem depender do locale do servidor.

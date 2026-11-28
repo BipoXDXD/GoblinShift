@@ -122,7 +122,7 @@ Como isso é feito com o Pillow está em [2.3](#s2-3).
 
 Os limites de campo e registro são contados em bytes UTF-8, na entrada e na saída. Exceder qualquer limite de tabela de 1.7 (tamanho, registros, colunas, registro ou campo) rejeita a tabela com `FIELD_LIMIT_EXCEEDED`, e o motivo diz qual limite foi; um arquivo que não é UTF-8 é rejeitado com `UNSUPPORTED_FORMAT`. Os filtros mantêm os registros que satisfazem todos os predicados. `trim_columns` remove das pontas qualquer espaço Unicode (`str.strip`).
 
-**Versão 2** ([ADR 067](adr/067-primeiras-versoes-2-das-receitas.md)): acrescenta `input_encoding` (`utf-8`, `windows-1252` ou `latin-1`, declarada e nunca adivinhada; byte inválido para a codificação recusa a tabela com `UNSUPPORTED_FORMAT`), `output_bom` (BOM do UTF-8 antes do cabeçalho, para o Excel) e `collapse_whitespace_columns` (sequências de espaço que não sejam CR nem LF viram um espaço, depois do `trim_columns` e antes da caixa). A v1 está `deprecated`, com `Sunset` em 2027-03-01.
+**Versão 2** ([ADR 067](adr/067-primeiras-versoes-2-das-receitas.md)): acrescenta `input_encoding` (`utf-8`, `windows-1252` ou `latin-1`, declarada e nunca adivinhada; byte inválido para a codificação recusa a tabela com `UNSUPPORTED_FORMAT`), `output_bom` (BOM do UTF-8 antes do cabeçalho, para o Excel) e `collapse_whitespace_columns` (sequências de espaço que não quebrem a linha viram um espaço; CR, LF, NEL, U+2028, U+2029 e os demais separadores de linha ficam, depois do `trim_columns` e antes da caixa). A v1 está `deprecated`, com `Sunset` em 2027-03-01.
 
 A ordem é fixa:
 
