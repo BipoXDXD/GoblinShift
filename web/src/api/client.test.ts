@@ -438,7 +438,7 @@ describe("createApiClient: relógio do servidor", () => {
     "%s entrega o Date mesmo quando a leitura do corpo falha",
     async (method) => {
       const observeServerDate = vi.fn<(dateHeader: string | null) => void>();
-      const brokenBody = new ReadableStream({
+      const brokenBody = new ReadableStream<Uint8Array>({
         start(controller) {
           controller.error(new Error("conexão caiu no meio do corpo"));
         },
