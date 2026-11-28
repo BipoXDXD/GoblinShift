@@ -25,7 +25,7 @@ fi
 if [[ ! -s "$dir/app.env" ]]; then
   email="admin@goblinshift.local"
   aleatorio=$(openssl rand -base64 30)
-  password="$(tr -dc 'A-Za-z0-9' <<<"$aleatorio" | head -c 28)Aa1_"
+  password="$(tr -dc 'A-Za-z0-9' <<<"$aleatorio" | cut -c1-28)Aa1_"
   (( ${#password} == 32 )) || { echo "senha do OpenObserve gerada curta" >&2; exit 1; }
   tmp=$(mktemp "$dir/.app.env.XXXXXX")
   {

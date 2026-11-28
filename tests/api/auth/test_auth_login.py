@@ -25,6 +25,7 @@ from tests.api.auth.support import (
     login_cookie_payload,
     login_settings,
     open_signup,
+    set_cookie_headers,
     start_login,
 )
 from tests.api.support import assert_problem
@@ -123,14 +124,43 @@ def test_provedor_desligado_responde_o_erro_generico(
 
 
 def test_cookie_de_login_tem_os_atributos_do_adr_024(client: TestClient) -> None:
-    header = cookie_header(start_login(client, "google"), "__Secure-gs_login").lower()
+    [header] = [
+        value.lower()
+        for value in set_cookie_headers(start_login(client, "google"))
+        if "gs_login" in value
+    ]
 
-    assert "path=/auth" in header
+    # `__Host-`: o navegador recusa o cookie plantado por subdomínio irmão com `Domain=`.
+    assert header.startswith("__host-gs_login=")
+    assert "path=/;" in header
     assert "secure" in header
     assert "httponly" in header
     assert "samesite=lax" in header
     assert "max-age=600" in header
     assert "domain=" not in header
+
+
+def test_cookie_de_login_nao_e_regravado_fora_de_auth(client: TestClient) -> None:
+    start_login(client, "google")
+    assert "__Host-gs_login" in client.cookies
+
+    response = client.get("/livez")
+
+    assert response.status_code == 200
+    assert set_cookie_headers(response) == []
+
+
+def test_cookie_de_login_com_o_nome_antigo_nao_vale(
+    client: TestClient, fake: FakeProviders, sessions: StoredSessions, login_app: FastAPI
+) -> None:
+    open_signup(login_app)
+    started = start_login(client, "google")
+    marker = client.cookies["__Host-gs_login"]
+    client.cookies.clear()
+    client.cookies.set("__Secure-gs_login", marker, path="/auth")
+
+    assert_login_failed(client.get(fake.consent(started.headers["location"])))
+    assert sessions.started == []
 
 
 def test_estado_fica_no_servidor_e_o_cookie_leva_so_o_marcador(
@@ -139,7 +169,7 @@ def test_estado_fica_no_servidor_e_o_cookie_leva_so_o_marcador(
     response = start_login(client, "google")
     query = authorize_query(response)
 
-    value = cookie_header(response, "__Secure-gs_login").split(";")[0].split("=", 1)[1]
+    value = cookie_header(response, "__Host-gs_login").split(";")[0].split("=", 1)[1]
     payload = login_cookie_payload(value)
     assert query["nonce"] not in str(payload)
     assert "code_verifier" not in str(payload)

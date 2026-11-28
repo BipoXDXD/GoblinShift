@@ -30,6 +30,8 @@ export interface UploadTransport {
   readonly createXhr: () => UploadXhr;
   readonly csrfToken: CsrfTokenSource;
   readonly now: () => number;
+  /** Recebe o header `Date` de toda resposta do envio, como no cliente fetch (serverClock.ts). */
+  readonly observeServerDate?: (dateHeader: string | null) => void;
 }
 
 export interface UploadContentOptions {
@@ -97,6 +99,7 @@ function sendContent(
     };
     xhr.onload = () => {
       settle();
+      transport.observeServerDate?.(xhr.getResponseHeader("Date"));
       try {
         const raw = {
           status: xhr.status,

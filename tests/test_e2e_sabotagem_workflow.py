@@ -15,7 +15,11 @@ ROOT = Path(__file__).resolve().parents[1]
 WORKFLOW = ROOT / ".github" / "workflows" / "e2e-webkit.yml"
 JOB = "sabotagem"
 SABOTAGE = "npm run e2e:sabotage"
-BUILDS_COPIED = ("npm run build", "npm run build:notice-e2e")
+BUILDS_COPIED = (
+    "npm run build",
+    "npm run build:notice-e2e",
+    "npm run build:notice-incident-e2e",
+)
 CHROMIUM_INSTALL = "npx playwright install --only-shell chromium"
 WEB_PATHS = "web/**"
 # O PyYAML lê a chave `on` como o booleano True.
@@ -48,7 +52,7 @@ def test_roda_em_todo_pull_request_e_push_que_mexe_na_web() -> None:
     assert WEB_PATHS in triggers["push"]["paths"]
 
 
-def test_sabotagem_roda_depois_do_navegador_e_dos_dois_builds() -> None:
+def test_sabotagem_roda_depois_do_navegador_e_dos_tres_builds() -> None:
     sabotage = step_index(SABOTAGE)
 
     for prerequisite in (CHROMIUM_INSTALL, *BUILDS_COPIED):

@@ -4,11 +4,9 @@ import type { ApiClient } from "../api/client";
 import { createRoutes } from "../app/routes";
 import type { SiteNotice } from "../notice/notice";
 import type { ContentUploader } from "../upload/xhr";
+import { testNow } from "./clock";
 import { fakeApi } from "./fakeApi";
 import { fakeUploader } from "./fakeUploader";
-
-/** Relógio fixo das telas nos testes: 14/10/2026 12:00 UTC. */
-const TEST_NOW = Date.parse("2026-10-14T12:00:00.000Z");
 
 interface AppRoutesOptions {
   /** Por padrão, um que confirma cada envio na hora. */
@@ -31,7 +29,7 @@ export function appRoutes(
       uploader,
       rateLimit: { maxAttempts: 1, fallbackDelayMs: 0, random: () => 0 },
     },
-    now: () => TEST_NOW,
+    now: testNow,
     notice,
   });
 }
