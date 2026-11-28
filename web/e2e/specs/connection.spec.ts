@@ -25,6 +25,7 @@ for (const theme of THEMES) {
     const back = page.getByRole("status").filter({ hasText: BACK });
     await expect(back).toBeVisible();
     await expect(page.getByText(OFFLINE)).toBeHidden();
+    await expectNoWcagViolations(page, `connection-back-${theme}`);
     // RECONNECTED_MS (5 s) mais folga: depois disso a faixa some sozinha.
     await expect(page.getByText(BACK)).toBeHidden({ timeout: 10_000 });
   });

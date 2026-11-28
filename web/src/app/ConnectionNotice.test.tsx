@@ -81,6 +81,19 @@ describe("ConnectionNotice", () => {
     expect(region).toHaveTextContent(T.offline);
   });
 
+  it("desmontar durante o 'de volta' não deixa timer pendente", async () => {
+    const { unmount } = render(<ConnectionNotice />);
+    installAnnounceClock();
+    goOffline();
+    goOnline();
+    await untilFakeClock(() => {
+      expect(screen.getByRole("status")).toHaveTextContent(T.back);
+    });
+    expect(vi.getTimerCount()).toBe(1);
+    unmount();
+    expect(vi.getTimerCount()).toBe(0);
+  });
+
   it("sem violações de axe offline", async () => {
     const { container } = render(<ConnectionNotice />);
     goOffline();
