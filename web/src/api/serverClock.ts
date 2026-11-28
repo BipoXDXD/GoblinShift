@@ -1,3 +1,5 @@
+import { parseHttpDateMs } from "./httpDate";
+
 /**
  * Relógio do servidor, estimado pelo header `Date` das respostas da API (D9).
  *
@@ -18,13 +20,8 @@ export function createServerClock(localNow: () => number): ServerClock {
   return {
     now: () => localNow() + offsetMs,
     observe: (dateHeader) => {
-      if (dateHeader === null) {
-        return;
-      }
-      const value = dateHeader.trim();
-      const serverMs = Date.parse(value);
-      // Só HTTP-date (RFC 9110, 5.6.7), o mesmo critério do Retry-After (retryAfter.ts).
-      if (Number.isNaN(serverMs) || !value.endsWith("GMT")) {
+      const serverMs = dateHeader === null ? null : parseHttpDateMs(dateHeader);
+      if (serverMs === null) {
         return;
       }
       offsetMs = serverMs - localNow();
