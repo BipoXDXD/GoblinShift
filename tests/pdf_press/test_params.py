@@ -168,6 +168,25 @@ def test_tipo_errado_e_recusado(raw: dict[str, object], option: str) -> None:
 
 
 @pytest.mark.parametrize(
+    ("item", "message"),
+    [
+        # Como antes da v2: upload_id é conferido antes de page_number.
+        pytest.param({"upload_id": 7, "page_number": "1"}, "upload_id deve ser texto", id="tipos"),
+        pytest.param(
+            {"upload_id": "nao-e-uuid", "page_number": 0},
+            "upload_id deve ser um UUID na forma canônica",
+            id="uuid-e-pagina",
+        ),
+    ],
+)
+def test_parser_da_v1_confere_upload_id_antes_de_page_number(
+    item: dict[str, object], message: str
+) -> None:
+    with pytest.raises(InvalidParametersError, match=f"^{message}$"):
+        params_from_mapping({"operation": "select", "select": [item]})
+
+
+@pytest.mark.parametrize(
     ("raw", "option"),
     [
         pytest.param(

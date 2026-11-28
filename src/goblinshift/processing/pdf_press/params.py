@@ -165,11 +165,15 @@ def _page(raw: object) -> PageRange:
     """Item do `select` da v1: uma página, que vira um intervalo de uma página."""
     if not isinstance(raw, Mapping) or set(raw) != _SELECTION_KEYS:
         raise InvalidParametersError("cada item de select tem exatamente upload_id e page_number")
+    # A ordem e as mensagens são as da v1: upload_id antes de page_number, que não vira o
+    # first_page do intervalo nas mensagens.
+    upload_id = _upload_id(raw["upload_id"])
     page_number = _integer(raw["page_number"], "page_number")
-    # A mensagem da v1 cita page_number, não o first_page do intervalo.
+    if not _CANONICAL_UUID.fullmatch(upload_id):
+        raise InvalidParametersError("upload_id deve ser um UUID na forma canônica")
     if not 1 <= page_number <= MAX_INPUT_PAGES:
         raise InvalidParametersError(f"page_number deve estar entre 1 e {MAX_INPUT_PAGES}")
-    return PageRange.single(_upload_id(raw["upload_id"]), page_number)
+    return PageRange.single(upload_id, page_number)
 
 
 def _page_range(raw: object) -> PageRange:
