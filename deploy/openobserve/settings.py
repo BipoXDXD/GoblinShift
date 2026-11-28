@@ -1,8 +1,9 @@
 """Segredos do provisionamento, lidos de arquivos no formato `.env`.
 
 Credencial e URLs de destino nunca passam pela linha de comando nem pelo ambiente do shell (que
-acabam no histórico e no `ps`): ficam em arquivos legíveis só pelo dono, como o
-`/srv/goblinshift/secrets/app.env` da VPS, que já traz as credenciais do OpenObserve.
+acabam no histórico e no `ps`): ficam em arquivos legíveis só pelo dono. Na produção, a
+credencial do OpenObserve vem das variáveis privadas do recurso de infraestrutura no Coolify,
+copiadas para um desses arquivos só durante o provisionamento (deploy/openobserve/README.md).
 
 As URLs de destino também são segredo: quem tem a URL de um webhook ou de um tópico do ntfy
 publica no canal. Por isso nenhuma mensagem de erro as mostra.
