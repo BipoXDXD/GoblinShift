@@ -1,7 +1,7 @@
 """Conta a partir da identidade externa do login (docs/GoblinShiftPlan.md, 1.8 e 3.6; Frente A).
 
 A identidade é `(issuer, subject)`, nunca e-mail (ADR 008). Com o cadastro fechado (ADR 023),
-identidade nova nasce `blocked` e só entra depois do `gs-admin unblock`.
+identidade nova nasce `blocked` e só entra depois do `gs-admin approve`.
 
 Transaction script com a Session direto, na transação de quem chama (3.2).
 """

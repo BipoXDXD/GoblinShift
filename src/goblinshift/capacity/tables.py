@@ -23,6 +23,11 @@ from sqlalchemy import (
 
 from goblinshift.platform.db import metadata
 
+# 2^50 bytes (1 PiB), barreira contra o estouro do bigint: `reserved + amount` de dois valores até
+# aqui nunca chega perto de 2^63. Os CHECKs de `capacity_pool` e `account_quota` e o teto do
+# `gs-admin set-limits` saem daqui; a migração 0032 repete o literal, que tem de bater com este.
+BYTE_AMOUNT_CEILING = 2**50
+
 capacity_pool = Table(
     "capacity_pool",
     metadata,
@@ -40,6 +45,9 @@ capacity_pool = Table(
     CheckConstraint("(scope = 'global') = (owner_id IS NULL)", name="owner"),
     CheckConstraint("resource IN ('storage_bytes')", name="resource"),
     CheckConstraint("reserved BETWEEN 0 AND max_amount", name="reserved"),
+    # Não estoura o bigint (migrações 0032/0033); o teto de negócio, mais baixo, é o do
+    # `gs-admin set-limits` (`runs.limits.MAX_STORAGE_BYTES`).
+    CheckConstraint(f"max_amount <= {BYTE_AMOUNT_CEILING}", name="max_amount_ceiling"),
 )
 
 # `holder_id` não tem FK: o detentor é um upload, uma Run ou um objeto, conforme `holder_kind`.

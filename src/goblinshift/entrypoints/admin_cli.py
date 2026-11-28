@@ -6,9 +6,10 @@ variáveis GS_* da API para chegar ao banco e ao armazenamento.
     gs-admin create-user --display-name "Ana"
     gs-admin issue-key --user <id> --scopes files:read,files:write,runs:read,runs:write --days 30
     gs-admin revoke-key --key <public_id>
-    gs-admin block --user <id>
+    gs-admin block --user <id> [--yes | --dry-run]
     gs-admin unblock --user <id>
-    gs-admin request-deletion --user <id>
+    gs-admin approve --user <id>
+    gs-admin request-deletion --user <id> [--yes | --dry-run]
     gs-admin list-users [--pending]
     gs-admin find-user --user-hash <hash>
     printf '%s' "$user_hash" | gs-admin find-user --user-hash -
@@ -18,19 +19,29 @@ variáveis GS_* da API para chegar ao banco e ao armazenamento.
     gs-admin orphan-files [--min-age-hours H] [--limit N]
 
 `issue-key` imprime o segredo uma única vez na saída padrão, e só ele, para que
-`> arquivo` o capture sem metadados; o identificador público e a expiração vão para stderr.
+`> arquivo` o capture sem metadados; o identificador público e a expiração vão para stderr. Emite
+pelo mesmo caminho travado da sessão web: só para conta ativa, sem exclusão pedida, e dentro dos
+tetos de chaves ativas e guardadas.
 `block` bloqueia, revoga sessões e chaves e cancela a execução ativa; repetir completa o que
-faltou. `request-deletion` pede a exclusão da conta pelo mesmo caminho do `DELETE /me`, também
+faltou. Só age com `--yes`: sem ele, imprime em stderr o estado da conta, as chaves e sessões que
+ainda valem e a execução ativa, e sai com 2 sem gravar nada; `--dry-run` imprime o mesmo e sai
+com 0. `unblock` desfaz o bloqueio por abuso, e `approve` libera a conta pendente do cadastro
+fechado (ADR 023): um não faz o papel do outro, e o `unblock` de uma pendente sai com 1 e sugere
+o `approve`. `request-deletion` pede a exclusão da conta pelo mesmo caminho do `DELETE /me`, também
 para conta bloqueada, que não consegue entrar: marca o pedido, revoga, audita e cancela a execução
 ativa, e a manutenção purga em até 24 h; repetir mantém o primeiro pedido e completa o que faltou.
+Como o `block`, só age com `--yes`: sem ele, mostra o resumo da conta e sai com 2, e `--dry-run`
+mostra o mesmo e sai com 0, sem gravar nada.
 `list-users` imprime id, emissor, estado e criação separados por tab, sem o sujeito da
 identidade externa; `--pending` mostra só as contas à espera de liberação (ADR 023).
 `find-user` traduz o `user.hash` dos eventos da telemetria no id da conta (roteiro de abuso);
 com `--user-hash -` lê o hash da entrada padrão, para ele não ficar no log do sudo.
 `set-limits` sobrepõe, para uma conta, as cotas diárias das settings (`GS_QUOTA_*`) e o teto de
 armazenamento do livro-razão (1.7); `default` volta o item ao padrão, e o que não for citado
-fica como está. Cada mudança grava `ACCOUNT_LIMITS_CHANGED` na auditoria, com os valores antigos
-e novos dos itens citados. `usage` imprime, separados por tab, o consumo das últimas 24 h
+fica como está. Cada item tem teto, e acima dele a saída é 2 sem gravar nada: execuções até
+2^31 - 1, bytes de entrada até 2^50 e armazenamento até o pool global (20 GiB). Cada mudança
+grava `ACCOUNT_LIMITS_CHANGED` na auditoria, com os valores antigos e novos dos itens citados.
+`usage` imprime, separados por tab, o consumo das últimas 24 h
 (execuções, bytes de entrada e tempo de executor), o armazenamento reservado e cada limite com a
 origem (`conta` ou `padrão`).
 `orphan-files` é um relatório só de leitura: nada é apagado nem alterado. Percorre o disco do
@@ -42,7 +53,10 @@ menos de `--min-age-hours` (padrão 6, aceita decimal) fica de fora, porque pode
 curso; a lista vai até `--limit` linhas (padrão 200) e os totais por categoria, em stderr, contam
 tudo. Sem a sentinela de montagem o storage não é verificado e a saída é 4. Sai com 0 mesmo com
 órfãos: decidir o que fazer com eles é do administrador.
-Sai com 0 em sucesso, 1 se a conta ou a chave não existir, 2 em erro de uso e 3 se faltar um
+`create-user`, `issue-key`, `revoke-key`, `find-user` (quando acha a conta) e os comandos que mudam
+a conta gravam a auditoria com `actor = admin` e sem IP, na mesma transação da ação.
+Sai com 0 em sucesso, 1 se a conta ou a chave não existir (no `issue-key`, também conta que não
+está ativa), 2 em erro de uso ou com o teto de chaves da conta cheio e 3 se faltar um
 segredo obrigatório, com uma linha em stderr que nomeia a variável; Ctrl-C sai com 130 e a linha
 `gs-admin: interrompido`. Qualquer outra falha sai com 4
 e uma linha em stderr só com o tipo do erro e, se vier do PostgreSQL, o SQLSTATE: sem stack trace
@@ -51,6 +65,7 @@ da falha fica gravado; `block` e `request-deletion` completam o que faltou se re
 """
 
 import argparse
+import functools
 import logging
 import math
 import re
@@ -76,16 +91,22 @@ from goblinshift.files.storage import FileStorage
 from goblinshift.identity import (
     DEFAULT_KEY_DAYS,
     MAX_KEY_DAYS,
+    AccountImpact,
+    ActiveKeyLimitError,
+    AuditActor,
     AuditEventType,
     AuditOutcome,
     InvalidDisplayNameError,
     InvalidKeyLifetimeError,
     InvalidScopesError,
+    StoredKeyLimitError,
     UnknownAccountError,
+    account_impact,
+    approve_account,
     block_account,
     create_admin_user,
     find_account,
-    issue_key,
+    issue_key_for_admin,
     parse_scopes,
     record_audit_event,
     request_account_deletion,
@@ -108,10 +129,18 @@ from goblinshift.platform.telemetry import (
 )
 from goblinshift.runs.cancellation import CancelResult
 from goblinshift.runs.finished import RunFinishedReporter
-from goblinshift.runs.limits import LIMIT_ITEMS, change_account_limits
+from goblinshift.runs.limits import (
+    INPUT_BYTES_PER_24H,
+    LIMIT_ITEMS,
+    MAX_LIMITS,
+    RUNS_PER_24H,
+    STORAGE_BYTES,
+    change_account_limits,
+)
 from goblinshift.runs.purge import cancel_active_run
 from goblinshift.runs.quotas import (
     QuotaLimits,
+    active_run_id,
     daily_usage,
     executor_time_ms,
     quota_override,
@@ -228,17 +257,25 @@ def _argument_parser() -> argparse.ArgumentParser:
         "block", help="bloqueia a conta, revoga sessões e chaves e cancela a execução ativa"
     )
     block.add_argument("--user", type=UUID, required=True, help="id da conta")
+    _add_confirmation(block)
     block.set_defaults(command=_block)
 
-    unblock = commands.add_parser("unblock", help="libera a conta bloqueada ou pendente")
+    unblock = commands.add_parser("unblock", help="desfaz o bloqueio por abuso")
     unblock.add_argument("--user", type=UUID, required=True, help="id da conta")
     unblock.set_defaults(command=_unblock)
+
+    approve = commands.add_parser(
+        "approve", help="libera a conta pendente do cadastro fechado (ADR 023)"
+    )
+    approve.add_argument("--user", type=UUID, required=True, help="id da conta")
+    approve.set_defaults(command=_approve)
 
     deletion = commands.add_parser(
         "request-deletion",
         help="pede a exclusão da conta, mesmo bloqueada; a manutenção purga em até 24 h",
     )
     deletion.add_argument("--user", type=UUID, required=True, help="id da conta")
+    _add_confirmation(deletion)
     deletion.set_defaults(command=_request_deletion)
 
     list_users = commands.add_parser("list-users", help="lista as contas, das mais novas primeiro")
@@ -259,13 +296,17 @@ def _argument_parser() -> argparse.ArgumentParser:
         "set-limits", help="sobrepõe as cotas e o teto de armazenamento de uma conta"
     )
     set_limits.add_argument("--user", type=UUID, required=True, help="id da conta")
-    for flag, what in (
-        ("--runs-per-24h", "execuções em 24 h"),
-        ("--input-bytes-per-24h", "bytes de entrada em 24 h"),
-        ("--storage-bytes", "teto de armazenamento, em bytes"),
+    for flag, item, what in (
+        ("--runs-per-24h", RUNS_PER_24H, "execuções em 24 h"),
+        ("--input-bytes-per-24h", INPUT_BYTES_PER_24H, "bytes de entrada em 24 h"),
+        ("--storage-bytes", STORAGE_BYTES, "teto de armazenamento, em bytes"),
     ):
+        maximum = MAX_LIMITS[item]
         set_limits.add_argument(
-            flag, type=_limit_value, default=_UNCHANGED, help=f"{what}, ou {_DEFAULT_WORD}"
+            flag,
+            type=functools.partial(_limit_value, maximum=maximum),
+            default=_UNCHANGED,
+            help=f"{what}, até {maximum}, ou {_DEFAULT_WORD}",
         )
     set_limits.set_defaults(command=_set_limits)
 
@@ -296,6 +337,7 @@ def _create_user(args: argparse.Namespace, context: _Context) -> int:
     try:
         with unit_of_work(context.factory) as session:
             user_id = create_admin_user(session, args.display_name)
+            _audit(session, AuditEventType.ACCOUNT_CREATED, user_id, datetime.now(UTC))
     except InvalidDisplayNameError as error:
         return _fail(EXIT_USAGE, str(error))
     print(user_id)
@@ -303,17 +345,21 @@ def _create_user(args: argparse.Namespace, context: _Context) -> int:
 
 
 def _issue_key(args: argparse.Namespace, context: _Context) -> int:
+    now = datetime.now(UTC)
     try:
         scopes = parse_scopes(args.scopes)
+        # Chave e evento na mesma transação: ou os dois, ou nenhum.
         with unit_of_work(context.factory) as session:
-            issued = issue_key(
-                session,
-                owner_id=args.user,
-                scopes=scopes,
-                now=datetime.now(UTC),
-                days=args.days,
+            issued = issue_key_for_admin(
+                session, owner_id=args.user, scopes=scopes, days=args.days, now=now
             )
-    except (InvalidScopesError, InvalidKeyLifetimeError) as error:
+            _audit(session, AuditEventType.KEY_ISSUED, args.user, now)
+    except (
+        InvalidScopesError,
+        InvalidKeyLifetimeError,
+        ActiveKeyLimitError,
+        StoredKeyLimitError,
+    ) as error:
         return _fail(EXIT_USAGE, str(error))
     except UnknownAccountError as error:
         return _fail(EXIT_NOT_FOUND, str(error))
@@ -323,15 +369,25 @@ def _issue_key(args: argparse.Namespace, context: _Context) -> int:
 
 
 def _revoke_key(args: argparse.Namespace, context: _Context) -> int:
+    now = datetime.now(UTC)
     with unit_of_work(context.factory) as session:
-        found = revoke_key(session, args.key, datetime.now(UTC))
-    if not found:
+        owner_id = revoke_key(session, args.key, now)
+        if owner_id is not None:
+            _audit(session, AuditEventType.KEY_REVOKED, owner_id, now)
+    if owner_id is None:
         return _fail(EXIT_NOT_FOUND, f"chave {args.key} não existe")
     print(f"chave {args.key} revogada", file=sys.stderr)
     return EXIT_OK
 
 
 def _block(args: argparse.Namespace, context: _Context) -> int:
+    if not args.yes:
+        return _show_impact(
+            args,
+            context,
+            "block bloquearia a conta, revogaria essas chaves e sessões e "
+            "cancelaria a execução ativa",
+        )
     with _run_finished_reporter(context) as finished:
         now = datetime.now(UTC)
         with unit_of_work(context.factory) as session:
@@ -350,17 +406,79 @@ def _block(args: argparse.Namespace, context: _Context) -> int:
 
 
 def _unblock(args: argparse.Namespace, context: _Context) -> int:
+    now = datetime.now(UTC)
     with unit_of_work(context.factory) as session:
         found = unblock_account(session, args.user)
         if found:
-            _audit(session, AuditEventType.ACCOUNT_UNBLOCKED, args.user, datetime.now(UTC))
+            _audit(session, AuditEventType.ACCOUNT_UNBLOCKED, args.user, now)
+        impact = None if found else account_impact(session, args.user, now)
+    if impact is not None and impact.awaiting_approval and not impact.deletion_requested:
+        return _fail(
+            EXIT_NOT_FOUND,
+            f"conta {args.user} está pendente de liberação, não bloqueada por abuso; "
+            f"use gs-admin approve --user {args.user}",
+        )
     if not found:
         return _fail(EXIT_NOT_FOUND, f"conta {args.user} não existe ou tem exclusão pedida")
     print(f"conta {args.user} liberada", file=sys.stderr)
     return EXIT_OK
 
 
+def _approve(args: argparse.Namespace, context: _Context) -> int:
+    with unit_of_work(context.factory) as session:
+        found = approve_account(session, args.user)
+        if found:
+            _audit(session, AuditEventType.ACCOUNT_APPROVED, args.user, datetime.now(UTC))
+    if not found:
+        return _fail(
+            EXIT_NOT_FOUND,
+            f"conta {args.user} não existe, não está pendente de liberação ou tem exclusão "
+            "pedida; o bloqueio por abuso se desfaz com unblock",
+        )
+    print(f"conta {args.user} aprovada", file=sys.stderr)
+    return EXIT_OK
+
+
+def _show_impact(args: argparse.Namespace, context: _Context, consequence: str) -> int:
+    """O resumo do comando destrutivo sem `--yes`: só lê, e nada é gravado.
+
+    Com `--dry-run` sai com 0; sem nenhum dos dois, com 2 (erro de uso), para que um id trocado
+    num comando digitado às pressas não revogue nada.
+    """
+    with context.factory() as session:
+        impact = account_impact(session, args.user, datetime.now(UTC))
+        run_id = None if impact is None else active_run_id(session, args.user)
+    if impact is None:
+        return _fail(EXIT_NOT_FOUND, f"conta {args.user} não existe")
+    print(_impact_line(args.user, impact, run_id), file=sys.stderr)
+    if args.dry_run:
+        print(f"gs-admin: --dry-run, nada foi gravado; {consequence}", file=sys.stderr)
+        return EXIT_OK
+    return _fail(EXIT_USAGE, f"{consequence}; confirme com --yes ou veja com --dry-run")
+
+
+def _impact_line(user_id: UUID, impact: AccountImpact, run_id: UUID | None) -> str:
+    if impact.awaiting_approval:
+        state = "pendente de liberação"
+    else:
+        state = {"active": "ativa", "blocked": "bloqueada"}.get(impact.status, impact.status)
+    if impact.deletion_requested:
+        state += ", com exclusão pedida"
+    running = f"execução ativa {run_id}" if run_id is not None else "nenhuma execução ativa"
+    return (
+        f"conta {user_id} ({impact.display_name}): {state}; {impact.active_keys} chave(s) "
+        f"ativa(s), {impact.active_sessions} sessão(ões) ativa(s), {running}"
+    )
+
+
 def _request_deletion(args: argparse.Namespace, context: _Context) -> int:
+    if not args.yes:
+        return _show_impact(
+            args,
+            context,
+            "request-deletion pediria a exclusão da conta, revogaria essas chaves e sessões, "
+            "cancelaria a execução ativa e entregaria a conta à purga em até 24 h, sem desfazer",
+        )
     with _run_finished_reporter(context) as finished:
         now = datetime.now(UTC)
         try:
@@ -409,14 +527,30 @@ def _find_user(args: argparse.Namespace, context: _Context) -> int:
     hasher = UserHasher(context.settings.user_hash_key())
     with unit_of_work(context.factory) as session:
         owner_id = find_account_by_user_hash(session, user_hash, hasher.hash)
+        # Reidentificar o hash é ação a rastrear; a busca sem resultado não aponta para ninguém.
+        if owner_id is not None:
+            _audit(session, AuditEventType.ACCOUNT_LOOKED_UP, owner_id, datetime.now(UTC))
     if owner_id is None:
         return _fail(EXIT_NOT_FOUND, "nenhuma conta tem esse user.hash")
     print(owner_id)
     return EXIT_OK
 
 
-def _limit_value(text: str) -> int | None:
-    """Inteiro positivo, ou `None` para `default`; o resto é erro de uso (saída 2)."""
+def _add_confirmation(parser: argparse.ArgumentParser) -> None:
+    """`--yes` executa; `--dry-run` só mostra o impacto. Sem nenhum dos dois, mostra e sai 2."""
+    confirmation = parser.add_mutually_exclusive_group()
+    confirmation.add_argument("--yes", action="store_true", help="confirma e executa")
+    confirmation.add_argument(
+        "--dry-run", action="store_true", help="só mostra o que mudaria, sem gravar nada"
+    )
+
+
+def _limit_value(text: str, *, maximum: int) -> int | None:
+    """Inteiro de 1 a `maximum`, ou `None` para `default`; o resto é erro de uso (saída 2).
+
+    O teto é conferido aqui, antes de abrir a transação: acima dele, o valor estouraria a coluna
+    ou o `bigint` do livro-razão (`runs.limits`).
+    """
     if text == _DEFAULT_WORD:
         return None
     try:
@@ -425,6 +559,8 @@ def _limit_value(text: str) -> int | None:
         raise argparse.ArgumentTypeError(f"use um inteiro positivo ou {_DEFAULT_WORD}") from None
     if value <= 0:
         raise argparse.ArgumentTypeError("o limite precisa ser positivo")
+    if value > maximum:
+        raise argparse.ArgumentTypeError(f"o limite passa do teto de {maximum}")
     return value
 
 
@@ -552,7 +688,13 @@ def _listing_line(account: AccountListing) -> str:
 def _audit(session: Session, event: AuditEventType, user_id: UUID, now: datetime) -> None:
     # Ação do administrador no servidor: não há IP de cliente a registrar.
     record_audit_event(
-        session, event=event, user_id=user_id, ip=None, outcome=AuditOutcome.SUCCESS, now=now
+        session,
+        event=event,
+        user_id=user_id,
+        ip=None,
+        outcome=AuditOutcome.SUCCESS,
+        now=now,
+        actor=AuditActor.ADMIN,
     )
 
 

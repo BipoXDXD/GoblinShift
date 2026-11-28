@@ -18,6 +18,7 @@ from goblinshift.entrypoints.api.dependencies import (
     client_ip,
 )
 from goblinshift.identity import (
+    AuditActor,
     AuditEventType,
     AuditOutcome,
     record_audit_event,
@@ -40,6 +41,7 @@ def logout(principal: OptionalSession, request: Request, session: DbSession, now
                 ip=client_ip(request),
                 outcome=AuditOutcome.SUCCESS,
                 now=now,
+                actor=AuditActor.USER,
             )
     return _signed_out()
 
@@ -58,6 +60,7 @@ def logout_all(
             ip=client_ip(request),
             outcome=AuditOutcome.SUCCESS,
             now=now,
+            actor=AuditActor.USER,
         )
     return _signed_out()
 

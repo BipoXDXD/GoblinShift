@@ -17,7 +17,7 @@ from goblinshift.identity import (
     MAX_STORED_KEYS,
     Scope,
     authenticate_api_key,
-    issue_key,
+    issue_key_for_admin,
     issue_key_for_session,
     revoke_session,
 )
@@ -250,9 +250,14 @@ def test_centesima_primeira_chave_guardada_409_com_mensagem_propria(
     owner = new_user(factory)
     sessions.sign_in(owner)
     with unit_of_work(factory) as session:
+        # Revogada logo depois de emitida, para não esbarrar no teto de ativas.
         for _ in range(MAX_STORED_KEYS):
-            issue_key(session, owner_id=owner, scopes=frozenset({Scope.FILES_READ}), now=NOW)
-        session.execute(update(api_key).where(api_key.c.owner_id == owner).values(revoked_at=NOW))
+            issue_key_for_admin(
+                session, owner_id=owner, scopes=frozenset({Scope.FILES_READ}), days=30, now=NOW
+            )
+            session.execute(
+                update(api_key).where(api_key.c.owner_id == owner).values(revoked_at=NOW)
+            )
 
     response = client.post(KEYS, json=VALID)
 
@@ -375,13 +380,18 @@ def test_repeticao_com_o_teto_cheio_responde_a_repeticao(
     with unit_of_work(factory) as session:
         if full == "ativas":
             for _ in range(MAX_ACTIVE_KEYS - 1):
-                issue_key(session, owner_id=owner, scopes=frozenset({Scope.FILES_READ}), now=NOW)
+                issue_key_for_admin(
+                    session, owner_id=owner, scopes=frozenset({Scope.FILES_READ}), days=30, now=NOW
+                )
         else:
+            # Revogada logo depois de emitida, para não esbarrar no teto de ativas.
             for _ in range(MAX_STORED_KEYS - 1):
-                issue_key(session, owner_id=owner, scopes=frozenset({Scope.FILES_READ}), now=NOW)
-            session.execute(
-                update(api_key).where(api_key.c.owner_id == owner).values(revoked_at=NOW)
-            )
+                issue_key_for_admin(
+                    session, owner_id=owner, scopes=frozenset({Scope.FILES_READ}), days=30, now=NOW
+                )
+                session.execute(
+                    update(api_key).where(api_key.c.owner_id == owner).values(revoked_at=NOW)
+                )
     created = post_with_key(client, IDEM).json()
 
     repeated = post_with_key(client, IDEM)

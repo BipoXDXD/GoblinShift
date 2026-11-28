@@ -78,6 +78,25 @@ def test_delete_me_marca_a_exclusao_revoga_tudo_e_limpa_o_navegador(
     assert events_of(factory, owner) == ["ACCOUNT_DELETION_REQUESTED"]
 
 
+def test_delete_me_grava_actor_user(
+    client: TestClient, factory: sessionmaker[Session], sessions: SimulatedSessions
+) -> None:
+    owner = new_user(factory)
+    sessions.sign_in(owner)
+
+    response = client.delete(ME)
+
+    assert response.status_code == 202, response.text
+    with factory() as session:
+        actors = session.execute(
+            select(audit_event.c.actor).where(
+                audit_event.c.user_id == owner,
+                audit_event.c.event_type == "ACCOUNT_DELETION_REQUESTED",
+            )
+        ).scalars()
+        assert list(actors) == ["user"]
+
+
 def test_delete_me_cancela_a_execucao_ativa(
     client: TestClient,
     factory: sessionmaker[Session],

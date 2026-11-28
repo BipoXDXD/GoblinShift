@@ -1,7 +1,7 @@
 """Contas e chaves de API contra o PostgreSQL real (docs/GoblinShiftPlan.md, 3.6)."""
 
 from datetime import UTC, datetime, timedelta
-from uuid import UUID, uuid7
+from uuid import UUID
 
 import pytest
 from sqlalchemy import select
@@ -10,20 +10,16 @@ from sqlalchemy.orm import Session, sessionmaker
 from goblinshift.identity import (
     ADMIN_ISSUER,
     InvalidDisplayNameError,
-    InvalidKeyLifetimeError,
-    InvalidScopesError,
     Principal,
     Scope,
-    UnknownAccountError,
     authenticate_api_key,
     create_admin_user,
     find_account,
-    issue_key,
     revoke_key,
 )
 from goblinshift.identity.tables import api_key, app_user
 from goblinshift.platform.db import unit_of_work
-from tests.identity.support import HASHER, new_key, new_user
+from tests.identity.support import HASHER, mark_blocked, new_key, new_user
 
 pytestmark = pytest.mark.integration
 
@@ -109,25 +105,6 @@ def test_banco_guarda_so_o_hash_do_segredo(factory: sessionmaker[Session]) -> No
     assert issued.token[-43:] not in stored
 
 
-def test_chave_para_conta_inexistente_e_recusada(factory: sessionmaker[Session]) -> None:
-    with pytest.raises(UnknownAccountError), unit_of_work(factory) as session:
-        issue_key(session, owner_id=uuid7(), scopes=frozenset(Scope), now=NOW)
-
-
-def test_chave_sem_escopos_e_recusada(factory: sessionmaker[Session]) -> None:
-    user_id = new_user(factory)
-
-    with pytest.raises(InvalidScopesError), unit_of_work(factory) as session:
-        issue_key(session, owner_id=user_id, scopes=frozenset(), now=NOW)
-
-
-def test_validade_acima_de_90_dias_e_recusada(factory: sessionmaker[Session]) -> None:
-    user_id = new_user(factory)
-
-    with pytest.raises(InvalidKeyLifetimeError), unit_of_work(factory) as session:
-        issue_key(session, owner_id=user_id, scopes=frozenset(Scope), now=NOW, days=91)
-
-
 def test_chave_que_expira_exatamente_agora_nao_autentica(
     factory: sessionmaker[Session],
 ) -> None:
@@ -169,7 +146,9 @@ def test_revogar_chave_inexistente_informa_que_nao_achou(
 
 
 def test_conta_bloqueada_nao_autentica(factory: sessionmaker[Session]) -> None:
-    issued = new_key(factory, new_user(factory, blocked=True), now=NOW)
+    user_id = new_user(factory)
+    issued = new_key(factory, user_id, now=NOW)
+    mark_blocked(factory, user_id)
 
     assert authenticate(factory, issued.token, NOW) is None
 
@@ -211,7 +190,9 @@ def test_ultimo_uso_e_gravado_no_maximo_uma_vez_por_minuto(
 
 
 def test_uso_recusado_nao_grava_ultimo_uso(factory: sessionmaker[Session]) -> None:
-    issued = new_key(factory, new_user(factory, blocked=True), now=NOW)
+    user_id = new_user(factory)
+    issued = new_key(factory, user_id, now=NOW)
+    mark_blocked(factory, user_id)
 
     authenticate(factory, issued.token, NOW)
 

@@ -23,6 +23,7 @@ from goblinshift.entrypoints.api.dependencies import (
 from goblinshift.entrypoints.api.json_command import command_openapi, json_command
 from goblinshift.entrypoints.api.problems import ApiProblem, ProblemCode, problem_responses
 from goblinshift.identity import (
+    AuditActor,
     AuditEventType,
     AuditOutcome,
     UnknownAccountError,
@@ -78,6 +79,7 @@ def accept_current_terms(
                     ip=client_ip(request),
                     outcome=AuditOutcome.SUCCESS,
                     now=now,
+                    actor=AuditActor.USER,
                 )
     except UnknownAccountError:
         raise ApiProblem(

@@ -38,9 +38,11 @@ from goblinshift.capacity.ledger import (
     usage,
 )
 from goblinshift.capacity.reconciliation import ReconcileReport, Unreserved, reconcile
+from goblinshift.capacity.tables import BYTE_AMOUNT_CEILING
 
 __all__ = [
     "ACCOUNT_STORAGE_MAX_BYTES",
+    "BYTE_AMOUNT_CEILING",
     "GIB",
     "GLOBAL_STORAGE_MAX_BYTES",
     "RELEASED_RETENTION",

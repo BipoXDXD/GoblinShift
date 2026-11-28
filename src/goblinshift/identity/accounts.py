@@ -36,7 +36,7 @@ from goblinshift.identity.keys import (
     secret_matches,
 )
 from goblinshift.identity.principal import InvalidScopesError, Principal, Scope
-from goblinshift.identity.tables import api_key, app_user
+from goblinshift.identity.tables import api_key, app_user, web_session
 from goblinshift.platform.telemetry import UserHasher
 from goblinshift.processing.names import has_unsafe_char
 
@@ -116,7 +116,7 @@ def create_admin_user(session: Session, display_name: str) -> UUID:
     return user_id
 
 
-def issue_key(
+def _insert_key(
     session: Session,
     *,
     owner_id: UUID,
@@ -125,7 +125,7 @@ def issue_key(
     days: int = DEFAULT_KEY_DAYS,
     idem_key: str | None = None,
 ) -> IssuedKey:
-    """Grava a chave sem teto nem trava; a emissão pela sessão passa por `issue_key_for_session`.
+    """Só o INSERT, sem trava nem tetos: emitir é `issue_key_for_session` ou `issue_key_for_admin`.
 
     `idem_key` só é gravada: quem a passa já a procurou sob a trava da conta (`_issue_locked`).
     """
@@ -166,8 +166,8 @@ def issue_key(
     return IssuedKey(id=key_id, public_id=key.public_id, token=key.token, expires_at=expires_at)
 
 
-def revoke_key(session: Session, public_id: str, now: datetime) -> bool:
-    """Revoga a chave; devolve False só se ela não existir.
+def revoke_key(session: Session, public_id: str, now: datetime) -> UUID | None:
+    """Revoga a chave e devolve o dono, para a auditoria; None só se ela não existir.
 
     Revogar de novo é sucesso e preserva o instante da primeira revogação.
     """
@@ -175,9 +175,10 @@ def revoke_key(session: Session, public_id: str, now: datetime) -> bool:
         update(api_key)
         .where(api_key.c.public_id == public_id)
         .values(revoked_at=func.coalesce(api_key.c.revoked_at, now))
-        .returning(api_key.c.id)
+        .returning(api_key.c.owner_id)
     )
-    return session.execute(statement).first() is not None
+    owner_id: UUID | None = session.execute(statement).scalar_one_or_none()
+    return owner_id
 
 
 def authenticate_api_key(
@@ -341,19 +342,104 @@ def block_account(session: Session, owner_id: UUID, now: datetime) -> bool:
 
 
 def unblock_account(session: Session, owner_id: UUID) -> bool:
-    """Libera a conta (inclusive a pendente do cadastro fechado); False se não existir.
+    """Desfaz o bloqueio por abuso; False se a conta não existir ou estiver pendente.
 
-    Conta com exclusão pedida também dá False: o pedido do titular é irrevogável e a purga já
-    está a caminho, então ela nunca volta a `active`. Sessões e chaves revogadas no bloqueio
-    continuam revogadas: a pessoa entra de novo.
+    A pendente do cadastro fechado (`awaiting_approval`) só sai pelo `approve_account`: um id
+    trocado no `unblock` não libera quem nunca foi aprovado. Conta com exclusão pedida também dá
+    False: o pedido do titular é irrevogável e a purga já está a caminho, então ela nunca volta a
+    `active`. Sessões e chaves revogadas no bloqueio continuam revogadas: a pessoa entra de novo.
     """
     unblocked = session.execute(
         update(app_user)
-        .where(app_user.c.id == owner_id, app_user.c.deletion_requested_at.is_(None))
-        .values(status=ACTIVE_STATUS, awaiting_approval=False)
+        .where(
+            app_user.c.id == owner_id,
+            app_user.c.deletion_requested_at.is_(None),
+            app_user.c.awaiting_approval.is_(False),
+        )
+        .values(status=ACTIVE_STATUS)
         .returning(app_user.c.id)
     ).first()
     return unblocked is not None
+
+
+def approve_account(session: Session, owner_id: UUID) -> bool:
+    """Libera a conta pendente do cadastro fechado (ADR 023); False se ela não estiver pendente.
+
+    Só age com `awaiting_approval`: a bloqueada por abuso tem o mesmo `status` e continua
+    bloqueada, e a com exclusão pedida nunca volta a `active`.
+    """
+    approved = session.execute(
+        update(app_user)
+        .where(
+            app_user.c.id == owner_id,
+            app_user.c.deletion_requested_at.is_(None),
+            app_user.c.awaiting_approval.is_(True),
+        )
+        .values(status=ACTIVE_STATUS, awaiting_approval=False)
+        .returning(app_user.c.id)
+    ).first()
+    return approved is not None
+
+
+@dataclass(frozen=True)
+class AccountImpact:
+    """O que um comando destrutivo do `gs-admin` atingiria, mostrado antes do `--yes`."""
+
+    display_name: str
+    status: str
+    awaiting_approval: bool
+    deletion_requested: bool
+    active_keys: int
+    active_sessions: int
+
+
+def account_impact(session: Session, owner_id: UUID, now: datetime) -> AccountImpact | None:
+    """Estado da conta e as credenciais que ainda valem em `now`; None se ela não existir.
+
+    Só lê. A execução ativa fica de fora: `runs` está acima de `identity` nas camadas, e o
+    `gs-admin` a junta ao resumo.
+    """
+    active_keys = (
+        select(func.count())
+        .select_from(api_key)
+        .where(
+            api_key.c.owner_id == owner_id,
+            api_key.c.revoked_at.is_(None),
+            api_key.c.expires_at > now,
+        )
+        .scalar_subquery()
+    )
+    active_sessions = (
+        select(func.count())
+        .select_from(web_session)
+        .where(
+            web_session.c.user_id == owner_id,
+            web_session.c.revoked_at.is_(None),
+            web_session.c.idle_expires_at > now,
+            web_session.c.absolute_expires_at > now,
+        )
+        .scalar_subquery()
+    )
+    row = session.execute(
+        select(
+            app_user.c.display_name,
+            app_user.c.status,
+            app_user.c.awaiting_approval,
+            app_user.c.deletion_requested_at,
+            active_keys.label("active_keys"),
+            active_sessions.label("active_sessions"),
+        ).where(app_user.c.id == owner_id)
+    ).first()
+    if row is None:
+        return None
+    return AccountImpact(
+        display_name=row.display_name,
+        status=row.status,
+        awaiting_approval=row.awaiting_approval,
+        deletion_requested=row.deletion_requested_at is not None,
+        active_keys=row.active_keys,
+        active_sessions=row.active_sessions,
+    )
 
 
 def request_account_deletion(session: Session, owner_id: UUID, now: datetime) -> None:
@@ -391,6 +477,40 @@ def issue_key_for_session(
     `UnknownAccountError`; sessão que não existe, é de outra conta, foi revogada ou venceu,
     `SessionNoLongerValidError`. A `idem_key` e os tetos ficam em `_issue_locked`.
     """
+    _lock_active_account(session, owner_id)
+    # O Principal foi lido noutra transação: sem reconferir aqui, a emissão que esperou o
+    # `logout-all` sairia com chave ativa de uma sessão já revogada.
+    if not sessions.session_still_valid(session, session_id=session_id, owner_id=owner_id, now=now):
+        raise SessionNoLongerValidError(
+            f"a sessão {session_id} não vale mais para a conta {owner_id}"
+        )
+    return _issue_locked(
+        session, owner_id=owner_id, scopes=scopes, days=days, now=now, idem_key=idem_key
+    )
+
+
+def issue_key_for_admin(
+    session: Session, *, owner_id: UUID, scopes: frozenset[Scope], days: int, now: datetime
+) -> IssuedKey:
+    """Emite chave pelo `gs-admin issue-key`, com a mesma trava, recusa e tetos da sessão web.
+
+    Conta inexistente, bloqueada, pendente ou com exclusão pedida levanta `UnknownAccountError`:
+    sem essa recusa, a chave emitida durante o bloqueio escaparia de `revoke_all_credentials` e
+    passaria a valer num `unblock`. Os tetos ficam em `_issue_locked`.
+    """
+    _lock_active_account(session, owner_id)
+    return _issue_locked(
+        session, owner_id=owner_id, scopes=scopes, days=days, now=now, idem_key=None
+    )
+
+
+def _lock_active_account(session: Session, owner_id: UUID) -> None:
+    """Trava a linha da conta (`FOR NO KEY UPDATE`); se ela não existe ou não está ativa, levanta
+    `UnknownAccountError`.
+
+    Ativa é `active` e sem exclusão pedida: a pendente do cadastro fechado e a bloqueada por abuso
+    têm `status = blocked`.
+    """
     account = session.execute(
         select(app_user.c.id)
         .where(
@@ -402,15 +522,6 @@ def issue_key_for_session(
     ).first()
     if account is None:
         raise UnknownAccountError(f"conta {owner_id} não existe ou não está ativa")
-    # O Principal foi lido noutra transação: sem reconferir aqui, a emissão que esperou o
-    # `logout-all` sairia com chave ativa de uma sessão já revogada.
-    if not sessions.session_still_valid(session, session_id=session_id, owner_id=owner_id, now=now):
-        raise SessionNoLongerValidError(
-            f"a sessão {session_id} não vale mais para a conta {owner_id}"
-        )
-    return _issue_locked(
-        session, owner_id=owner_id, scopes=scopes, days=days, now=now, idem_key=idem_key
-    )
 
 
 def _issue_locked(
@@ -451,7 +562,7 @@ def _issue_locked(
         raise ActiveKeyLimitError(f"a conta já tem {MAX_ACTIVE_KEYS} chaves ativas")
     if stored >= MAX_STORED_KEYS:
         raise StoredKeyLimitError(f"a conta já guarda {MAX_STORED_KEYS} chaves")
-    return issue_key(
+    return _insert_key(
         session, owner_id=owner_id, scopes=scopes, now=now, days=days, idem_key=idem_key
     )
 
@@ -459,10 +570,10 @@ def _issue_locked(
 def list_keys(session: Session, owner_id: UUID, now: datetime) -> list[KeySummary]:
     """Chaves da conta até `MAX_LISTED_KEYS`: ativas primeiro, depois das mais novas às antigas.
 
-    Revogadas e vencidas ficam na tabela até `KEY_RETENTION` depois do fim. A emissão pela sessão
-    para em `MAX_STORED_KEYS`, que cabe inteiro na lista, mas o `gs-admin issue-key` não passa por
-    esse teto; sem priorizar as ativas (no máximo `MAX_ACTIVE_KEYS` pela sessão), chaves mais novas
-    tirariam da lista uma chave que ainda autentica, e o dono ficaria sem o id para revogá-la.
+    Revogadas e vencidas ficam na tabela até `KEY_RETENTION` depois do fim. A emissão, pela sessão
+    ou pelo `gs-admin issue-key`, para em `MAX_STORED_KEYS`, que cabe inteiro na lista. As ativas
+    vêm primeiro mesmo assim: chaves emitidas antes do teto existir podem passar dele, e as mais
+    novas não podem tirar da lista uma chave que ainda autentica, sem o id para revogá-la.
     """
     is_inactive = case(
         (and_(api_key.c.revoked_at.is_(None), api_key.c.expires_at > now), False), else_=True

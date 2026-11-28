@@ -15,7 +15,7 @@ from goblinshift.identity import Scope, revoke_key
 from goblinshift.platform.db import unit_of_work
 from goblinshift.platform.telemetry import UserHasher
 from tests.api.support import assert_problem
-from tests.identity.support import new_key, new_user
+from tests.identity.support import mark_blocked, new_key, new_user
 
 pytestmark = pytest.mark.integration
 
@@ -128,7 +128,9 @@ def test_chave_revogada_responde_401(client: TestClient, factory: sessionmaker[S
 
 
 def test_conta_bloqueada_responde_401(client: TestClient, factory: sessionmaker[Session]) -> None:
-    issued = new_key(factory, new_user(factory, blocked=True))
+    user_id = new_user(factory)
+    issued = new_key(factory, user_id)
+    mark_blocked(factory, user_id)
 
     response = client.get(ME, headers=bearer(issued.token))
 

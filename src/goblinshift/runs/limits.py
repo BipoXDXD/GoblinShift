@@ -9,6 +9,12 @@ perderiam uma mudança e auditariam `old` errado. Um advisory lock de transaçã
 como em `presets.store`, serializa o comando inteiro antes de qualquer leitura; vale também
 quando a conta ainda não tem linha em `account_quota`, onde um `FOR UPDATE` não teria o que travar.
 O segundo espera no máximo o `lock_timeout` de 2 s do `make_engine` e falha alto se passar dele.
+
+Cada limite tem teto (`MAX_LIMITS`), que o `gs-admin` confere antes de abrir a transação:
+execuções cabem na coluna `integer`; bytes de entrada param em 2^50, o mesmo CHECK do banco; e o
+armazenamento da conta não passa do pool global (`capacity.GLOBAL_STORAGE_MAX_BYTES`). Sem eles, um
+valor perto de 2^63 - 1 estourava o `bigint` em `reserved + amount` do livro-razão, e todo upload
+da conta respondia 500.
 """
 
 from collections.abc import Mapping
@@ -20,6 +26,7 @@ from sqlalchemy.orm import Session
 
 from goblinshift import capacity
 from goblinshift.identity import (
+    AuditActor,
     AuditEventType,
     AuditOutcome,
     LimitChange,
@@ -32,6 +39,14 @@ RUNS_PER_24H = "runs_per_24h"
 INPUT_BYTES_PER_24H = "input_bytes_per_24h"
 STORAGE_BYTES = "storage_bytes"
 LIMIT_ITEMS = (RUNS_PER_24H, INPUT_BYTES_PER_24H, STORAGE_BYTES)
+MAX_RUNS_PER_24H = 2**31 - 1
+MAX_INPUT_BYTES_PER_24H = capacity.BYTE_AMOUNT_CEILING
+MAX_STORAGE_BYTES = capacity.GLOBAL_STORAGE_MAX_BYTES
+MAX_LIMITS = {
+    RUNS_PER_24H: MAX_RUNS_PER_24H,
+    INPUT_BYTES_PER_24H: MAX_INPUT_BYTES_PER_24H,
+    STORAGE_BYTES: MAX_STORAGE_BYTES,
+}
 _LOCK_NAMESPACE = "goblinshift.runs.limits.owner"
 
 
@@ -72,5 +87,6 @@ def change_account_limits(
         ip=None,
         outcome=AuditOutcome.SUCCESS,
         now=now,
+        actor=AuditActor.ADMIN,
         details=limits_changed_details(changes),
     )

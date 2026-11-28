@@ -24,6 +24,7 @@ from testcontainers.community.postgres import PostgresContainer
 from goblinshift.entrypoints.maintenance import AccountJobs
 from goblinshift.files.storage import FileStorage
 from goblinshift.identity import (
+    AuditActor,
     AuditEventType,
     AuditOutcome,
     record_audit_event,
@@ -370,6 +371,7 @@ def _audit(factory: sessionmaker[Session], user_id: UUID, now: datetime) -> None
             ip=None,
             outcome=AuditOutcome.SUCCESS,
             now=now,
+            actor=AuditActor.USER,
         )
 
 

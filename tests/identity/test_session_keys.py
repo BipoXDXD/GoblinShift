@@ -8,7 +8,7 @@ from datetime import UTC, datetime, timedelta
 from uuid import UUID, uuid7
 
 import pytest
-from sqlalchemy import func, select, update
+from sqlalchemy import func, insert, select, update
 from sqlalchemy.orm import Session, sessionmaker
 
 from goblinshift.identity import (
@@ -22,7 +22,8 @@ from goblinshift.identity import (
     SessionNoLongerValidError,
     UnknownAccountError,
     authenticate_api_key,
-    issue_key,
+    generate_key,
+    issue_key_for_admin,
     issue_key_for_session,
     list_keys,
     revoke_owned_key,
@@ -180,11 +181,19 @@ def store_inactive_keys(factory: sessionmaker[Session], owner_id: UUID, count: i
     with unit_of_work(factory) as session:
         for index in range(count):
             if index % 2:
-                issue_key(
-                    session, owner_id=owner_id, scopes=READ, now=NOW - timedelta(days=31), days=30
+                # Validade de um dia, emitida em ordem cronológica: cada vencida já venceu quando
+                # a seguinte é emitida e não ocupa vaga de ativa.
+                issue_key_for_admin(
+                    session,
+                    owner_id=owner_id,
+                    scopes=READ,
+                    days=1,
+                    now=NOW - timedelta(days=count + 1 - index),
                 )
             else:
-                issued = issue_key(session, owner_id=owner_id, scopes=READ, now=NOW)
+                issued = issue_key_for_admin(
+                    session, owner_id=owner_id, scopes=READ, days=30, now=NOW
+                )
                 session.execute(
                     update(api_key)
                     .where(api_key.c.public_id == issued.public_id)
@@ -380,22 +389,26 @@ def test_listagem_traz_so_as_chaves_da_conta_mais_recentes_primeiro(
 def test_listar_chaves_mostra_ativa_antiga_depois_de_100_revogadas(
     factory: sessionmaker[Session],
 ) -> None:
-    # O `gs-admin issue-key` não passa pelo teto de `MAX_STORED_KEYS`: sem priorizar as ativas,
-    # 100 chaves mais novas tirariam da listagem uma chave que ainda autentica, e o dono não teria
-    # o id para revogá-la.
+    # Chaves de antes do teto de `MAX_STORED_KEYS` podem passar de 100, e a emissão de hoje não
+    # chega lá: as revogadas entram direto na tabela. Sem priorizar as ativas, 100 chaves mais
+    # novas tirariam da listagem uma chave que ainda autentica, e o dono não teria o id para
+    # revogá-la.
     owner = new_user(factory)
     active = issue(factory, owner, NOW - timedelta(days=1))
+    legacy = [
+        {
+            "owner_id": owner,
+            "public_id": key.public_id,
+            "secret_hash": key.secret_hash,
+            "scopes": sorted(READ),
+            "created_at": NOW + timedelta(minutes=minute),
+            "expires_at": NOW + timedelta(days=30),
+            "revoked_at": NOW + timedelta(minutes=minute),
+        }
+        for minute, key in enumerate(generate_key() for _ in range(MAX_LISTED_KEYS))
+    ]
     with unit_of_work(factory) as session:
-        for minute in range(MAX_LISTED_KEYS):
-            issue_key(
-                session, owner_id=owner, scopes=READ, days=30, now=NOW + timedelta(minutes=minute)
-            )
-            session.execute(
-                update(api_key)
-                .where(api_key.c.owner_id == owner, api_key.c.revoked_at.is_(None))
-                .where(api_key.c.public_id != active.public_id)
-                .values(revoked_at=NOW + timedelta(minutes=minute))
-            )
+        session.execute(insert(api_key), legacy)
 
     with unit_of_work(factory) as session:
         listed = list_keys(session, owner, NOW + timedelta(hours=2))

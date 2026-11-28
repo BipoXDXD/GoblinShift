@@ -29,7 +29,7 @@ from goblinshift.entrypoints.shutdown import ShutdownFlag
 from goblinshift.files import purge as files_purge
 from goblinshift.files.storage import FileStorage
 from goblinshift.files.tables import object_use, stored_object
-from goblinshift.identity import IssuedKey, Scope, issue_key, request_account_deletion
+from goblinshift.identity import IssuedKey, Scope, issue_key_for_admin, request_account_deletion
 from goblinshift.identity import purge as identity_purge
 from goblinshift.identity.rate_limit import RequestClass, count_request
 from goblinshift.identity.tables import (
@@ -82,7 +82,9 @@ def full_account(
     create_intent(factory, owner)
     now = datetime.now(UTC)
     with unit_of_work(factory) as session:
-        key = issue_key(session, owner_id=owner, scopes=frozenset(Scope), now=now)
+        key = issue_key_for_admin(
+            session, owner_id=owner, scopes=frozenset(Scope), days=30, now=now
+        )
         count_request(session, owner, "api_key", RequestClass.READ, now)
         # A janela sem canal da 0007, que a réplica anterior ao deploy ainda grava (preflight R4).
         session.execute(
@@ -323,10 +325,12 @@ def test_ciclo_de_contas_conta_api_keys_removed(factory: sessionmaker[Session]) 
     owner = create_user(factory, "bia")
     with unit_of_work(factory) as session:
         # Venceu há 31 dias: passou da retenção. A ativa fica.
-        issue_key(
+        issue_key_for_admin(
             session, owner_id=owner, scopes=frozenset(Scope), now=now - timedelta(days=61), days=30
         )
-        active = issue_key(session, owner_id=owner, scopes=frozenset(Scope), now=now, days=30)
+        active = issue_key_for_admin(
+            session, owner_id=owner, scopes=frozenset(Scope), now=now, days=30
+        )
 
     counts = AccountJobs(factory, cancel_active_run=keep_run, clock=lambda: now).run_cycle()
 

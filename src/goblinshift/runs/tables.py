@@ -20,6 +20,7 @@ from sqlalchemy import (
 )
 from sqlalchemy.dialects.postgresql import JSONB
 
+from goblinshift.capacity.tables import BYTE_AMOUNT_CEILING
 from goblinshift.platform.db import metadata
 
 _ACTIVE = "status IN ('queued', 'running', 'stopping')"
@@ -222,4 +223,8 @@ account_quota = Table(
     Column("updated_at", DateTime(timezone=True), nullable=False, server_default=func.now()),
     CheckConstraint("runs_per_24h > 0", name="runs_per_24h"),
     CheckConstraint("input_bytes_per_24h > 0", name="input_bytes_per_24h"),
+    # Barreira contra o estouro do bigint (migrações 0032/0033); o teto de negócio é do código.
+    CheckConstraint(
+        f"input_bytes_per_24h <= {BYTE_AMOUNT_CEILING}", name="input_bytes_per_24h_ceiling"
+    ),
 )

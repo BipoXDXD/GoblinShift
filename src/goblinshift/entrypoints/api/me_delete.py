@@ -25,6 +25,7 @@ from goblinshift.entrypoints.api.dependencies import (
 )
 from goblinshift.entrypoints.api.problems import ApiProblem, ProblemCode
 from goblinshift.identity import (
+    AuditActor,
     AuditEventType,
     AuditOutcome,
     UnknownAccountError,
@@ -58,6 +59,7 @@ def delete_me(
                 ip=request.client.host if request.client else None,
                 outcome=AuditOutcome.SUCCESS,
                 now=now,
+                actor=AuditActor.USER,
             )
     except UnknownAccountError:
         raise ApiProblem(
