@@ -24,8 +24,10 @@ from goblinshift.entrypoints.api.dependencies import current_time, require_recen
 from goblinshift.identity import (
     IssuedSession,
     Principal,
+    SessionRefusal,
     authenticate_api_key,
     issue_csrf_token,
+    resolve_session,
 )
 from goblinshift.identity.tables import audit_event
 from goblinshift.platform.db import unit_of_work
@@ -184,17 +186,21 @@ def test_sessao_expira_com_30_min_sem_uso(
 def test_sessao_expira_8h_apos_login_mesmo_com_uso(
     app: FastAPI, client: TestClient, factory: sessionmaker[Session]
 ) -> None:
-    # O teto conta da abertura da sessão (7 h antes de NOW), não do login no provedor.
+    # O teto conta da abertura da sessão, não do login no provedor. O uso a cada 20 min, o último
+    # em 7h40, deixaria a inatividade só para 8h10: em 8 h, quem derruba a sessão é o teto.
     opened = NOW - timedelta(hours=7)
     issued = open_session(app, new_user(factory), authenticated_at=opened, now=opened)
 
-    for minutes in range(25, 7 * 60 + 51, 25):
+    for minutes in range(20, 7 * 60 + 41, 20):
         _freeze(app, opened + timedelta(minutes=minutes))
         assert client.get(ME, headers=_cookie_only(issued)).status_code == 200
-    _freeze(app, NOW + timedelta(hours=1))
+    _freeze(app, opened + timedelta(hours=8))
     response = client.get(ME, headers=_cookie_only(issued))
 
     assert_problem(response, 401, "AUTHENTICATION_REQUIRED")
+    with unit_of_work(factory) as session:
+        refusal = resolve_session(session, issued.token, opened + timedelta(hours=8))
+    assert refusal is SessionRefusal.ABSOLUTE_EXPIRED
 
 
 # --- Autenticação recente ---------------------------------------------------------------------
