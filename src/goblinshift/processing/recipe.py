@@ -96,6 +96,7 @@ class OutputGroup(StrEnum):
     TEXT = "text"
     ARCHIVES = "archives"
     AUDIO = "audio"  # Media Mill (ADR 036)
+    DOCUMENTS = "documents"  # Downloads Detox v2 (ADR 067)
     # Derivados para pré-visualização (imagem reduzida, amostra de tabela): publicados com o papel
     # `preview`, fora do manifesto e do ZIP.
     PREVIEWS = "previews"

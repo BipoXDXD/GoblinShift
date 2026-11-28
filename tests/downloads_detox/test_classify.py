@@ -5,7 +5,9 @@ import io
 import pytest
 
 from goblinshift.processing.downloads_detox.classify import (
+    TEXT_BLOCK_BYTES,
     V1_FORMATS,
+    V2_FORMATS,
     Format,
     Kind,
     Refusal,
@@ -154,3 +156,95 @@ def test_executavel_e_script_sao_recusados_com_qualquer_extensao(
 
     assert isinstance(result, Refusal)
     assert "executável ou script" in result.reason
+
+
+# --- Versão 2: PDF, WebP e GIF pela assinatura, só no primeiro bloco ---------------------------
+
+
+@pytest.mark.parametrize(
+    ("name", "data", "fmt"),
+    [
+        ("a.pdf", samples.pdf(), Format.PDF),
+        ("a.webp", samples.webp(), Format.WEBP),
+        ("a.gif", samples.gif(samples.GIF87A), Format.GIF),
+        ("a.GIF", samples.gif(samples.GIF89A), Format.GIF),
+    ],
+)
+def test_v2_aceita_pela_assinatura(name: str, data: bytes, fmt: Format) -> None:
+    assert classify(io.BytesIO(data), name, V2_FORMATS) is fmt
+
+
+@pytest.mark.parametrize(
+    ("fmt", "kind", "extension"),
+    [
+        (Format.PDF, Kind.DOCUMENT, ".pdf"),
+        (Format.WEBP, Kind.IMAGE, ".webp"),
+        (Format.GIF, Kind.IMAGE, ".gif"),
+    ],
+)
+def test_formatos_novos_tem_tipo_e_extensao_canonica(
+    fmt: Format, kind: Kind, extension: str
+) -> None:
+    assert (fmt.kind, fmt.extension) == (kind, extension)
+
+
+def test_v2_continua_aceitando_os_formatos_da_v1() -> None:
+    assert V1_FORMATS < V2_FORMATS
+    assert classify(io.BytesIO(samples.png()), "a.png", V2_FORMATS) is Format.PNG
+    assert classify(io.BytesIO(samples.text()), "a.txt", V2_FORMATS) is Format.TXT
+
+
+def test_formato_binario_e_decidido_no_primeiro_bloco() -> None:
+    class OneRead(io.BytesIO):
+        reads = 0
+
+        def read(self, size: int | None = -1) -> bytes:
+            self.reads += 1
+            assert self.reads == 1, "o classificador leu além do primeiro bloco"
+            return super().read(size)
+
+    data = samples.pdf() + b"\0" * (3 * TEXT_BLOCK_BYTES)
+    assert classify(OneRead(data), "a.pdf", V2_FORMATS) is Format.PDF
+
+
+def test_riff_que_nao_e_webp_e_recusado() -> None:
+    wav = b"RIFF\x24\x00\x00\x00WAVEfmt "
+    assert classify(io.BytesIO(wav), "a.webp", V2_FORMATS) == Refusal(
+        "o conteúdo não tem a assinatura de WebP"
+    )
+
+
+def test_extensao_pdf_com_conteudo_jpeg_e_recusada() -> None:
+    assert classify(io.BytesIO(samples.jpeg()), "a.pdf", V2_FORMATS) == Refusal(
+        "o conteúdo é JPEG, mas a extensão é .pdf"
+    )
+
+
+def test_extensao_png_com_conteudo_gif_e_recusada_na_v2() -> None:
+    assert classify(io.BytesIO(samples.gif()), "a.png", V2_FORMATS) == Refusal(
+        "o conteúdo é GIF, mas a extensão é .png"
+    )
+
+
+def test_pdf_com_assinatura_de_executavel_e_recusado() -> None:
+    assert classify(io.BytesIO(b"MZ%PDF-1.7"), "a.pdf", V2_FORMATS) == Refusal(
+        "assinatura de executável ou script"
+    )
+
+
+def test_mensagem_da_v2_lista_as_extensoes_novas_no_fim() -> None:
+    assert classify(io.BytesIO(samples.text()), "a.exe", V2_FORMATS) == Refusal(
+        "extensão .exe não aceita; aceitas: .jpg, .jpeg, .png, .csv, .txt, .zip, .pdf, .webp, .gif"
+    )
+
+
+def test_v1_continua_recusando_pdf_com_a_mesma_mensagem() -> None:
+    assert classify(io.BytesIO(samples.pdf()), "a.pdf", V1_FORMATS) == Refusal(
+        "extensão .pdf não aceita; aceitas: .jpg, .jpeg, .png, .csv, .txt, .zip"
+    )
+
+
+def test_v1_nao_reconhece_pdf_dentro_de_png() -> None:
+    assert classify(io.BytesIO(samples.pdf()), "a.png", V1_FORMATS) == Refusal(
+        "o conteúdo não tem a assinatura de PNG"
+    )

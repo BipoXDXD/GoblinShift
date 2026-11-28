@@ -1,13 +1,15 @@
 """Classificação de uma entrada por assinatura, extensão e UTF-8 incremental (1.4).
 
-Nada é decodificado nem aberto: imagens e ZIP são reconhecidos pelos primeiros bytes, e texto
+Nada é decodificado nem aberto: imagens, PDF e ZIP são reconhecidos pelos primeiros bytes (só o
+primeiro bloco lido), e texto
 por uma passada do decodificador UTF-8. A extensão tem de estar na lista e ser coerente com a
 assinatura; incoerência é recusa, nunca adivinhação (A11). ZIP é opaco: um JAR, APK, DOCX ou
-XLSX chamado `.zip` passa como ZIP, porque só abrindo o arquivo daria para distingui-los.
+XLSX chamado `.zip` passa como ZIP, porque só abrindo o arquivo daria para distingui-los. PDF
+também é opaco: JavaScript, anexos e formulários só se veem abrindo, e isso é do PDF Press.
 """
 
 import codecs
-from collections.abc import Iterable
+from collections.abc import Callable, Iterable
 from dataclasses import dataclass
 from enum import StrEnum
 from itertools import chain
@@ -24,6 +26,7 @@ class Kind(StrEnum):
     TABLE = "table"
     TEXT = "text"
     ARCHIVE = "archive"
+    DOCUMENT = "document"
 
 
 class Format(StrEnum):
@@ -32,6 +35,9 @@ class Format(StrEnum):
     CSV = "csv"
     TXT = "txt"
     ZIP = "zip"
+    PDF = "pdf"
+    WEBP = "webp"
+    GIF = "gif"
 
     @property
     def kind(self) -> Kind:
@@ -49,6 +55,9 @@ _KIND = {
     Format.CSV: Kind.TABLE,
     Format.TXT: Kind.TEXT,
     Format.ZIP: Kind.ARCHIVE,
+    Format.PDF: Kind.DOCUMENT,
+    Format.WEBP: Kind.IMAGE,
+    Format.GIF: Kind.IMAGE,
 }
 _CANONICAL_EXTENSION = {
     Format.JPEG: ".jpg",
@@ -56,6 +65,9 @@ _CANONICAL_EXTENSION = {
     Format.CSV: ".csv",
     Format.TXT: ".txt",
     Format.ZIP: ".zip",
+    Format.PDF: ".pdf",
+    Format.WEBP: ".webp",
+    Format.GIF: ".gif",
 }
 _FORMAT_BY_EXTENSION = {
     ".jpg": Format.JPEG,
@@ -64,18 +76,49 @@ _FORMAT_BY_EXTENSION = {
     ".csv": Format.CSV,
     ".txt": Format.TXT,
     ".zip": Format.ZIP,
+    # Versão 2: no fim, para a mensagem da v1 continuar idêntica.
+    ".pdf": Format.PDF,
+    ".webp": Format.WEBP,
+    ".gif": Format.GIF,
 }
 # Formatos que uma versão da receita aceita; a v1 fica congelada nos cinco de 1.4.
 type AcceptedFormats = frozenset[Format]
 V1_FORMATS: AcceptedFormats = frozenset(
     {Format.JPEG, Format.PNG, Format.CSV, Format.TXT, Format.ZIP}
 )
-_LABEL = {Format.JPEG: "JPEG", Format.PNG: "PNG", Format.ZIP: "ZIP"}
-_BINARY_SIGNATURES = (
-    (b"\xff\xd8\xff", Format.JPEG),
-    (b"\x89PNG\r\n\x1a\n", Format.PNG),
-    (b"PK\x03\x04", Format.ZIP),
-    (b"PK\x05\x06", Format.ZIP),  # ZIP vazio: só o fim do diretório central
+V2_FORMATS: AcceptedFormats = V1_FORMATS | {Format.PDF, Format.WEBP, Format.GIF}
+_LABEL = {
+    Format.JPEG: "JPEG",
+    Format.PNG: "PNG",
+    Format.ZIP: "ZIP",
+    Format.PDF: "PDF",
+    Format.WEBP: "WebP",
+    Format.GIF: "GIF",
+}
+_RIFF = b"RIFF"
+_WEBP_FORM = b"WEBP"
+# O tipo da forma RIFF vem depois do tamanho do contêiner (4 bytes).
+_RIFF_FORM_SLICE = slice(8, 12)
+
+
+def _starts_with(signature: bytes) -> Callable[[bytes], bool]:
+    return lambda head: head.startswith(signature)
+
+
+def _is_webp(head: bytes) -> bool:
+    # WAV e AVI também são RIFF: só a forma WEBP distingue.
+    return head.startswith(_RIFF) and head[_RIFF_FORM_SLICE] == _WEBP_FORM
+
+
+_BINARY_SIGNATURES: tuple[tuple[Callable[[bytes], bool], Format], ...] = (
+    (_starts_with(b"\xff\xd8\xff"), Format.JPEG),
+    (_starts_with(b"\x89PNG\r\n\x1a\n"), Format.PNG),
+    (_starts_with(b"PK\x03\x04"), Format.ZIP),
+    (_starts_with(b"PK\x05\x06"), Format.ZIP),  # ZIP vazio: só o fim do diretório central
+    (_starts_with(b"%PDF-"), Format.PDF),
+    (_starts_with(b"GIF87a"), Format.GIF),
+    (_starts_with(b"GIF89a"), Format.GIF),
+    (_is_webp, Format.WEBP),
 )
 _EXECUTABLE_SIGNATURES = (
     b"MZ",  # PE (Windows)
@@ -144,11 +187,7 @@ def _format_by_extension(extension: str, accepted: AcceptedFormats) -> Format | 
 
 def _binary_format(head: bytes, accepted: AcceptedFormats) -> Format | None:
     return next(
-        (
-            fmt
-            for signature, fmt in _BINARY_SIGNATURES
-            if fmt in accepted and head.startswith(signature)
-        ),
+        (fmt for matches, fmt in _BINARY_SIGNATURES if fmt in accepted and matches(head)),
         None,
     )
 

@@ -79,6 +79,7 @@ def test_grupos_de_saida_sao_a_lista_fechada_do_plano() -> None:
         "text",
         "archives",
         "audio",
+        "documents",
         "previews",
     ]
 

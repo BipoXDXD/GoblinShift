@@ -24,6 +24,9 @@ INDEXED = Params(name_mode=NameMode.INDEXED)
         (Format.CSV, OutputGroup.TABLES),
         (Format.TXT, OutputGroup.TEXT),
         (Format.ZIP, OutputGroup.ARCHIVES),
+        (Format.PDF, OutputGroup.DOCUMENTS),
+        (Format.WEBP, OutputGroup.IMAGES),
+        (Format.GIF, OutputGroup.IMAGES),
     ],
 )
 def test_group_by_kind_usa_o_grupo_do_tipo(fmt: Format, group: OutputGroup) -> None:

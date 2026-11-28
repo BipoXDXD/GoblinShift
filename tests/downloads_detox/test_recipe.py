@@ -1,15 +1,18 @@
-"""Receita downloads-detox v1 sobre o contrato de 3.2 (docs/GoblinShiftPlan.md, 1.1, 1.4, 1.7)."""
+"""Receita downloads-detox, v1 e v2, sobre o contrato de 3.2 (GoblinShiftPlan, 1.1, 1.4, 1.7)."""
 
 import unicodedata
 
 import pytest
 
 from goblinshift.processing.downloads_detox import GroupBy, NameMode, Params
+from goblinshift.processing.downloads_detox.classify import V2_FORMATS
 from goblinshift.processing.downloads_detox.recipe import (
     MAX_INPUTS,
     MAX_TOTAL_INPUT_BYTES,
     OPAQUE_ARCHIVE_NOTE,
     OPAQUE_ARCHIVES_LIMIT,
+    OPAQUE_DOCUMENT_NOTE,
+    OPAQUE_DOCUMENTS_LIMIT,
     DownloadsDetox,
 )
 from goblinshift.processing.recipe import (
@@ -274,3 +277,61 @@ def test_duplicatas_e_rejeicoes_nao_contam_para_o_limite_do_lote(work: Workspace
     report = work.run(recipe=DownloadsDetox(max_total_bytes=10))
 
     assert [type(item) for item in report.items] == [ItemOk, ItemDuplicate, ItemRejected]
+
+
+# --- Versão 2: PDF em documents/, WebP e GIF em images/ ---------------------------------------
+
+
+def test_v2_copia_pdf_para_documents_e_imagens_novas_para_images(work: Workspace) -> None:
+    contents = {"a.pdf": samples.pdf(), "b.webp": samples.webp(), "c.gif": samples.gif()}
+    for name, data in contents.items():
+        work.add(name, data)
+
+    report = work.run(recipe=DownloadsDetox(accepted=V2_FORMATS))
+
+    assert work.output_paths() == ["documents/a.pdf", "images/b.webp", "images/c.gif"]
+    assert report.items == [
+        ItemOk(0, ("documents/a.pdf",), details={"kind": "document", "note": OPAQUE_DOCUMENT_NOTE}),
+        ItemOk(1, ("images/b.webp",), details=IMAGE),
+        ItemOk(2, ("images/c.gif",), details=IMAGE),
+    ]
+    assert [work.read(path) for path in work.output_paths()] == list(contents.values())
+
+
+def test_v2_relatorio_registra_o_limite_dos_pdfs_opacos(work: Workspace) -> None:
+    work.add("a.png", samples.png())
+
+    report = work.run(recipe=DownloadsDetox(accepted=V2_FORMATS))
+
+    assert report.details == {
+        "opaque_archives": OPAQUE_ARCHIVES_LIMIT,
+        "opaque_documents": OPAQUE_DOCUMENTS_LIMIT,
+    }
+
+
+def test_v2_indexed_usa_a_extensao_canonica_dos_formatos_novos(work: Workspace) -> None:
+    work.add("Relatório.PDF", samples.pdf())
+    work.add("anim.GIF", samples.gif())
+
+    work.run(Params(name_mode=NameMode.INDEXED), recipe=DownloadsDetox(accepted=V2_FORMATS))
+
+    assert work.output_paths() == ["documents/file-001.pdf", "images/file-002.gif"]
+
+
+def test_v1_recusa_pdf_webp_e_gif(work: Workspace) -> None:
+    work.add("a.pdf", samples.pdf())
+    work.add("b.webp", samples.webp())
+    work.add("c.gif", samples.gif())
+
+    report = work.run()
+
+    assert all(isinstance(item, ItemRejected) for item in report.items)
+    assert work.output_paths() == []
+
+
+def test_v1_relatorio_nao_ganha_chave_nova(work: Workspace) -> None:
+    work.add("a.png", samples.png())
+
+    report = work.run(recipe=DownloadsDetox())
+
+    assert report.details == {"opaque_archives": OPAQUE_ARCHIVES_LIMIT}

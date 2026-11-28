@@ -51,6 +51,14 @@ OPAQUE_ARCHIVES_LIMIT = (
     "JAR, APK, DOCX e XLSX com extensão .zip passam como ZIP opaco; "
     "a classificação não certifica que um arquivo é inofensivo"
 )
+OPAQUE_DOCUMENT_NOTE = "PDF copiado sem abrir: o Detox não confere o conteúdo"
+OPAQUE_DOCUMENTS_LIMIT = (
+    "PDFs passam sem inspeção; para recusar JavaScript, anexos e formulários, use o PDF Press"
+)
+
+
+# Tipos copiados sem abrir: o item diz que o conteúdo não foi conferido.
+_OPAQUE_NOTE = {Kind.ARCHIVE: OPAQUE_ARCHIVE_NOTE, Kind.DOCUMENT: OPAQUE_DOCUMENT_NOTE}
 
 
 @dataclass(frozen=True)
@@ -85,7 +93,14 @@ class DownloadsDetox:
         for decision in decisions:
             items.append(_carry_out(decision, params, out))
             progress.item_done(items[-1].position)
-        return Report(items, details={"opaque_archives": OPAQUE_ARCHIVES_LIMIT})
+        return Report(items, details=self._report_details())
+
+    def _report_details(self) -> dict[str, DetailValue]:
+        details: dict[str, DetailValue] = {"opaque_archives": OPAQUE_ARCHIVES_LIMIT}
+        # Só a versão que aceita PDF declara o limite dele; o relatório da v1 fica como era.
+        if Format.PDF in self._accepted:
+            details["opaque_documents"] = OPAQUE_DOCUMENTS_LIMIT
+        return details
 
     def _require_within_budget(self, decisions: Sequence[_Decision]) -> None:
         total = sum(d.entry.size for d in decisions if isinstance(d, _Accepted))
@@ -137,6 +152,6 @@ def _copy(entry: InputFile, fmt: Format, params: Params, out: OutputDir) -> Item
 
 def _details(fmt: Format) -> dict[str, DetailValue]:
     details: dict[str, DetailValue] = {"kind": fmt.kind.value}
-    if fmt.kind is Kind.ARCHIVE:
-        details["note"] = OPAQUE_ARCHIVE_NOTE
+    if (note := _OPAQUE_NOTE.get(fmt.kind)) is not None:
+        details["note"] = note
     return details

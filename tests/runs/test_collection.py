@@ -215,7 +215,9 @@ def test_saidas_em_grupos_permitidos_sao_coletadas_com_o_caminho(tmp_path: Path)
     assert collected.outputs[0].path == out / "images" / "a.jpg"
 
 
-@pytest.mark.parametrize("group", ["images", "thumbnails", "tables", "text", "archives"])
+@pytest.mark.parametrize(
+    "group", ["images", "thumbnails", "tables", "text", "archives", "documents"]
+)
 def test_cada_grupo_da_lista_fechada_e_aceito(tmp_path: Path, group: str) -> None:
     out = tmp_path / "out"
     write_out(out, [ok_item(0, f"{group}/x")], {f"{group}/x": b"1"})

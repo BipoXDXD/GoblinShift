@@ -17,6 +17,7 @@ _GROUP = {
     Kind.TABLE: OutputGroup.TABLES,
     Kind.TEXT: OutputGroup.TEXT,
     Kind.ARCHIVE: OutputGroup.ARCHIVES,
+    Kind.DOCUMENT: OutputGroup.DOCUMENTS,
 }
 
 

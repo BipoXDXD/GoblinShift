@@ -14,6 +14,9 @@ JPEG_SIGNATURE = b"\xff\xd8\xff"
 ZIP_LOCAL_HEADER = b"PK\x03\x04"
 ZIP_END_OF_CENTRAL_DIRECTORY = b"PK\x05\x06"
 JAVA_CLASS_MAGIC = b"\xca\xfe\xba\xbe"
+PDF_SIGNATURE = b"%PDF-"
+GIF87A = b"GIF87a"
+GIF89A = b"GIF89a"
 _ZIP_EPOCH = (1980, 1, 1, 0, 0, 0)
 
 # Diretório central vazio: assinatura do fim (4 bytes) e 18 bytes de campos zerados.
@@ -75,3 +78,23 @@ def docx() -> bytes:
 
 def text(content: str = "linha\n") -> bytes:
     return content.encode()
+
+
+def pdf(variant: int = 0) -> bytes:
+    """Começo e fim de um PDF; o Detox só lê a assinatura, então o corpo não precisa ser válido."""
+    return (
+        PDF_SIGNATURE + b"1.7\n%\xe2\xe3\xcf\xd3\n" + f"% amostra {variant}\n".encode() + b"%%EOF\n"
+    )
+
+
+def webp(variant: int = 0) -> bytes:
+    """Contêiner RIFF com a forma WEBP e um bloco VP8L curto."""
+    body = b"WEBP" + b"VP8L" + struct.pack("<I", 5) + bytes([0x2F, 0, 0, 0, variant % 256]) + b"\0"
+    return b"RIFF" + struct.pack("<I", len(body)) + body
+
+
+def gif(signature: bytes = GIF89A, variant: int = 0) -> bytes:
+    """GIF de 1 por 1 pixel; `signature` escolhe entre GIF87a e GIF89a."""
+    screen = struct.pack("<HHBBB", 1, 1, 0x80, 0, 0) + bytes([0, 0, 0, variant % 256, 0, 0])
+    image = b"\x2c" + struct.pack("<HHHHB", 0, 0, 1, 1, 0) + b"\x02\x02\x44\x01\x00"
+    return signature + screen + image + b"\x3b"
