@@ -290,7 +290,7 @@ def test_reauth_pelo_github_continua_recente(
     sessions: StoredSessions,
     login_app: FastAPI,
 ) -> None:
-    # O GitHub não informa a hora do login: a reautenticação vale como recente (ADR 062).
+    # O GitHub não informa a hora do login: a reautenticação vale como recente (ADR 065).
     open_signup(login_app)
     login(client, fake, "github")
 

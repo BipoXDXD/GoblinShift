@@ -35,7 +35,7 @@ GOOGLE_ID_TOKEN_ALGORITHMS = ("RS256",)
 GOOGLE_SCOPE = "openid"
 GOOGLE_DISPLAY_NAME = "Conta Google"
 # O Google não aceita `prompt=login` nem `max_age`: a recência vem do `auth_time` do ID token, que
-# só vem se o pedido o exige assim (e com "Session age claims" ligado no console; ADR 062).
+# só vem se o pedido o exige assim (e com "Session age claims" ligado no console; ADR 065).
 GOOGLE_AUTH_TIME_CLAIMS = '{"id_token":{"auth_time":{"essential":true}}}'
 
 GITHUB_ISSUER = "https://github.com"

@@ -319,7 +319,7 @@ SPAN_CAUSES: tuple[_SpanCause, ...] = (
         "causa-google-sem-auth-time",
         "Login no Google sem auth_time: a recência da sessão cai na hora do callback, e um "
         "navegador já logado no Google abre DELETE /me e a emissão de chave sem senha. Ligue "
-        "Session age claims no Google Auth Platform (ADR 062); veja o runbook em "
+        "Session age claims no Google Auth Platform (ADR 065); veja o runbook em "
         "deploy/openobserve/README.md.",
         period_minutes=10,
         silence_minutes=180,

@@ -57,4 +57,4 @@ A variável não fica ligada no Compose nem no Coolify: o arquivo só existe dur
 
 ## Atualização de 2026-11-28 (#366)
 
-A recência da sessão no Google passa a vir do `auth_time` do ID token, e o teto absoluto de 8 h conta da abertura da sessão: [ADR 062](062-reautenticacao-pelo-auth-time-do-google.md).
+A recência da sessão no Google passa a vir do `auth_time` do ID token, e o teto absoluto de 8 h conta da abertura da sessão: [ADR 065](065-reautenticacao-pelo-auth-time-do-google.md).

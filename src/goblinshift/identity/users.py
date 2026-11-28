@@ -41,7 +41,7 @@ class LoginRefused(Enum):
     # Reautenticação (`reauth=1`) que voltou com a identidade de outra conta, ou de nenhuma.
     REAUTH_MISMATCH = auto()
     # Reautenticação da mesma conta com login no provedor fora da janela de recência: o Google
-    # confirmou a conta sem pedir a senha (ADR 062). Este motivo o navegador recebe, com aviso.
+    # confirmou a conta sem pedir a senha (ADR 065). Este motivo o navegador recebe, com aviso.
     REAUTH_STALE = auto()
 
 

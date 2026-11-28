@@ -16,7 +16,7 @@ export const LOGIN_ERROR_PARAM = "login_error";
 export const LOGIN_FAILED = "failed";
 /**
  * Reautenticação que o Google confirmou sem pedir a senha (LOGIN_REAUTH_STALE_LOCATION): a sessão
- * continua, mas a confirmação não vale (ADR 062).
+ * continua, mas a confirmação não vale (ADR 065).
  */
 export const LOGIN_REAUTH_STALE = "reauth_stale";
 // Código de referência do login recusado (`#ref=<request_id>`, LOGIN_REF_FRAGMENT): o UUID v4 que

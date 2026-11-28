@@ -1,4 +1,4 @@
-# ADR 062. Recência da sessão pelo `auth_time` do Google
+# ADR 065. Recência da sessão pelo `auth_time` do Google
 
 - **Estado:** aceito (2026-11-22, decisões D1 a D5 do dono no plano `docs/superpowers/plans/2026-11-22-login-e-borda.md`)
 - **Plano:** [3.6](../GoblinShiftPlan.md#s3-6) (sessão e autenticação recente)

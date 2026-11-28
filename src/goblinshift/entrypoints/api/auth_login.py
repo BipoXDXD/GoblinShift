@@ -18,7 +18,7 @@ navegador já tem, e o callback só aceita a identidade dessa mesma conta. Outra
 provedor) é recusada antes de qualquer escrita: a sessão anterior continua valendo e nenhuma
 sessão recente nasce para quem não pediu a confirmação. Sem sessão válida, é um login comum.
 
-Recência (ADR 062): o Google não força a senha (não aceita `prompt=login` nem `max_age`), então
+Recência (ADR 065): o Google não força a senha (não aceita `prompt=login` nem `max_age`), então
 todo pedido a ele exige o claim `auth_time`, e a sessão guarda `min(auth_time, agora)` como
 `authenticated_at`. Um navegador logado no Google há dias entra, mas não abre `DELETE /me` nem a
 emissão de chave. Sem `auth_time` ("Session age claims" desligado), vale a hora do callback, com o
