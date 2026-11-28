@@ -44,6 +44,7 @@ from goblinshift.entrypoints.api.json_command import (
     json_command,
 )
 from goblinshift.entrypoints.api.presets import (
+    ETAG_PATTERN,
     if_match_parameter,
     parse_if_match_revision,
     stale_preset,
@@ -427,15 +428,13 @@ def _preset_run_openapi() -> dict[str, Any]:
         "additionalProperties": False,
     }
     idempotency_key = idempotency_key_parameter(required=True)
-    required_if_match = if_match_parameter()
-    etag_pattern = required_if_match["schema"]["pattern"].removeprefix("^").removesuffix("$")
     if_match = {
-        **required_if_match,
+        **if_match_parameter(),
         # Opcional aqui: ausente ou `*` roda a revisão atual do preset.
         "required": False,
         "description": 'ETag da leitura do preset (`"3"`); de outra revisão → 412. Ausente ou '
         "`*`: roda a revisão atual.",
-        "schema": {"type": "string", "pattern": rf"^(\*|{etag_pattern})$"},
+        "schema": {"type": "string", "pattern": rf"^(\*|{ETAG_PATTERN.pattern})$"},
     }
     return {
         "parameters": [idempotency_key, if_match],

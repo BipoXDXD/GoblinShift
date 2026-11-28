@@ -59,7 +59,7 @@ PRESETS_PATH = "/presets"
 PRESET_PATH = f"{PRESETS_PATH}/{{preset_id}}"
 _IF_MATCH_HEADER = "If-Match"
 # Um ETag forte com a revisão: `"12"`. Teto de dígitos só para não converter texto enorme.
-_ETAG_PATTERN = re.compile(r'"([1-9][0-9]{0,8})"')
+ETAG_PATTERN = re.compile(r'"([1-9][0-9]{0,8})"')
 _ETAG_HEADER_DOC = {
     "ETag": {
         "description": 'Revisão entre aspas (`"3"`); envie-a em `If-Match` para alterar.',
@@ -126,7 +126,7 @@ def if_match_parameter() -> dict[str, Any]:
         # Lido à mão: declarado na assinatura, a ausência viraria 422 e não o 428 do contrato.
         "required": True,
         "description": 'ETag da leitura (`"3"`); ausente → 428, de outra revisão → 412.',
-        "schema": {"type": "string", "pattern": f"^{_ETAG_PATTERN.pattern}$"},
+        "schema": {"type": "string", "pattern": f"^{ETAG_PATTERN.pattern}$"},
     }
 
 
@@ -273,7 +273,7 @@ def parse_if_match_revision(request: Request, *, required: bool) -> int | None:
             ProblemCode.PRECONDITION_REQUIRED,
             'Envie If-Match com o ETag lido do preset (por exemplo, "1").',
         )
-    matched = _ETAG_PATTERN.fullmatch(raw)
+    matched = ETAG_PATTERN.fullmatch(raw)
     if matched is None:
         raise ApiProblem(
             ProblemCode.BAD_REQUEST,

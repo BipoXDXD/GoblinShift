@@ -479,7 +479,46 @@ def test_if_match_fora_da_forma_responde_400(
 
     response = run_preset(client, account, preset["id"], inputs, headers={"If-Match": header})
 
-    assert response.status_code == 400, response.text
+    assert_problem(response, 400, "BAD_REQUEST")
+    assert count_rows(factory) == before
+
+
+@pytest.mark.parametrize("header", ['"1"', '"2"'], ids=["revisao-dele", "outra-revisao"])
+def test_if_match_em_preset_de_outra_conta_responde_404_sem_criar(
+    client: TestClient, factory: sessionmaker[Session], storage: FileStorage, header: str
+) -> None:
+    preset = create_preset(client, Account(factory), trim_columns=["segredo"])
+    attacker = Account(factory)
+    inputs = ready_inputs(factory, storage, attacker.id)
+    before = count_rows(factory)
+
+    response = run_preset(client, attacker, preset["id"], inputs, headers={"If-Match": header})
+
+    assert_problem(response, 404, "NOT_FOUND")
+    assert "segredo" not in response.text
+    assert count_rows(factory) == before
+
+
+def test_replay_com_if_match_antigo_depois_de_editar_repete_a_execucao(
+    client: TestClient, factory: sessionmaker[Session], storage: FileStorage
+) -> None:
+    # O replay vem antes da leitura do preset: o retry repete a Run aceita, mesmo com o If-Match
+    # que agora seria de revisão antiga (412 só para uma chave nova).
+    account = Account(factory)
+    preset = create_preset(client, account, trim_columns=["a"])
+    inputs = ready_inputs(factory, storage, account.id)
+    key = str(uuid.uuid4())
+    first = run_preset(client, account, preset["id"], inputs, key, headers={"If-Match": '"1"'})
+    assert first.status_code == 202, first.text
+    _edit_preset(client, account, preset["id"], '"1"')
+    before = count_rows(factory)
+
+    again = run_preset(client, account, preset["id"], inputs, key, headers={"If-Match": '"1"'})
+
+    assert again.status_code == 202, again.text
+    assert again.headers["idempotency-replayed"] == "true"
+    assert again.json()["id"] == first.json()["id"]
+    assert again.json()["preset_revision"] == 1
     assert count_rows(factory) == before
 
 
