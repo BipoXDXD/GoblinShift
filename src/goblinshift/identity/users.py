@@ -33,13 +33,16 @@ class ExternalIdentity:
 
 
 class LoginRefused(Enum):
-    """Motivo interno da recusa; o navegador recebe sempre o mesmo erro genérico."""
+    """Motivo interno da recusa; o navegador recebe o mesmo erro genérico, salvo `REAUTH_STALE`."""
 
     BLOCKED = auto()
     PENDING_APPROVAL = auto()
     DELETION_REQUESTED = auto()
     # Reautenticação (`reauth=1`) que voltou com a identidade de outra conta, ou de nenhuma.
     REAUTH_MISMATCH = auto()
+    # Reautenticação da mesma conta com login no provedor fora da janela de recência: o Google
+    # confirmou a conta sem pedir a senha (ADR 062). Este motivo o navegador recebe, com aviso.
+    REAUTH_STALE = auto()
 
 
 @dataclass(frozen=True)

@@ -2,7 +2,13 @@ import { CircleAlert } from "lucide-react";
 import { useEffect, useLayoutEffect, useRef, type ReactElement } from "react";
 import { Navigate, NavLink, Outlet, useLocation, useMatches, useSearchParams } from "react-router";
 
-import { LOGIN_ERROR_PARAM, loginRefFrom, safeReturnTo } from "../account/signIn";
+import {
+  LOGIN_ERROR_PARAM,
+  LOGIN_FAILED,
+  LOGIN_REAUTH_STALE,
+  loginRefFrom,
+  safeReturnTo,
+} from "../account/signIn";
 import { isSignedOut, useMe } from "../account/useMe";
 import type { SiteNotice } from "../notice/notice";
 import { SiteNoticeBanner } from "../notice/SiteNoticeBanner";
@@ -17,8 +23,6 @@ const T = TEXT.layout;
 const MAIN_ID = "conteudo";
 const NAV_LINK =
   "inline-flex min-h-11 items-center font-semibold aria-[current=page]:text-fg aria-[current=page]:no-underline";
-/** Valor exato com que o servidor volta de um login recusado (auth_login.py). */
-const LOGIN_FAILED = "failed";
 /**
  * Telas abertas a quem ainda não aceitou os termos vigentes: ler e aceitar os textos e, como na
  * API (ADR 029), reduzir o próprio acesso pelo Acesso (sair, revogar chaves, excluir a conta).
@@ -191,7 +195,9 @@ function TermsGate(): ReactElement {
 
 /**
  * O servidor volta para `/?login_error=failed#ref=<request_id>` em toda recusa, sem dizer o motivo
- * (auth_login.py). O código serve para a pessoa citar no pedido de suporte ou no recurso.
+ * (auth_login.py). O código serve para a pessoa citar no pedido de suporte ou no recurso. A única
+ * exceção é a reautenticação que o Google confirmou sem senha (`login_error=reauth_stale`): aí a
+ * mensagem diz o que fazer, porque só chega lá quem já tem a sessão daquela conta.
  *
  * O alerta fica antes do `h1` da tela e toma o foco inicial, como o resumo de erros: com o foco no
  * título, a leitura seguiria para baixo sem passar pela mensagem, e a mudança de foco pode cortar o
@@ -199,13 +205,17 @@ function TermsGate(): ReactElement {
  */
 function LoginFailedAlert(): ReactElement | null {
   const [params] = useSearchParams();
-  if (params.get(LOGIN_ERROR_PARAM) !== LOGIN_FAILED) {
-    return null;
+  const error = params.get(LOGIN_ERROR_PARAM);
+  if (error === LOGIN_FAILED) {
+    return <LoginFailedMessage message={TEXT.account.signIn.failed} />;
   }
-  return <LoginFailedMessage />;
+  if (error === LOGIN_REAUTH_STALE) {
+    return <LoginFailedMessage message={TEXT.account.signIn.reauthStale} />;
+  }
+  return null;
 }
 
-function LoginFailedMessage(): ReactElement {
+function LoginFailedMessage({ message }: { readonly message: string }): ReactElement {
   const { hash } = useLocation();
   const alert = useRef<HTMLDivElement>(null);
   useEffect(() => {
@@ -223,7 +233,7 @@ function LoginFailedMessage(): ReactElement {
     >
       <CircleAlert aria-hidden="true" className="mt-1 size-4 flex-none" />
       <div className="flex max-w-prose flex-col gap-1">
-        <p className="font-semibold">{TEXT.account.signIn.failed}</p>
+        <p className="font-semibold">{message}</p>
         {ref !== null && <p className="font-mono text-sm">{TEXT.failure.requestId(ref)}</p>}
       </div>
     </div>

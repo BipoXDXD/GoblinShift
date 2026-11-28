@@ -7,12 +7,14 @@ import hmac
 import io
 import json
 import logging
+import re
 import time
 from collections.abc import Callable
 from datetime import UTC, datetime
 from hashlib import sha256
 from typing import Any
 from urllib.parse import parse_qs, urlencode, urlsplit
+from uuid import UUID
 
 import httpx2 as httpx
 import pytest
@@ -36,6 +38,7 @@ from tests.api.auth.support import (
     accounts,
     alert_events,
     assert_login_failed,
+    audit_by_ref,
     audit_events,
     browser,
     cookie_header,
@@ -362,6 +365,80 @@ def test_auth_time_com_tipo_errado_e_recusado(
     fake.claims_patch = {"auth_time": auth_time}
 
     assert_nothing_logged_in(factory, sessions, login(client, fake, "google"))
+
+
+# --- Reautenticação com `auth_time` velho (D2) -----------------------------------------------
+
+REAUTH_STALE_WITH_REF = re.compile(
+    r"/\?login_error=reauth_stale#ref=([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})"
+)
+
+
+def test_reauth_com_auth_time_velho_mantem_a_sessao_e_avisa(
+    client: TestClient,
+    fake: FakeProviders,
+    sessions: StoredSessions,
+    factory: sessionmaker[Session],
+    login_app: FastAPI,
+) -> None:
+    # "Entre de novo", e o Google volta sem pedir a senha: a confirmação não vale.
+    open_signup(login_app)
+    login(client, fake, "google")
+    [account] = accounts(factory)
+    fake.claims_patch = {"auth_time": _now() - 2 * 3600}
+
+    response = login(client, fake, "google", reauth="1")
+
+    assert response.status_code == 303
+    matched = REAUTH_STALE_WITH_REF.fullmatch(response.headers["location"])
+    assert matched is not None, response.headers["location"]
+    assert matched.group(1) == response.headers[REQUEST_ID_HEADER]
+    assert "__Host-gs_session" not in response.headers.get("set-cookie", "")
+    assert sessions.revoked == []
+    assert len(sessions.started) == 1
+    assert sessions.started[0].issued_for(client.cookies["__Host-gs_session"])
+    assert audit_events(factory)[-1] == ("REAUTH_REQUIRED", "failure", account["id"])
+    assert audit_by_ref(factory, UUID(matched.group(1))) == [("REAUTH_REQUIRED", account["id"])]
+
+
+@pytest.mark.parametrize(("age", "stale"), [(600, False), (601, True)], ids=["600s", "601s"])
+def test_reauth_na_fronteira_de_10_min(
+    client: TestClient,
+    fake: FakeProviders,
+    sessions: StoredSessions,
+    login_app: FastAPI,
+    age: int,
+    stale: bool,
+) -> None:
+    # Como `require_recent_session`, só passar de 10 min recusa.
+    open_signup(login_app)
+    frozen = freeze_api_clock(login_app)
+    login(client, fake, "google")
+    fake.claims_patch = {"auth_time": frozen - age}
+
+    response = login(client, fake, "google", reauth="1")
+
+    assert response.headers["location"].startswith("/?login_error=reauth_stale") is stale
+    assert len(sessions.started) == (1 if stale else 2)
+
+
+def test_reauth_com_auth_time_recente_abre_sessao_recente(
+    client: TestClient,
+    fake: FakeProviders,
+    sessions: StoredSessions,
+    login_app: FastAPI,
+) -> None:
+    open_signup(login_app)
+    login(client, fake, "google")
+    fake.claims_patch = {"auth_time": _now() - 60}
+
+    response = login(client, fake, "google", reauth="1")
+
+    assert response.headers["location"] == "/"
+    first, second = sessions.started
+    assert sessions.revoked == [first.session_id]
+    assert second.issued_for(client.cookies["__Host-gs_session"])
+    assert client.delete("/api/v1/me", headers=delete_me_headers(client)).status_code == 202
 
 
 # --- Cadastro fechado e contas recusadas -----------------------------------------------------

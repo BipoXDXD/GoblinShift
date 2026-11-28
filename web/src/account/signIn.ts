@@ -12,6 +12,13 @@ const MAX_RETURN_TO_CHARS = 512;
 const DEFAULT_RETURN_TO = "/";
 /** Parâmetro com que o servidor volta quando o login falha (LOGIN_FAILED_LOCATION). */
 export const LOGIN_ERROR_PARAM = "login_error";
+/** Valor exato com que o servidor volta de um login recusado (auth_login.py). */
+export const LOGIN_FAILED = "failed";
+/**
+ * Reautenticação que o Google confirmou sem pedir a senha (LOGIN_REAUTH_STALE_LOCATION): a sessão
+ * continua, mas a confirmação não vale (ADR 062).
+ */
+export const LOGIN_REAUTH_STALE = "reauth_stale";
 // Código de referência do login recusado (`#ref=<request_id>`, LOGIN_REF_FRAGMENT): o UUID v4 que
 // o servidor gera, em minúsculas. Qualquer outro valor é ignorado, para o fragmento não virar um
 // jeito de pôr texto arbitrário na tela de erro.

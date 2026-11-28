@@ -51,3 +51,5 @@ Antes do deploy deste ADR: ligar "Session age claims" em Google Auth Platform â†
 - `tests/api/auth/test_auth_login.py::test_pedido_ao_google_pede_o_auth_time`
 - `tests/api/auth/test_auth_callback_google.py::test_sessao_do_google_conta_recencia_pelo_auth_time`, `::test_sem_auth_time_vale_agora_e_alerta`, `::test_auth_time_no_futuro_vira_agora`, `::test_auth_time_com_tipo_errado_e_recusado`
 - `tests/identity/test_sessions.py::test_login_antigo_no_provedor_abre_sessao_com_teto_contado_de_agora`
+- `tests/api/auth/test_auth_callback_google.py::test_reauth_com_auth_time_velho_mantem_a_sessao_e_avisa`, `::test_reauth_na_fronteira_de_10_min`
+- `tests/api/auth/test_auth_callback_github.py::test_reauth_pelo_github_continua_recente` (caracteriza o risco aceito)

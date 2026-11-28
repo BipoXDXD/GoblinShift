@@ -22,6 +22,7 @@ from tests.api.auth.support import (
     accounts,
     assert_login_failed,
     audit_events,
+    delete_me_headers,
     login,
     open_signup,
 )
@@ -281,3 +282,23 @@ def test_reauth_pelo_github_com_sessao_do_google_e_recusada(
     assert sessions.started_for == [google_account]
     assert [account["issuer"] for account in accounts(factory)] == [GOOGLE_ISSUER]
     assert audit_events(factory)[-1] == ("LOGIN_FAILED", "failure", google_account)
+
+
+def test_reauth_pelo_github_continua_recente(
+    client: TestClient,
+    fake: FakeProviders,
+    sessions: StoredSessions,
+    login_app: FastAPI,
+) -> None:
+    # O GitHub não informa a hora do login: a reautenticação vale como recente (ADR 062).
+    open_signup(login_app)
+    login(client, fake, "github")
+
+    response = login(client, fake, "github", reauth="1")
+
+    assert response.status_code == 303
+    assert response.headers["location"] == "/"
+    first, second = sessions.started
+    assert sessions.revoked == [first.session_id]
+    assert second.issued_for(client.cookies["__Host-gs_session"])
+    assert client.delete("/api/v1/me", headers=delete_me_headers(client)).status_code == 202
