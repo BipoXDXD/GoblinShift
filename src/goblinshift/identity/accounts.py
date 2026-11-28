@@ -64,6 +64,9 @@ class Account:
     display_name: str
     issuer: str
     accepted_terms: AcceptedTerms | None
+    # `active` ou `blocked` (CHECK `app_user_status`).
+    status: str
+    created_at: datetime
 
     def needs_terms_acceptance(self, current_version: str) -> bool:
         """Conta do login sem o aceite da versão vigente (1.8; ADR 029).
@@ -235,6 +238,8 @@ def find_account(session: Session, owner_id: UUID) -> Account | None:
             app_user.c.issuer,
             app_user.c.terms_version,
             app_user.c.terms_accepted_at,
+            app_user.c.status,
+            app_user.c.created_at,
         ).where(app_user.c.id == owner_id)
     ).first()
     if row is None:
@@ -246,7 +251,12 @@ def find_account(session: Session, owner_id: UUID) -> Account | None:
         else AcceptedTerms(version=row.terms_version, accepted_at=row.terms_accepted_at)
     )
     return Account(
-        id=row.id, display_name=row.display_name, issuer=row.issuer, accepted_terms=accepted
+        id=row.id,
+        display_name=row.display_name,
+        issuer=row.issuer,
+        accepted_terms=accepted,
+        status=row.status,
+        created_at=row.created_at,
     )
 
 
@@ -456,8 +466,11 @@ def _issue_locked(
     )
 
 
-def list_keys(session: Session, owner_id: UUID, now: datetime) -> list[KeySummary]:
-    """Chaves da conta até `MAX_LISTED_KEYS`: ativas primeiro, depois das mais novas às antigas.
+def list_keys(
+    session: Session, owner_id: UUID, now: datetime, *, limit: int | None = MAX_LISTED_KEYS
+) -> list[KeySummary]:
+    """Chaves da conta até `limit` (`MAX_LISTED_KEYS` na tela): ativas primeiro, depois das mais
+    novas às antigas. `None` traz todas: a exportação da conta (art. 19) não corta nenhuma.
 
     Revogadas e vencidas ficam na tabela até `KEY_RETENTION` depois do fim. A emissão pela sessão
     para em `MAX_STORED_KEYS`, que cabe inteiro na lista, mas o `gs-admin issue-key` não passa por
@@ -479,7 +492,7 @@ def list_keys(session: Session, owner_id: UUID, now: datetime) -> list[KeySummar
         )
         .where(api_key.c.owner_id == owner_id)
         .order_by(is_inactive, api_key.c.created_at.desc(), api_key.c.id.desc())
-        .limit(MAX_LISTED_KEYS)
+        .limit(limit)
     ).all()
     return [
         KeySummary(

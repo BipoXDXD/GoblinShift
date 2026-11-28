@@ -74,12 +74,13 @@ _LIMITED_CLASSES: dict[RateLimitClass, RequestClass | None] = {
     RateLimitClass.RUN_CREATE: RequestClass.RUN_CREATE,
     RateLimitClass.TRANSFER: None,
 }
-# Rotas que a conta sem o aceite dos termos vigentes continua usando (ADR 029): ler a própria
-# conta, aceitar os termos e reduzir o próprio acesso (sair de tudo, ver e revogar chaves,
+# Rotas que a conta sem o aceite dos termos vigentes continua usando (ADR 029): ler e exportar a
+# própria conta, aceitar os termos e reduzir o próprio acesso (sair de tudo, ver e revogar chaves,
 # excluir a conta). O `POST /auth/logout` não autentica e nunca passa pelo bloqueio.
 _TERMS_EXEMPT_ROUTES = frozenset(
     {
         ("GET", "/api/v1/me"),
+        ("GET", "/api/v1/me/export"),
         ("POST", "/api/v1/me/terms:accept"),
         ("DELETE", "/api/v1/me"),
         ("POST", "/auth/logout-all"),

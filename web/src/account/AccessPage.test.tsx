@@ -1,6 +1,6 @@
 import { screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { apiKeyBody, KEY_ID, meBody, SECOND_KEY_ID } from "../test/account";
 import { appRoutes, preloadRoutes } from "../test/appRoutes";
@@ -1045,5 +1045,95 @@ describe("Acesso: excluir conta", () => {
     await openDialog(user);
 
     expect(await axeViolations(container)).toEqual([]);
+  });
+});
+
+describe("Acesso: seus dados", () => {
+  const EXPORTED = {
+    generated_at: "2026-11-28T12:00:00Z",
+    account: { id: "5f0c7c1a-2b3d-4e5f-8a9b-0c1d2e3f4a5b", display_name: "Ana" },
+    runs: [],
+  };
+  const saved: { name: string; blob: Blob }[] = [];
+  const createObjectURL = vi.fn((blob: Blob) => {
+    saved.push({ name: "", blob });
+    return `blob:fake-${String(saved.length)}`;
+  });
+  const revokeObjectURL = vi.fn();
+
+  beforeEach(() => {
+    saved.length = 0;
+    vi.stubGlobal("URL", Object.assign(URL, { createObjectURL, revokeObjectURL }));
+    // O jsdom não baixa arquivos: o clique no link só registra o nome pedido.
+    vi.spyOn(HTMLAnchorElement.prototype, "click").mockImplementation(function (
+      this: HTMLAnchorElement,
+    ) {
+      const last = saved.at(-1);
+      if (last !== undefined) {
+        last.name = this.download;
+      }
+    });
+  });
+
+  afterEach(() => {
+    vi.unstubAllGlobals();
+    vi.restoreAllMocks();
+    createObjectURL.mockClear();
+    revokeObjectURL.mockClear();
+  });
+
+  it("baixa o JSON da conta", async () => {
+    const { api, user } = setup({ "GET /api/v1/me/export": () => jsonResponse(EXPORTED) });
+
+    await user.click(
+      within(await section("Seus dados")).getByRole("button", {
+        name: "Baixar meus dados (JSON)",
+      }),
+    );
+
+    await waitFor(() => {
+      expect(revokeObjectURL).toHaveBeenCalledWith("blob:fake-1");
+    });
+    const [file] = saved;
+    expect(file?.name).toBe("goblinshift-conta.json");
+    expect(file?.blob.type).toBe("application/json");
+    expect(JSON.parse((await file?.blob.text()) ?? "")).toEqual(EXPORTED);
+    expect(sent(api.requests, "GET /api/v1/me/export")).toHaveLength(1);
+  });
+
+  it("enquanto prepara, o botão fica ocupado e não repete o pedido", async () => {
+    const held = heldResponse();
+    const { api, user } = setup({ "GET /api/v1/me/export": held.handler });
+    const region = await section("Seus dados");
+
+    await user.click(within(region).getByRole("button", { name: "Baixar meus dados (JSON)" }));
+
+    const busy = await within(region).findByRole("button", { name: "Preparando…" });
+    expect(busy).toHaveAttribute("aria-busy", "true");
+    expect(busy).toHaveAttribute("aria-disabled", "true");
+    await user.click(busy);
+    held.answer(jsonResponse(EXPORTED));
+    const ready = await within(region).findByRole("button", { name: "Baixar meus dados (JSON)" });
+    expect(ready).not.toHaveAttribute("aria-busy", "true");
+    expect(sent(api.requests, "GET /api/v1/me/export")).toHaveLength(1);
+  });
+
+  it("pede login recente no REAUTH_REQUIRED", async () => {
+    const { user } = setup({
+      "GET /api/v1/me/export": () => problemResponse(401, "REAUTH_REQUIRED"),
+    });
+
+    await user.click(
+      within(await section("Seus dados")).getByRole("button", {
+        name: "Baixar meus dados (JSON)",
+      }),
+    );
+
+    const prompt = await section("Entre de novo para confirmar");
+    expect(within(prompt).getByRole("link", { name: "Entrar com Google" })).toHaveAttribute(
+      "href",
+      "/auth/login/google?return_to=%2Facesso&reauth=1",
+    );
+    expect(createObjectURL).not.toHaveBeenCalled();
   });
 });

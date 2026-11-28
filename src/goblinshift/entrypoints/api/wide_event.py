@@ -45,6 +45,8 @@ _READ_METHODS = frozenset({"GET", "HEAD"})
 _ROUTE_CLASSES: dict[tuple[str, str], RateLimitClass] = {
     ("POST", "/api/v1/runs"): RateLimitClass.RUN_CREATE,
     ("POST", "/api/v1/presets/{preset_id}/runs"): RateLimitClass.RUN_CREATE,
+    # A exportação da conta junta várias tabelas: leitura com o limite da criação de execução.
+    ("GET", "/api/v1/me/export"): RateLimitClass.RUN_CREATE,
     ("PUT", "/api/v1/uploads/{upload_id}/content"): RateLimitClass.TRANSFER,
     ("GET", "/api/v1/artifacts/{artifact_id}/download"): RateLimitClass.TRANSFER,
 }

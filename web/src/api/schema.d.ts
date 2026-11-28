@@ -56,6 +56,23 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/me/export": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Export Me */
+        get: operations["exportMe"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/me/terms:accept": {
         parameters: {
             query?: never;
@@ -428,6 +445,28 @@ export interface components {
              */
             accepted_at: string;
         };
+        /** AccountExport */
+        AccountExport: {
+            /**
+             * Generated At
+             * Format: date-time
+             */
+            generated_at: string;
+            account: components["schemas"]["ExportedAccount"];
+            terms: components["schemas"]["ExportedTerms"];
+            limits: components["schemas"]["Limits"];
+            usage: components["schemas"]["Usage"];
+            /** Api Keys */
+            api_keys: components["schemas"]["ExportedApiKey"][];
+            /** Sessions */
+            sessions: components["schemas"]["ExportedSession"][];
+            /** Security Events */
+            security_events: components["schemas"]["ExportedSecurityEvent"][];
+            /** Runs */
+            runs: components["schemas"]["ExportedRunSummary"][];
+            /** Presets */
+            presets: components["schemas"]["ExportedPreset"][];
+        };
         /** ApiKeyList */
         ApiKeyList: {
             /** Data */
@@ -495,6 +534,17 @@ export interface components {
          * @enum {string}
          */
         AudioFormat: "wav" | "flac";
+        /**
+         * AuditEventType
+         * @description Tipos aceitos pelo CHECK `audit_event_event_type_check` (migrações 0006, 0008 e 0016).
+         * @enum {string}
+         */
+        AuditEventType: "LOGIN_SUCCEEDED" | "LOGIN_FAILED" | "LOGOUT" | "LOGOUT_ALL" | "KEY_ISSUED" | "KEY_REVOKED" | "REAUTH_REQUIRED" | "CSRF_FAILED" | "ACCESS_DENIED" | "ACCOUNT_DELETION_REQUESTED" | "ACCOUNT_BLOCKED" | "ACCOUNT_UNBLOCKED" | "TERMS_ACCEPTED" | "ACCOUNT_LIMITS_CHANGED";
+        /**
+         * AuditOutcome
+         * @enum {string}
+         */
+        AuditOutcome: "success" | "failure";
         /**
          * Availability
          * @description Se o conteúdo ainda pode ser usado, independente do estado histórico (1.7).
@@ -580,6 +630,174 @@ export interface components {
         CreatedUploads: {
             /** Items */
             items: components["schemas"]["CreatedUpload"][];
+        };
+        /** ExportedAccount */
+        ExportedAccount: {
+            /**
+             * Id
+             * Format: uuid
+             */
+            id: string;
+            /** Issuer */
+            issuer: string;
+            /** Display Name */
+            display_name: string;
+            /** Status */
+            status: string;
+            /**
+             * Created At
+             * Format: date-time
+             */
+            created_at: string;
+        };
+        /**
+         * ExportedApiKey
+         * @description Metadados da chave; o segredo nunca é guardado, e o hash não sai.
+         */
+        ExportedApiKey: {
+            /** Public Id */
+            public_id: string;
+            /** Scopes */
+            scopes: components["schemas"]["Scope"][];
+            /**
+             * Created At
+             * Format: date-time
+             */
+            created_at: string;
+            /**
+             * Expires At
+             * Format: date-time
+             */
+            expires_at: string;
+            /** Last Used At */
+            last_used_at: string | null;
+            /** Revoked At */
+            revoked_at: string | null;
+        };
+        /** ExportedPreset */
+        ExportedPreset: {
+            /**
+             * Id
+             * Format: uuid
+             */
+            id: string;
+            /** Name */
+            name: string;
+            /** Recipe Id */
+            recipe_id: string;
+            /** Recipe Version */
+            recipe_version: number;
+            /** Parameters */
+            parameters: {
+                [key: string]: unknown;
+            };
+            /**
+             * Created At
+             * Format: date-time
+             */
+            created_at: string;
+            /**
+             * Updated At
+             * Format: date-time
+             */
+            updated_at: string;
+        };
+        /** ExportedRunSummary */
+        ExportedRunSummary: {
+            /**
+             * Id
+             * Format: uuid
+             */
+            id: string;
+            /** Recipe Id */
+            recipe_id: string;
+            /** Recipe Version */
+            recipe_version: number;
+            status: components["schemas"]["Status"];
+            /** Error Code */
+            error_code: string | null;
+            /**
+             * Created At
+             * Format: date-time
+             */
+            created_at: string;
+            /** Started At */
+            started_at: string | null;
+            /** Finished At */
+            finished_at: string | null;
+            /** Processed */
+            processed: number;
+            /** Total */
+            total: number;
+            /** Summary */
+            summary: {
+                [key: string]: number;
+            } | null;
+            /** Parameters */
+            parameters: {
+                [key: string]: unknown;
+            } | null;
+            /** Preset Id */
+            preset_id: string | null;
+        };
+        /** ExportedSecurityEvent */
+        ExportedSecurityEvent: {
+            event_type: components["schemas"]["AuditEventType"];
+            outcome: components["schemas"]["AuditOutcome"];
+            /**
+             * Occurred At
+             * Format: date-time
+             */
+            occurred_at: string;
+            /**
+             * Ip Prefix
+             * @description A rede do cliente: /24 em IPv4, /48 em IPv6.
+             */
+            ip_prefix: string | null;
+            /** Details */
+            details: {
+                [key: string]: unknown;
+            } | null;
+        };
+        /**
+         * ExportedSession
+         * @description Datas da sessão, sem id nem hash.
+         */
+        ExportedSession: {
+            /**
+             * Created At
+             * Format: date-time
+             */
+            created_at: string;
+            /**
+             * Authenticated At
+             * Format: date-time
+             */
+            authenticated_at: string;
+            /**
+             * Last Seen At
+             * Format: date-time
+             */
+            last_seen_at: string;
+            /**
+             * Idle Expires At
+             * Format: date-time
+             */
+            idle_expires_at: string;
+            /**
+             * Absolute Expires At
+             * Format: date-time
+             */
+            absolute_expires_at: string;
+            /** Revoked At */
+            revoked_at: string | null;
+        };
+        /** ExportedTerms */
+        ExportedTerms: {
+            /** Accepted Version */
+            accepted_version: string | null;
+            /** Accepted At */
+            accepted_at: string | null;
         };
         /** FieldError */
         FieldError: {
@@ -1472,6 +1690,84 @@ export interface operations {
                 };
                 content: {
                     "application/json": unknown;
+                };
+            };
+            /** @description Unauthorized */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description Forbidden */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description Unprocessable Content */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description Too Many Requests */
+            429: {
+                headers: {
+                    /** @description Segundos até poder repetir a requisição. */
+                    "Retry-After": string;
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description Internal Server Error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description Service Unavailable */
+            503: {
+                headers: {
+                    /** @description Segundos até poder repetir a requisição. */
+                    "Retry-After": string;
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+        };
+    };
+    exportMe: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AccountExport"];
                 };
             };
             /** @description Unauthorized */

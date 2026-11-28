@@ -38,6 +38,7 @@ ACCOUNT_NAME = "Conta Google de teste"
 # chaves e excluir a conta. Todas as outras recusam.
 EXEMPT_ROUTES = {
     ("GET", ME),
+    ("GET", f"{ME}/export"),
     ("POST", ACCEPT),
     ("DELETE", ME),
     ("POST", "/auth/logout-all"),

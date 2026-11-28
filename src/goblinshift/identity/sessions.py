@@ -251,3 +251,46 @@ def record_session_use(session: Session, session_id: UUID, now: datetime) -> Non
 
 def _hash_token(token: str) -> bytes:
     return hashlib.sha256(token.encode("ascii")).digest()
+
+
+@dataclass(frozen=True)
+class SessionView:
+    """Datas de uma sessão da conta, para a exportação: sem id nem hash, que abririam a sessão."""
+
+    created_at: datetime
+    authenticated_at: datetime
+    last_seen_at: datetime
+    idle_expires_at: datetime
+    absolute_expires_at: datetime
+    revoked_at: datetime | None
+
+
+def list_sessions(session: Session, owner_id: UUID) -> list[SessionView]:
+    """Sessões guardadas da conta, das mais antigas às mais novas.
+
+    A manutenção apaga as sessões encerradas (`purge.delete_ended_web_sessions`): o volume é o das
+    sessões ainda vivas e das recém-encerradas.
+    """
+    rows = session.execute(
+        select(
+            web_session.c.created_at,
+            web_session.c.authenticated_at,
+            web_session.c.last_seen_at,
+            web_session.c.idle_expires_at,
+            web_session.c.absolute_expires_at,
+            web_session.c.revoked_at,
+        )
+        .where(web_session.c.user_id == owner_id)
+        .order_by(web_session.c.created_at, web_session.c.id)
+    ).all()
+    return [
+        SessionView(
+            created_at=row.created_at,
+            authenticated_at=row.authenticated_at,
+            last_seen_at=row.last_seen_at,
+            idle_expires_at=row.idle_expires_at,
+            absolute_expires_at=row.absolute_expires_at,
+            revoked_at=row.revoked_at,
+        )
+        for row in rows
+    ]

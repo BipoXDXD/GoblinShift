@@ -258,3 +258,40 @@ def truncate_ip(ip: str | None) -> IPv4Network | IPv6Network | None:
         address = address.ipv4_mapped
     prefix = IPV4_PREFIX if isinstance(address, IPv4Address) else IPV6_PREFIX
     return ip_network(f"{address}/{prefix}", strict=False)
+
+
+@dataclass(frozen=True)
+class AuditEventView:
+    """Um evento de segurança da conta, para a exportação; o IP já é a rede truncada."""
+
+    event_type: AuditEventType
+    outcome: AuditOutcome
+    occurred_at: datetime
+    ip_prefix: IPv4Network | IPv6Network | None
+    details: dict[str, Any] | None
+
+
+def list_audit_events(session: Session, owner_id: UUID) -> list[AuditEventView]:
+    """Eventos da conta em ordem cronológica. A retenção de 90 dias (1.8) limita o volume, e o
+    `CSRF_FAILED` agregado impede a inundação (`record_csrf_failure`)."""
+    rows = session.execute(
+        select(
+            audit_event.c.event_type,
+            audit_event.c.outcome,
+            audit_event.c.occurred_at,
+            audit_event.c.ip_prefix,
+            audit_event.c.details,
+        )
+        .where(audit_event.c.user_id == owner_id)
+        .order_by(audit_event.c.occurred_at, audit_event.c.id)
+    ).all()
+    return [
+        AuditEventView(
+            event_type=AuditEventType(row.event_type),
+            outcome=AuditOutcome(row.outcome),
+            occurred_at=row.occurred_at,
+            ip_prefix=row.ip_prefix,
+            details=row.details,
+        )
+        for row in rows
+    ]
