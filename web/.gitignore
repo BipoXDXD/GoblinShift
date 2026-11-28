@@ -9,4 +9,5 @@ playwright-report/
 e2e-results/
 
 test-results-webkit/
+test-results-vitrine/
 playwright-report-webkit/
