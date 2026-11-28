@@ -11,12 +11,15 @@ import { ConfirmDialog } from "../components/ui/ConfirmDialog";
 import { formatDateTime } from "../format";
 import { TEXT } from "../text";
 import { deleteRunArtifacts, type RunResults } from "./commands";
+import { RetentionBadge } from "./RetentionBadge";
 
 const T = TEXT.run.results;
 
 interface ResultsAvailabilityProps {
   readonly runId: string;
   readonly results: RunResults;
+  /** O relógio da tela, em ms do servidor: o selo diz quanto falta para o prazo. */
+  readonly nowMs: number;
   /** Depois de excluir: quem chama põe o foco no título do cartão (o botão some). */
   readonly onDeleted: () => void;
   /** Os downloads, mostrados enquanto os resultados estão disponíveis. */
@@ -24,14 +27,15 @@ interface ResultsAvailabilityProps {
 }
 
 /**
- * Os downloads só enquanto há algo para baixar, e "Excluir resultados" terciária com confirmação
- * em vermelho. A disponibilidade de cada referência vem do próprio /results (fonte única): sem
+ * Os downloads só enquanto há algo para baixar, com o prazo em destaque e "Apagar agora"
+ * secundária acima deles (D5); o vermelho fica só na confirmação (RUI regra 4). A disponibilidade de cada referência vem do próprio /results (fonte única): sem
  * nenhuma disponível, a seção mostra o estado vazio com o motivo; com alguma, quem chama mostra
  * cada arquivo com o link ou com o motivo de não ter.
  */
 export function ResultsAvailability({
   runId,
   results,
+  nowMs,
   onDeleted,
   children,
 }: ResultsAvailabilityProps): ReactElement {
@@ -77,9 +81,13 @@ export function ResultsAvailability({
   return (
     <>
       {downloadable ? (
-        <>
-          {children}
+        <div className="flex flex-col gap-6">
           <DeleteResults
+            badge={
+              results.expires_at !== null && !hasExpired(results) ? (
+                <RetentionBadge expiresAt={results.expires_at} nowMs={nowMs} />
+              ) : null
+            }
             asking={asking}
             pending={removal.isPending}
             error={removal.error}
@@ -96,7 +104,8 @@ export function ResultsAvailability({
               }
             }}
           />
-        </>
+          {children}
+        </div>
       ) : (
         <Unavailable
           reason={deletedHere ? "deleted" : sharedReason(results)}
@@ -113,6 +122,11 @@ type UnavailableReason = "deleted" | "expired" | "missing" | "other";
 
 function isAvailable(reference: Reference): boolean {
   return reference.availability === "available";
+}
+
+/** Com uma referência já expirada, o prazo passou: "Disponível até" contradiria o motivo. */
+function hasExpired(results: RunResults): boolean {
+  return results.artifacts.some((reference) => reference.availability === "expired");
 }
 
 /** O motivo comum a todas as referências, ou "other" se elas divergem (ou o motivo é novo). */
@@ -168,6 +182,8 @@ function Unavailable({ reason, expiresAt }: UnavailableProps): ReactElement {
 }
 
 interface DeleteResultsProps {
+  /** O selo do prazo, na mesma linha do botão; `null` sem prazo a mostrar. */
+  readonly badge: ReactNode;
   readonly asking: boolean;
   readonly pending: boolean;
   readonly error: Error | null;
@@ -177,6 +193,7 @@ interface DeleteResultsProps {
 }
 
 function DeleteResults({
+  badge,
   asking,
   pending,
   error,
@@ -186,6 +203,14 @@ function DeleteResults({
 }: DeleteResultsProps): ReactElement {
   return (
     <div className="flex flex-col gap-3">
+      <div className="flex flex-wrap items-center gap-3">
+        {badge}
+        {/* Bloqueado com o pedido em voo: o reset do onAsk zeraria o isPending e liberaria um
+            segundo DELETE antes da resposta do primeiro. */}
+        <Button type="button" variant="secondary" aria-disabled={pending} onClick={onAsk}>
+          {T.remove}
+        </Button>
+      </div>
       {error !== null && (
         <FailureNotice
           error={error}
@@ -193,13 +218,6 @@ function DeleteResults({
           messages={{ STATE_CONFLICT: T.removeNotFinished, NOT_FOUND: T.removeRunGone }}
         />
       )}
-      <div className="self-start">
-        {/* Bloqueado com o pedido em voo: o reset do onAsk zeraria o isPending e liberaria um
-            segundo DELETE antes da resposta do primeiro. */}
-        <Button type="button" variant="tertiary" aria-disabled={pending} onClick={onAsk}>
-          {T.remove}
-        </Button>
-      </div>
       <ConfirmDialog
         open={asking}
         title={T.removeTitle}

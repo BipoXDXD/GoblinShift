@@ -1,6 +1,7 @@
 import { screen, within } from "@testing-library/react";
 import { describe, expect, it } from "vitest";
 
+import { formatDateTime } from "../format";
 import { appRoutes, preloadRoutes } from "../test/appRoutes";
 import { axeViolations } from "../test/axe";
 import { fakeApi, jsonResponse, runBody } from "../test/fakeApi";
@@ -28,13 +29,28 @@ async function row(): Promise<HTMLElement> {
 
 describe("Histórico: disponibilidade dos resultados", () => {
   it.each([
-    ["2026-10-15T09:00:00Z", /^Resultados até /],
     ["2026-10-14T11:00:00Z", /^Resultados expirados$/],
     [null, /^Resultados indisponíveis$/],
   ])("concluída com validade %s", async (expiresAt, text) => {
     renderHistory({ status: "succeeded", results_expire_at: expiresAt });
 
     expect(within(await row()).getByText(text)).toBeVisible();
+  });
+
+  it("o cartão do Histórico mostra o selo sem botão", async () => {
+    const { container } = renderHistory({
+      status: "succeeded",
+      results_expire_at: "2026-10-15T09:00:00Z",
+    });
+
+    const card = await row();
+    expect(
+      within(card).getByText(
+        `Disponível até ${formatDateTime("2026-10-15T09:00:00Z")} · apagado automaticamente em 21 h`,
+      ),
+    ).toHaveClass("bg-info-bg");
+    expect(within(card).queryByRole("button")).toBeNull();
+    expect(await axeViolations(container)).toEqual([]);
   });
 
   it.each(["queued", "running", "failed", "canceled"])(

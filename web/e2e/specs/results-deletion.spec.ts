@@ -10,7 +10,7 @@ test("excluir resultados tira os downloads e diz por quê @fake-api", async ({ p
   const results = page.getByRole("region", { name: "Resultados" });
   await expect(results.getByRole("link", { name: /^Baixar csv-janitor\.zip/ })).toBeVisible();
 
-  await results.getByRole("button", { name: "Excluir resultados" }).click();
+  await results.getByRole("button", { name: "Apagar agora" }).click();
   const dialog = page.getByRole("dialog", { name: "Excluir os resultados desta execução?" });
   await expect(dialog.getByRole("button", { name: "Cancelar" })).toBeFocused();
   expect((await new AxeBuilder({ page }).analyze()).violations).toEqual([]);

@@ -23,7 +23,7 @@ type Handler = (request: Request) => Response | Promise<Response> | null;
 const CSRF = "csrf-da-sessao";
 const PACKAGE_ID = "7d3c2a1e-0000-4000-8000-0000000000aa";
 const DELETE_ROUTE = `DELETE /api/v1/runs/${RUN_ID}/artifacts`;
-const OPEN_BUTTON = "Excluir resultados";
+const OPEN_BUTTON = "Apagar agora";
 
 const REPORT_ID = "7d3c2a1e-0000-4000-8000-0000000000bb";
 const EXPIRES_AT = "2026-10-16T12:00:00Z";
@@ -90,7 +90,7 @@ async function resultsRegion(): Promise<HTMLElement> {
 }
 
 describe("Resultados: disponibilidade vem do /results", () => {
-  it("disponíveis: os downloads e o Excluir resultados, sem consultar cada artefato", async () => {
+  it("disponíveis: os downloads e o Apagar agora, sem consultar cada artefato", async () => {
     const { api } = setup();
 
     const region = await resultsRegion();
@@ -101,6 +101,23 @@ describe("Resultados: disponibilidade vem do /results", () => {
         new URL(request.url).pathname.startsWith("/api/v1/artifacts/"),
       ),
     ).toEqual([]);
+  });
+
+  it("os resultados mostram o selo antes da lista e Apagar agora como secundário", async () => {
+    const { container } = setup();
+
+    const region = await resultsRegion();
+    const badge = await within(region).findByText(
+      `Disponível até ${formatDateTime(EXPIRES_AT)} · apagado automaticamente em 48 h`,
+    );
+    const download = within(region).getByRole("link", { name: /^Baixar csv-janitor\.zip/ });
+    expect(badge.compareDocumentPosition(download) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    const remove = within(region).getByRole("button", { name: OPEN_BUTTON });
+    expect(
+      remove.compareDocumentPosition(download) & Node.DOCUMENT_POSITION_FOLLOWING,
+    ).toBeTruthy();
+    expect(remove).toHaveClass("border-secondary-fg");
+    expect(await axeViolations(container)).toEqual([]);
   });
 
   it("todos excluídos: sem links nem Excluir, com o estado vazio que diz por quê", async () => {
@@ -200,8 +217,8 @@ describe("Resultados: disponibilidade vem do /results", () => {
     expect(within(region).getByRole("listitem")).toHaveTextContent(
       `relatorio.json (relatório): expirou em ${formatDateTime(EXPIRES_AT)}.`,
     );
-    // O prazo já passou: "Disponíveis até" a mesma data contradiria o motivo.
-    expect(region).not.toHaveTextContent("Disponíveis até");
+    // O prazo já passou: "Disponível até" a mesma data contradiria o motivo.
+    expect(region).not.toHaveTextContent("Disponível até");
     expect(within(region).getByRole("button", { name: OPEN_BUTTON })).toBeVisible();
   });
 

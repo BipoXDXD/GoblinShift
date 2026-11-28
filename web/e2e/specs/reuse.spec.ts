@@ -29,7 +29,7 @@ test("Histórico → Reutilizar parâmetros → Bancada com os parâmetros da ex
   await historico.open();
   // all() não espera a lista chegar; o expect espera a primeira linha.
   const row = historico.rows().first();
-  await expect(row.getByText(/^Resultados até /)).toBeVisible();
+  await expect(row.getByText(/^Disponível até /)).toBeVisible();
 
   await row.getByRole("link", { name: /^Reutilizar parâmetros/ }).click();
 
