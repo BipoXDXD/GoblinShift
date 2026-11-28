@@ -1,4 +1,4 @@
-"""Receita pdf-press, versão 1: inspecionar → planejar → compor → mapa de páginas.
+"""Receita pdf-press, versões 1 e 2: inspecionar → planejar → compor → mapa de páginas.
 
 Ao contrário das três receitas centrais, nenhuma entrada é rejeitada sozinha: arquivo danificado,
 recurso não suportado, página inexistente ou limite estourado falham a execução inteira (1.5),
@@ -28,7 +28,7 @@ from goblinshift.processing.pdf_press.page_map import (
     encode_page_map,
 )
 from goblinshift.processing.pdf_press.params import Operation, Params
-from goblinshift.processing.pdf_press.writing import write_document
+from goblinshift.processing.pdf_press.writing import DocumentWriter
 from goblinshift.processing.previews import PendingPreview, attach_previews, write_previews
 from goblinshift.processing.recipe import (
     InputContractError,
@@ -43,7 +43,7 @@ from goblinshift.processing.recipe import (
     require_max_inputs,
 )
 
-__all__ = ["RECIPE_ID", "VERSION", "PdfPressV1"]
+__all__ = ["RECIPE_ID", "VERSION", "PdfPress"]
 
 NOT_SELECTED = ReportWarning("INPUT_NOT_SELECTED", "nenhuma página desta entrada foi selecionada")
 
@@ -51,7 +51,7 @@ type _Written = tuple[str, PlannedDocument]
 PREVIEW_EXTENSION = ".json"
 
 
-class PdfPressV1:
+class PdfPress:
     def __init__(self, max_inputs: int = MAX_INPUTS, limits: Limits | None = None) -> None:
         self._max_inputs = max_inputs
         self._limits = limits or Limits()
@@ -66,7 +66,8 @@ class PdfPressV1:
             opened = self._inspect_all(inputs, progress, stack)
             documents = [_described(entry, opened[entry.position]) for entry in inputs]
             plan = plan_documents(params, documents, self._limits)
-            written = [(_write(planned, opened, out), planned) for planned in plan]
+            writer = DocumentWriter()
+            written = [(_write(writer, planned, opened, out), planned) for planned in plan]
             versions = {position: source.pdf_version for position, source in opened.items()}
         page_map = out.create(PAGE_MAP_NAME, OutputRole.CONTENT, inputs[0].position)
         with page_map.stream as sink:
@@ -105,11 +106,14 @@ def _described(entry: InputFile, document: InspectedDocument) -> InputDocument:
 
 
 def _write(
-    planned: PlannedDocument, opened: Mapping[int, InspectedDocument], out: OutputDir
+    writer: DocumentWriter,
+    planned: PlannedDocument,
+    opened: Mapping[int, InspectedDocument],
+    out: OutputDir,
 ) -> str:
     output = out.create(planned.logical_name, OutputRole.CONTENT, planned.source_position)
     with output.stream as sink:
-        write_document(planned, opened, sink)
+        writer.write(planned, opened, sink)
     return output.name
 
 

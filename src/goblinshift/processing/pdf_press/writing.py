@@ -29,20 +29,23 @@ from goblinshift.processing.pdf_press.inspection import InspectedDocument
 _PRIVATE_METADATA_KEYS = ("/Metadata", "/PieceInfo", "/LastModified")
 
 
-def write_document(
-    planned: PlannedDocument, sources: Mapping[int, InspectedDocument], sink: BinaryIO
-) -> None:
-    """Grava `planned` em `sink`; `sources` são as entradas abertas, pela posição."""
-    with pikepdf.new() as composed:
-        for page in planned.pages:
-            composed.pages.append(sources[page.position].pdf.pages[page.page_number - 1])
-        _drop_private_metadata(composed)
-        composed.save(
-            sink,
-            min_version=_highest_version(planned, sources),
-            stream_decode_level=pikepdf.StreamDecodeLevel.none,
-            deterministic_id=True,
-        )
+class DocumentWriter:
+    """Grava os documentos planejados de uma execução; uma instância por execução."""
+
+    def write(
+        self, planned: PlannedDocument, sources: Mapping[int, InspectedDocument], sink: BinaryIO
+    ) -> None:
+        """Grava `planned` em `sink`; `sources` são as entradas abertas, pela posição."""
+        with pikepdf.new() as composed:
+            for page in planned.pages:
+                composed.pages.append(sources[page.position].pdf.pages[page.page_number - 1])
+            _drop_private_metadata(composed)
+            composed.save(
+                sink,
+                min_version=_highest_version(planned, sources),
+                stream_decode_level=pikepdf.StreamDecodeLevel.none,
+                deterministic_id=True,
+            )
 
 
 def _drop_private_metadata(pdf: pikepdf.Pdf) -> None:

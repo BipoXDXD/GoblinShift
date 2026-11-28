@@ -8,7 +8,7 @@ import pytest
 
 from goblinshift.processing.output_dir import RESERVED_NAMES, FileSystemOutputDir
 from goblinshift.processing.pdf_press import RECIPE_ID, Params
-from goblinshift.processing.pdf_press.recipe import PdfPressV1
+from goblinshift.processing.pdf_press.recipe import PdfPress
 from goblinshift.processing.recipe import InputFile, Report
 
 PDF_PRESS_RESERVED_NAMES = (*RESERVED_NAMES, f"{RECIPE_ID}.zip")
@@ -46,9 +46,9 @@ class Workspace:
         self.inputs.append(entry)
         return entry
 
-    def run(self, params: Params | None = None, recipe: PdfPressV1 | None = None) -> Report:
+    def run(self, params: Params | None = None, recipe: PdfPress | None = None) -> Report:
         out = FileSystemOutputDir(self.out_dir, reserved_names=PDF_PRESS_RESERVED_NAMES)
-        return (recipe or PdfPressV1()).run(params or Params(), self.inputs, out, self.progress)
+        return (recipe or PdfPress()).run(params or Params(), self.inputs, out, self.progress)
 
     def output_paths(self) -> list[str]:
         return sorted(

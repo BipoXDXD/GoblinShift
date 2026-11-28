@@ -1,4 +1,4 @@
-"""Receita pdf-press v1 sobre o contrato de 3.2 (docs/GoblinShiftPlan.md, 1.5 e 1.7; ADR 035)."""
+"""Receita pdf-press sobre o contrato de 3.2 (docs/GoblinShiftPlan.md, 1.5 e 1.7; ADR 035)."""
 
 import io
 import json
@@ -8,7 +8,7 @@ import pytest
 
 from goblinshift.processing.output_dir import FileSystemOutputDir
 from goblinshift.processing.pdf_press import RECIPE_ID, Limits, Operation, PageRange, Params
-from goblinshift.processing.pdf_press.recipe import PdfPressV1
+from goblinshift.processing.pdf_press.recipe import PdfPress
 from goblinshift.processing.recipe import (
     FailureCode,
     InputContractError,
@@ -294,7 +294,7 @@ def test_paginas_de_entrada_somadas_acima_do_teto_falham(work: Workspace) -> Non
     work.add("b.pdf", samples.document("b", pages=2))
 
     with pytest.raises(RecipeFailure) as caught:
-        work.run(recipe=PdfPressV1(limits=Limits(max_input_pages=3)))
+        work.run(recipe=PdfPress(limits=Limits(max_input_pages=3)))
 
     assert caught.value.code is FailureCode.INPUT_LIMIT_EXCEEDED
     assert "entrada 2" in caught.value.detail
@@ -304,7 +304,7 @@ def test_paginas_de_entrada_no_teto_passam(work: Workspace) -> None:
     work.add("a.pdf", samples.document("a", pages=2))
     work.add("b.pdf", samples.document("b", pages=1))
 
-    report = work.run(recipe=PdfPressV1(limits=Limits(max_input_pages=3)))
+    report = work.run(recipe=PdfPress(limits=Limits(max_input_pages=3)))
 
     assert report.details["output_pages"] == 3
 
@@ -314,7 +314,7 @@ def test_saidas_acima_do_teto_de_bytes_falham(work: Workspace) -> None:
     out = FileSystemOutputDir(work.out_dir, max_bytes=100)
 
     with pytest.raises(RecipeFailure) as caught:
-        PdfPressV1().run(Params(), work.inputs, out, work.progress)
+        PdfPress().run(Params(), work.inputs, out, work.progress)
 
     assert caught.value.code is FailureCode.OUTPUT_LIMIT_EXCEEDED
 
@@ -324,7 +324,7 @@ def test_entradas_acima_do_teto_da_versao_sao_job_fora_do_contrato(work: Workspa
         work.add(f"{position}.pdf", samples.document(str(position)))
 
     with pytest.raises(InputContractError, match="2"):
-        work.run(recipe=PdfPressV1(max_inputs=2))
+        work.run(recipe=PdfPress(max_inputs=2))
 
 
 def test_select_sem_upload_id_das_entradas_e_job_fora_do_contrato(work: Workspace) -> None:

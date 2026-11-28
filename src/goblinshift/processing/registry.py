@@ -15,7 +15,7 @@ from goblinshift.processing.csv_janitor import recipe as csv_janitor_recipe
 from goblinshift.processing.downloads_detox import DownloadsDetoxV1
 from goblinshift.processing.image_forge.recipe import ImageForgeV1
 from goblinshift.processing.media_mill.recipe import MediaMillV1
-from goblinshift.processing.pdf_press.recipe import PdfPressV1
+from goblinshift.processing.pdf_press.recipe import PdfPress
 from goblinshift.processing.recipe import InputFile, OutputDir, Progress, Recipe, Report
 
 type RecipeKey = tuple[str, int]
@@ -61,7 +61,7 @@ _DOWNLOADS_DETOX_V1: _Bound[downloads_detox.Params] = _Bound(
 )
 _MEDIA_MILL_V1: _Bound[media_mill.Params] = _Bound(media_mill.params_from_mapping, MediaMillV1())
 
-_PDF_PRESS_V1: _Bound[pdf_press.Params] = _Bound(pdf_press.params_from_mapping, PdfPressV1())
+_PDF_PRESS_V1: _Bound[pdf_press.Params] = _Bound(pdf_press.params_from_mapping, PdfPress())
 
 RECIPES: Mapping[RecipeKey, RegisteredRecipe] = MappingProxyType(
     {
