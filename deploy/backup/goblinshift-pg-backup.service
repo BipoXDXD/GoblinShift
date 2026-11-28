@@ -5,6 +5,11 @@ Description=GoblinShift: backup cifrado do PostgreSQL para o armazenamento exter
 Requires=docker.service
 After=docker.service network-online.target
 Wants=network-online.target
+# Até 4 partidas em 6 h (a do timer e 3 repetições): uma falha passageira logo depois da
+# atualização da plataforma (Docker reiniciando) não perde o dia, e uma falha persistente para de
+# repetir. Ver ADR 022, atualização de 2026-11-28.
+StartLimitIntervalSec=6h
+StartLimitBurst=4
 
 [Service]
 Type=oneshot
@@ -22,10 +27,30 @@ StateDirectoryMode=0700
 # chega aqui quando o instalador roda de novo.
 ExecStart=/usr/local/lib/goblinshift/backup/pg-backup.sh
 TimeoutStartSec=1h
+Restart=on-failure
+RestartSec=15min
 Nice=10
 IOSchedulingClass=idle
+UMask=0077
+
+# Hardening, como na unit da aceitação, mas sem nenhuma capability: o serviço roda como
+# goblinshift e só fala com o socket do Docker e com o S3/healthchecks.io pelo curl.
 NoNewPrivileges=yes
+CapabilityBoundingSet=
 PrivateTmp=yes
 ProtectHome=yes
 # `full`, e não `strict`: /run precisa continuar acessível para o socket do Docker.
 ProtectSystem=full
+PrivateDevices=yes
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectKernelLogs=yes
+ProtectControlGroups=yes
+ProtectClock=yes
+ProtectHostname=yes
+RestrictNamespaces=yes
+RestrictRealtime=yes
+LockPersonality=yes
+# Unix para o socket do Docker; Internet para o PUT no S3 e os pings do healthchecks.io.
+RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6
+SystemCallArchitectures=native
