@@ -5,8 +5,10 @@ para `out/`. Tudo o que um vídeo produz fica no rascunho até o último passo d
 recusado no meio (miniatura de um trecho danificado depois de o áudio já ter saído) não deixa
 saída órfã em `out/`, que a coleta do worker recusaria por não estar no relatório.
 
-Um vídeo recusado vira `ItemRejected` e o lote continua (1.1). Estourar o tempo é falha da
-execução inteira (`RESOURCE_LIMIT_EXCEEDED`), e a cópia para `out/` fica fora da tradução de
+Um vídeo recusado vira `ItemRejected` e o lote continua (1.1). Cada vídeo tem prazo próprio
+(`CallTimeouts.video_s`): passar dele recusa só aquele vídeo, e o resto do orçamento fica para os
+outros. Esgotar o orçamento da execução é falha da execução inteira (`RESOURCE_LIMIT_EXCEEDED`), e
+a cópia para `out/` fica fora da tradução de
 erros: um `ENOSPC` ou `OUTPUT_LIMIT_EXCEEDED` derruba a execução em vez de virar rejeição.
 
 As duas versões rodam o mesmo pipeline, `_Mill`, sobre um `MillPlan` (`plan.py`): um conserto de
@@ -98,11 +100,14 @@ THUMBNAIL_POINTS = {
 
 @dataclass(frozen=True)
 class CallTimeouts:
-    """Teto de cada chamada (s); todas descontam também do orçamento da execução (TimeBudget).
+    """Teto de cada chamada e de cada vídeo (s); todos descontam também do orçamento da execução.
 
     Passar do teto da chamada recusa só aquele vídeo (`MEDIA_TOO_LARGE`): um GOP enorme, com um
     keyframe só em 300 s de 1080p60, faz a busca precisa da miniatura decodificar milhares de
-    quadros. Esgotar o orçamento da execução falha a execução inteira (`RESOURCE_LIMIT_EXCEEDED`).
+    quadros. As chamadas de um vídeo somam até 440 s (ffprobe, áudio e, por miniatura, a busca e o
+    último quadro anterior); `video_s` corta essa soma em 180 s, para um vídeo hostil deixar ao
+    menos 300 s dos 480 s do orçamento (`DEFAULT_BUDGET_S`) para os outros (ADR 036). Esgotar o
+    orçamento da execução falha a execução inteira (`RESOURCE_LIMIT_EXCEEDED`).
     Referência (Mac, 1 CPU, sem gVisor): ~100 quadros 1080p por segundo; com keyframe a cada
     10 s, cada miniatura decodifica no máximo 600 quadros.
     """
@@ -110,6 +115,7 @@ class CallTimeouts:
     probe_s: float = 20
     audio_s: float = 60
     thumbnail_s: float = 60
+    video_s: float = 180
 
 
 @dataclass(frozen=True)
@@ -179,7 +185,9 @@ def _mill_all(
 
         def mill_one(source: InputFile, pending: list[PendingPreview]) -> ItemOk | ItemRejected:
             work = Path(scratch, f"{source.position:04}")
-            runner = _Runner(tools, budget, settings.timeouts, work)
+            # Prazo próprio de cada vídeo, criado aqui: um vídeo hostil não gasta o dos outros.
+            video = TimeBudget(settings.timeouts.video_s, settings.clock)
+            runner = _Runner(tools, budget, settings.timeouts, work, video=video)
             return _Mill(runner, settings.limits, plan).process(source, out, pending)
 
         processed = process_each(inputs, mill_one, progress)
@@ -228,23 +236,38 @@ class _Converted:
 
 
 class _Runner:
-    """Roda as ferramentas de um vídeo no rascunho dele, com o teto da chamada e o orçamento."""
+    """Roda as ferramentas de um vídeo no rascunho dele, com o teto da chamada, o prazo do vídeo e
+    o orçamento da execução."""
 
     def __init__(
-        self, tools: Tools, budget: TimeBudget, timeouts: CallTimeouts, work: Path
+        self,
+        tools: Tools,
+        budget: TimeBudget,
+        timeouts: CallTimeouts,
+        work: Path,
+        *,
+        video: TimeBudget,
     ) -> None:
         self.tools = tools
         self.timeouts = timeouts
         self.work = work
         self._budget = budget
+        self._video = video
 
     def run(self, argv: Sequence[str], *, cap_s: float, name: str) -> Outcome:
-        timeout_s = self._budget.timeout(cap_s)
+        video_remaining = self._video.remaining()
+        if video_remaining <= 0:
+            raise self._video_too_long()
+        limit = min(cap_s, video_remaining)
+        timeout_s = self._budget.timeout(limit)
         try:
             outcome = run_tool(argv, timeout_s=timeout_s, scratch=self.work, name=name)
         except ToolTimeoutError:
-            if timeout_s < cap_s:
+            # Quem cortou o prazo decide: o orçamento da execução, o prazo do vídeo ou a etapa.
+            if timeout_s < limit:
                 raise budget_exhausted() from None
+            if limit < cap_s:
+                raise self._video_too_long() from None
             raise MediaRejected(
                 RejectionCode.MEDIA_TOO_LARGE,
                 f"processar este vídeo passou de {cap_s:g} s numa etapa ({name})",
@@ -258,6 +281,12 @@ class _Runner:
                 f"numa etapa ({name})",
             )
         return outcome
+
+    def _video_too_long(self) -> MediaRejected:
+        return MediaRejected(
+            RejectionCode.MEDIA_TOO_LARGE,
+            f"processar este vídeo passou de {self.timeouts.video_s:g} s no total",
+        )
 
 
 class _Mill:

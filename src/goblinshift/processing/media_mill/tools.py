@@ -6,9 +6,10 @@ Quem monta a linha de comando é `commands`; aqui só se executa, sempre do mesm
   `FFREPORT` (que faria o FFmpeg gravar um relatório onde quisesse) nunca chegam ao filho;
 - `stdin` em `/dev/null` (além do `-nostdin`), `stdout` e `stderr` em arquivos do diretório de
   rascunho, para a memória do executor não crescer com a saída de um arquivo hostil;
-- tempo: cada chamada tem um prazo, o menor entre o teto dela e o que sobra do orçamento da
-  execução inteira (`TimeBudget`), abaixo dos 10 minutos da tentativa (1.7). Estourar levanta
-  `ToolTimeoutError`; a receita decide se recusa o vídeo ou falha a execução;
+- tempo: cada chamada tem um prazo, o menor entre o teto dela, o que sobra do prazo do vídeo e o
+  que sobra do orçamento da execução inteira (`TimeBudget`), abaixo dos 10 minutos da tentativa
+  (1.7). Estourar levanta `ToolTimeoutError`; a receita decide se recusa o vídeo ou falha a
+  execução;
 - memória e tamanho de arquivo: `RLIMIT_AS` e `RLIMIT_FSIZE` no filho, abaixo dos 2 GiB do
   container, para um decodificador descontrolado morrer sozinho sem levar o executor junto.
   Passar do `RLIMIT_FSIZE` mata o filho com `SIGXFSZ` (`Outcome.file_size_exceeded`).
@@ -64,15 +65,19 @@ class ToolTimeoutError(Exception):
 
 
 class TimeBudget:
-    """Orçamento de tempo da execução inteira, medido com relógio monotônico."""
+    """Orçamento de tempo (da execução inteira ou de um vídeo), medido com relógio monotônico."""
 
     def __init__(self, total_s: float, clock: Callable[[], float] = time.monotonic) -> None:
         self._clock = clock
         self._deadline = clock() + total_s
 
+    def remaining(self) -> float:
+        """O que sobra do orçamento agora; zero ou negativo quando acabou."""
+        return self._deadline - self._clock()
+
     def timeout(self, cap_s: float) -> float:
         """Prazo da próxima chamada: o teto dela ou o que sobra do orçamento, o menor."""
-        remaining = self._deadline - self._clock()
+        remaining = self.remaining()
         if remaining <= 0:
             raise budget_exhausted()
         return min(cap_s, remaining)

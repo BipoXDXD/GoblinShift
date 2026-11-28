@@ -87,3 +87,11 @@ def test_orcamento_esgotado_e_falha_de_recurso() -> None:
         budget.timeout(30)
 
     assert failure.value.code is FailureCode.RESOURCE_LIMIT_EXCEEDED
+
+
+def test_remaining_desconta_o_relogio() -> None:
+    now = [0.0]
+    budget = TimeBudget(10, clock=lambda: now[0])
+    now[0] = 4.0
+
+    assert budget.remaining() == 6.0

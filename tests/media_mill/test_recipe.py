@@ -7,6 +7,7 @@ e arquivo truncado.
 
 import itertools
 import subprocess
+import sys
 import tempfile
 import wave
 from collections.abc import Iterator
@@ -19,9 +20,10 @@ from goblinshift.processing.media_mill import RECIPE_ID, AudioFormat, Params
 from goblinshift.processing.media_mill import recipe as mill_recipe
 from goblinshift.processing.media_mill.commands import Source, audio_argv, encoding_for
 from goblinshift.processing.media_mill.params_v2 import DEFAULT_BITRATE_KBPS, AudioFormatV2
-from goblinshift.processing.media_mill.recipe import MediaMillV1
+from goblinshift.processing.media_mill.recipe import CallTimeouts, MediaMillV1, _Runner
+from goblinshift.processing.media_mill.rejection import MediaRejected, RejectionCode
 from goblinshift.processing.media_mill.signature import Container
-from goblinshift.processing.media_mill.tools import Tools
+from goblinshift.processing.media_mill.tools import Outcome, TimeBudget, Tools, run_tool
 from goblinshift.processing.output_dir import FileSystemOutputDir
 from goblinshift.processing.previews import PendingPreview
 from goblinshift.processing.recipe import (
@@ -634,6 +636,76 @@ def test_tempo_esgotado_falha_a_execucao_inteira(workspace: Workspace, clips: Cl
         workspace.run(recipe=MediaMillV1(budget_s=150, clock=lambda: next(ticks)))
 
     assert failure.value.code is FailureCode.RESOURCE_LIMIT_EXCEEDED
+
+
+class FakeClock:
+    def __init__(self, now: float) -> None:
+        self.now = now
+
+    def __call__(self) -> float:
+        return self.now
+
+
+def test_video_sem_prazo_e_recusado_sem_rodar_a_ferramenta(tmp_path: Path) -> None:
+    clock = FakeClock(0)
+    tools = Tools(ffmpeg=Path("/nao/existe/ffmpeg"), ffprobe=Path("/nao/existe/ffprobe"))
+    runner = _Runner(
+        tools, TimeBudget(480, clock), CallTimeouts(), tmp_path, video=TimeBudget(180, clock)
+    )
+    runner.run(["true"], cap_s=20, name="ffprobe")
+    clock.now = 181
+
+    # `false` rodaria e voltaria com código 1; a recusa vem antes, e o log nem é criado.
+    with pytest.raises(MediaRejected) as rejected:
+        runner.run(["false"], cap_s=20, name="ffprobe-2")
+
+    assert rejected.value.code is RejectionCode.MEDIA_TOO_LARGE
+    assert "180 s no total" in str(rejected.value)
+    assert not (tmp_path / "ffprobe-2.log").exists()
+
+
+def test_chamada_cortada_pelo_prazo_do_video_recusa_so_o_video(tmp_path: Path) -> None:
+    clock = FakeClock(0)
+    tools = Tools(ffmpeg=Path("/nao/existe/ffmpeg"), ffprobe=Path("/nao/existe/ffprobe"))
+    runner = _Runner(
+        tools, TimeBudget(480, clock), CallTimeouts(), tmp_path, video=TimeBudget(180, clock)
+    )
+    clock.now = 179.5  # sobra 0,5 s do vídeo, abaixo do teto da etapa e do orçamento
+
+    with pytest.raises(MediaRejected) as rejected:
+        runner.run(
+            [sys.executable, "-I", "-c", "import time; time.sleep(30)"], cap_s=20, name="lenta"
+        )
+
+    assert rejected.value.code is RejectionCode.MEDIA_TOO_LARGE
+    assert "180 s no total" in str(rejected.value)
+
+
+def test_video_hostil_nao_consome_o_lote(
+    workspace: Workspace, clips: ClipLibrary, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # Ferramentas falsas no relógio: cada chamada do 1º vídeo "leva" 60 s; a do 2º, 1 s. Com três
+    # miniaturas, o 1º passa de 180 s antes da quarta chamada; o 2º ainda tem orçamento de sobra.
+    clock = FakeClock(0)
+
+    def slow_first_video(argv: list[str], *, timeout_s: float, scratch: Path, name: str) -> Outcome:
+        outcome = run_tool(argv, timeout_s=timeout_s, scratch=scratch, name=name)
+        clock.now += 60 if scratch.name == "0000" else 1
+        return outcome
+
+    monkeypatch.setattr(mill_recipe, "run_tool", slow_first_video)
+    workspace.add("hostil.mp4", clips.bytes("mp4"))
+    workspace.add("bom.mp4", clips.bytes("mp4"))
+
+    report = workspace.run(Params(thumbnail_count=3), MediaMillV1(clock=clock))
+
+    assert [type(item) for item in report.items] == [ItemRejected, ItemOk]
+    hostile = report.items[0]
+    assert isinstance(hostile, ItemRejected)
+    assert hostile.code == "MEDIA_TOO_LARGE"
+    assert "180 s no total" in hostile.reason
+    assert workspace.progress.done == [0, 1]
+    assert all("hostil" not in name for name in workspace.files())
 
 
 def test_mais_de_cinco_videos_e_job_fora_do_contrato(workspace: Workspace) -> None:
