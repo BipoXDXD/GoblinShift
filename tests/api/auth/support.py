@@ -7,6 +7,7 @@ callback gravou, e o token do cookie é conferido contra o hash guardado.
 import base64
 import hmac
 import json
+import logging
 import re
 from dataclasses import dataclass, field, replace
 from hashlib import sha256
@@ -24,6 +25,7 @@ from sqlalchemy.orm import Session, sessionmaker
 
 from goblinshift.entrypoints.api import auth_login
 from goblinshift.entrypoints.api.app import create_app
+from goblinshift.entrypoints.api.cookies import CSRF_COOKIE, CSRF_HEADER
 from goblinshift.identity.login_state import PostgresLoginStateCache
 from goblinshift.identity.tables import app_user, audit_event, web_session
 from goblinshift.platform.db import unit_of_work
@@ -145,6 +147,24 @@ def login(client: TestClient, fake: FakeProviders, provider: str, **params: str)
     """Fluxo inteiro num navegador: início, aprovação no provedor e callback."""
     started = start_login(client, provider, **params)
     return client.get(fake.consent(started.headers["location"]))
+
+
+def delete_me_headers(client: TestClient) -> dict[str, str]:
+    """Headers de uma mutação da SPA com a sessão que o login gravou no navegador `client`."""
+    return {
+        CSRF_HEADER: client.cookies[CSRF_COOKIE],
+        "Sec-Fetch-Site": "same-origin",
+        "Origin": PUBLIC_ORIGIN,
+    }
+
+
+def alert_events(records: list[logging.LogRecord]) -> list[str]:
+    """Os eventos `alert` dos registros de log (`extra={"fields": {"alert": ...}}`)."""
+    return [
+        fields["alert"]
+        for record in records
+        if isinstance(fields := getattr(record, "fields", None), dict) and "alert" in fields
+    ]
 
 
 def assert_login_failed(response: httpx.Response) -> UUID:

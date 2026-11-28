@@ -54,3 +54,7 @@ Trocar `csrf_secret` invalidaria os tokens CSRF emitidos: o cookie `__Host-gs_cs
 3. retirar `GS_CSRF_SECRET_PREVIOUS_FILE` e o arquivo, e reiniciar.
 
 A variável não fica ligada no Compose nem no Coolify: o arquivo só existe durante a troca, e montá-lo sempre obrigaria a criá-lo no host.
+
+## Atualização de 2026-11-28 (#366)
+
+A recência da sessão no Google passa a vir do `auth_time` do ID token, e o teto absoluto de 8 h conta da abertura da sessão: [ADR 062](062-reautenticacao-pelo-auth-time-do-google.md).

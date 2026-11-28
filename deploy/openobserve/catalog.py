@@ -150,6 +150,7 @@ CAUSE_COLUMNS: tuple[str, ...] = (
     "alert_run_without_reservation",
     "alert_executor_start_failed",
     "alert_input_tampered",
+    "alert_google_auth_time_missing",
     "api_saturation_rejected",
 )
 
@@ -313,6 +314,16 @@ SPAN_CAUSES: tuple[_SpanCause, ...] = (
         period_minutes=10,
         silence_minutes=60,
         destination=DestinationKey.URGENT,
+    ),
+    _SpanCause(
+        "causa-google-sem-auth-time",
+        "Login no Google sem auth_time: a recência da sessão cai na hora do callback, e um "
+        "navegador já logado no Google abre DELETE /me e a emissão de chave sem senha. Ligue "
+        "Session age claims no Google Auth Platform (ADR 062); veja o runbook em "
+        "deploy/openobserve/README.md.",
+        period_minutes=10,
+        silence_minutes=180,
+        destination=DestinationKey.WARNING,
     ),
     _SpanCause(
         "causa-api-saturada",

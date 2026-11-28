@@ -68,6 +68,8 @@ class Grant:
     code_challenge: str | None
     code_challenge_method: str | None
     nonce: str | None
+    # O parâmetro `claims` do pedido (JSON), como o Google o recebe.
+    claims: str | None = None
 
 
 IdTokenFactory = Callable[[dict[str, Any], RSAKey], str]
@@ -84,6 +86,8 @@ class FakeProviders:
     claims_patch: dict[str, Any] = field(default_factory=dict)
     id_token_factory: IdTokenFactory | None = None
     omit_id_token: bool = False
+    # O Google só manda `auth_time` com "Session age claims" ligado e o app verificado.
+    omit_auth_time: bool = False
     google_subject: str = GOOGLE_SUBJECT
     github_user_body: bytes = field(default_factory=lambda: json.dumps(GITHUB_USER).encode())
     github_user_status: int = 200
@@ -116,6 +120,7 @@ class FakeProviders:
             code_challenge=query.get("code_challenge"),
             code_challenge_method=query.get("code_challenge_method"),
             nonce=query.get("nonce"),
+            claims=query.get("claims"),
         )
         callback = urlsplit(query["redirect_uri"])
         return f"{callback.path}?{urlencode({'code': code, 'state': query['state']})}"
@@ -130,6 +135,8 @@ class FakeProviders:
             "exp": now + 300,
             "email": GITHUB_USER["email"],
         }
+        if not self.omit_auth_time:
+            claims["auth_time"] = now
         if grant.nonce is not None:
             claims["nonce"] = grant.nonce
         return claims | self.claims_patch

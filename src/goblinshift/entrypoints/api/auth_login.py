@@ -18,6 +18,13 @@ navegador já tem, e o callback só aceita a identidade dessa mesma conta. Outra
 provedor) é recusada antes de qualquer escrita: a sessão anterior continua valendo e nenhuma
 sessão recente nasce para quem não pediu a confirmação. Sem sessão válida, é um login comum.
 
+Recência (ADR 062): o Google não força a senha (não aceita `prompt=login` nem `max_age`), então
+todo pedido a ele exige o claim `auth_time`, e a sessão guarda `min(auth_time, agora)` como
+`authenticated_at`. Um navegador logado no Google há dias entra, mas não abre `DELETE /me` nem a
+emissão de chave. Sem `auth_time` ("Session age claims" desligado), vale a hora do callback, com o
+alerta `google_auth_time_missing`. O GitHub não informa a hora: o login dele conta como recente,
+risco aceito no mesmo ADR.
+
 As rotas são `async` porque a integração Starlette do Authlib é; o banco é acessado numa thread
 do pool, em transação curta, e nunca durante uma chamada ao provedor.
 """
@@ -71,6 +78,7 @@ from goblinshift.identity.providers import (
     GITHUB_TOKEN_URL,
     GITHUB_USER_URL,
     GOOGLE_ACCEPTED_ISSUERS,
+    GOOGLE_AUTH_TIME_CLAIMS,
     GOOGLE_AUTHORIZE_URL,
     GOOGLE_ID_TOKEN_ALGORITHMS,
     GOOGLE_ISSUER,
@@ -98,6 +106,8 @@ RETURN_TO_PATTERN = re.compile(r"/(?!/)[A-Za-z0-9/_\-.?=&%]*")
 MAX_RETURN_TO_CHARS = 512
 DEFAULT_RETURN_TO = "/"
 REAUTH_PROMPT = "select_account"
+# Login no Google sem `auth_time`: a recência cai na hora do callback (D3 do plano login-e-borda).
+GOOGLE_AUTH_TIME_MISSING_ALERT = "google_auth_time_missing"
 # Falhas esperadas de um provedor externo ou de um callback forjado. Qualquer outra exceção é
 # defeito nosso e segue para o handler de erro 500. `TimeoutError` é o prazo total;
 # `MalformedProviderResponseError`, o JSON válido com forma errada (`_consume_provider`).
@@ -287,6 +297,8 @@ async def start_login(
     else:
         request.session[_reauth_key(name)] = str(reauth_user)
     extra = {"prompt": REAUTH_PROMPT} if reauthenticating else {}
+    if name is ProviderName.GOOGLE:
+        extra["claims"] = GOOGLE_AUTH_TIME_CLAIMS
     response: Response = await login_provider.oauth_app.authorize_redirect(
         request, _redirect_uri(request, name), **extra
     )
@@ -314,6 +326,11 @@ async def finish_login(request: Request, provider: str, now: Now) -> Response:
         logger.warning("login %s recusado: %s", name, _failure_kind(exc))
         await run_in_threadpool(_record_login_failure, factory, attempt)
         return _login_failed(attempt)
+    if name is ProviderName.GOOGLE and identity.authenticated_at is None:
+        logger.warning(
+            "login google sem auth_time",
+            extra={"fields": {"alert": GOOGLE_AUTH_TIME_MISSING_ALERT}},
+        )
 
     result = await run_in_threadpool(
         _complete_login,
@@ -370,10 +387,25 @@ def _complete_login(
             return resolved
         _revoke_previous_session(session, previous_token, now)
         issued = start_session(
-            session, user_id=resolved, authenticated_at=now, now=now, csrf_key=csrf_key
+            session,
+            user_id=resolved,
+            authenticated_at=_session_authenticated_at(identity, now),
+            now=now,
+            csrf_key=csrf_key,
         )
         _record(session, AuditEventType.LOGIN_SUCCEEDED, resolved, attempt)
         return issued
+
+
+def _session_authenticated_at(identity: ExternalIdentity, now: datetime) -> datetime:
+    """A hora do login no provedor para a recência: a que ele informou, nunca depois de `now`.
+
+    Sem a hora (GitHub, ou Google sem `auth_time`), vale `now`. Um `auth_time` no futuro (relógio
+    do provedor adiantado) também vira `now`, sem recusar o login.
+    """
+    if identity.authenticated_at is None:
+        return now
+    return min(identity.authenticated_at, now)
 
 
 def _revoke_previous_session(session: Session, token: str | None, now: datetime) -> None:

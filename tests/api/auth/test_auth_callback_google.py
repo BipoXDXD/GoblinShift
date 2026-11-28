@@ -9,6 +9,7 @@ import json
 import logging
 import time
 from collections.abc import Callable
+from datetime import UTC, datetime
 from hashlib import sha256
 from typing import Any
 from urllib.parse import parse_qs, urlencode, urlsplit
@@ -23,6 +24,7 @@ from sqlalchemy import func, select
 from sqlalchemy.orm import Session, sessionmaker
 
 from goblinshift.entrypoints.api import auth_login
+from goblinshift.entrypoints.api.dependencies import current_time
 from goblinshift.entrypoints.api.problems import REQUEST_ID_HEADER
 from goblinshift.identity import csrf_token_matches
 from goblinshift.identity.providers import GOOGLE_ISSUER, GOOGLE_TOKEN_URL
@@ -32,16 +34,19 @@ from goblinshift.platform.settings import WebIdentityConfig
 from tests.api.auth.support import (
     StoredSessions,
     accounts,
+    alert_events,
     assert_login_failed,
     audit_events,
     browser,
     cookie_header,
     cookie_value,
+    delete_me_headers,
     login,
     mask_ref,
     open_signup,
     start_login,
 )
+from tests.api.support import assert_problem
 from tests.identity.fake_providers import (
     GOOGLE_CLIENT,
     GOOGLE_SUBJECT,
@@ -252,6 +257,111 @@ def test_reauth_com_sessao_revogada_vira_login_comum(
     assert response.status_code == 303
     assert [account["subject"] for account in accounts(factory)] == ["sub-a", "sub-b"]
     assert sessions.started[-1].issued_for(client.cookies["__Host-gs_session"])
+
+
+# --- Recência pelo `auth_time` (D1, D3, D4) --------------------------------------------------
+
+
+def freeze_api_clock(app: FastAPI) -> int:
+    """Fixa o relógio da API no segundo atual e o devolve; o `auth_time` do teste parte dele."""
+    frozen = int(time.time())
+    app.dependency_overrides[current_time] = lambda: datetime.fromtimestamp(frozen, UTC)
+    return frozen
+
+
+def session_authenticated_at(factory: sessionmaker[Session]) -> list[datetime]:
+    with unit_of_work(factory) as session:
+        return list(
+            session.execute(
+                select(web_session.c.authenticated_at).order_by(
+                    web_session.c.created_at, web_session.c.id
+                )
+            ).scalars()
+        )
+
+
+def test_sessao_do_google_conta_recencia_pelo_auth_time(
+    client: TestClient, fake: FakeProviders, login_app: FastAPI
+) -> None:
+    # Navegador logado no Google há 3 dias: o login entra, mas não vale como recente.
+    open_signup(login_app)
+    fake.claims_patch = {"auth_time": _now() - 3 * 24 * 3600}
+
+    assert login(client, fake, "google").status_code == 303
+    response = client.delete("/api/v1/me", headers=delete_me_headers(client))
+
+    assert_problem(response, 401, "REAUTH_REQUIRED")
+
+
+def test_auth_time_recente_vale_como_login_recente(
+    client: TestClient, fake: FakeProviders, factory: sessionmaker[Session], login_app: FastAPI
+) -> None:
+    open_signup(login_app)
+    frozen = freeze_api_clock(login_app)
+    fake.claims_patch = {"auth_time": frozen - 60}
+
+    login(client, fake, "google")
+
+    assert session_authenticated_at(factory) == [datetime.fromtimestamp(frozen - 60, UTC)]
+    assert client.delete("/api/v1/me", headers=delete_me_headers(client)).status_code == 202
+
+
+def test_sem_auth_time_vale_agora_e_alerta(
+    client: TestClient,
+    fake: FakeProviders,
+    factory: sessionmaker[Session],
+    login_app: FastAPI,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    # "Session age claims" desligado ou app não verificado: falha aberta com alerta (D3).
+    open_signup(login_app)
+    frozen = freeze_api_clock(login_app)
+    fake.omit_auth_time = True
+    caplog.set_level(logging.WARNING, logger=auth_login.__name__)
+
+    assert login(client, fake, "google").headers["location"] == "/"
+
+    assert session_authenticated_at(factory) == [datetime.fromtimestamp(frozen, UTC)]
+    assert alert_events(caplog.records) == ["google_auth_time_missing"]
+
+
+def test_com_auth_time_nao_ha_alerta(
+    client: TestClient, fake: FakeProviders, login_app: FastAPI, caplog: pytest.LogCaptureFixture
+) -> None:
+    open_signup(login_app)
+    caplog.set_level(logging.WARNING, logger=auth_login.__name__)
+
+    login(client, fake, "google")
+
+    assert alert_events(caplog.records) == []
+
+
+def test_auth_time_no_futuro_vira_agora(
+    client: TestClient, fake: FakeProviders, factory: sessionmaker[Session], login_app: FastAPI
+) -> None:
+    # Relógio do Google adiantado: nem recusa nem `ValueError` de `start_session`.
+    open_signup(login_app)
+    frozen = freeze_api_clock(login_app)
+    fake.claims_patch = {"auth_time": frozen + 120}
+
+    assert login(client, fake, "google").headers["location"] == "/"
+
+    assert session_authenticated_at(factory) == [datetime.fromtimestamp(frozen, UTC)]
+
+
+@pytest.mark.parametrize("auth_time", ["123", True, -5], ids=repr)
+def test_auth_time_com_tipo_errado_e_recusado(
+    client: TestClient,
+    fake: FakeProviders,
+    sessions: StoredSessions,
+    factory: sessionmaker[Session],
+    login_app: FastAPI,
+    auth_time: object,
+) -> None:
+    open_signup(login_app)
+    fake.claims_patch = {"auth_time": auth_time}
+
+    assert_nothing_logged_in(factory, sessions, login(client, fake, "google"))
 
 
 # --- Cadastro fechado e contas recusadas -----------------------------------------------------

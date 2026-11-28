@@ -28,6 +28,8 @@ class ExternalIdentity:
     issuer: str
     subject: str
     display_name: str
+    # Hora da autenticação no provedor, quando ele a informa (o `auth_time` do Google).
+    authenticated_at: datetime | None = None
 
 
 class LoginRefused(Enum):

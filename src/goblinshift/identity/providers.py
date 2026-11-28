@@ -10,6 +10,7 @@ Este módulo não fala HTTP; o fluxo OAuth (Authlib) mora no entrypoint `auth_lo
 """
 
 from collections.abc import Mapping
+from datetime import UTC, datetime
 from enum import StrEnum
 from typing import Annotated, Literal
 
@@ -33,6 +34,9 @@ GOOGLE_ID_TOKEN_ALGORITHMS = ("RS256",)
 # Só o escopo `openid` (1.8, minimização): o ID token não traz nome, então o nome é fixo (D-8).
 GOOGLE_SCOPE = "openid"
 GOOGLE_DISPLAY_NAME = "Conta Google"
+# O Google não aceita `prompt=login` nem `max_age`: a recência vem do `auth_time` do ID token, que
+# só vem se o pedido o exige assim (e com "Session age claims" ligado no console; ADR 062).
+GOOGLE_AUTH_TIME_CLAIMS = '{"id_token":{"auth_time":{"essential":true}}}'
 
 GITHUB_ISSUER = "https://github.com"
 GITHUB_AUTHORIZE_URL = "https://github.com/login/oauth/authorize"
@@ -48,6 +52,9 @@ _OIDC_SUBJECT = r"^[\x21-\x7e]{1,255}$"
 # Regras de nome de usuário do GitHub: letras, dígitos e hífen, até 39 caracteres.
 _GITHUB_LOGIN = r"^[A-Za-z0-9-]{1,39}$"
 _MAX_BIGINT = 2**63 - 1
+# 9999-12-31T23:59:59Z, o maior instante que `datetime` representa: acima disso, `fromtimestamp`
+# levantaria `OverflowError` em vez de recusar a identidade.
+_MAX_EPOCH_SECONDS = 253_402_300_799
 
 
 _PROVIDER_BY_ISSUER = {GOOGLE_ISSUER: ProviderName.GOOGLE, GITHUB_ISSUER: ProviderName.GITHUB}
@@ -76,6 +83,8 @@ class _GoogleClaims(BaseModel):
 
     iss: Literal["https://accounts.google.com", "accounts.google.com"]
     sub: Annotated[str, Field(pattern=_OIDC_SUBJECT)]
+    # Segundos desde a época; o modo estrito recusa string, `True` e número com fração.
+    auth_time: Annotated[int, Field(gt=0, le=_MAX_EPOCH_SECONDS)] | None = None
 
 
 class _GitHubUser(BaseModel):
@@ -91,8 +100,14 @@ def google_identity(claims: Mapping[str, object]) -> ExternalIdentity:
         parsed = _GoogleClaims.model_validate(dict(claims))
     except ValidationError as exc:
         raise InvalidProviderIdentityError("claims do Google fora do modelo") from exc
+    authenticated_at = (
+        None if parsed.auth_time is None else datetime.fromtimestamp(parsed.auth_time, UTC)
+    )
     return ExternalIdentity(
-        issuer=GOOGLE_ISSUER, subject=parsed.sub, display_name=GOOGLE_DISPLAY_NAME
+        issuer=GOOGLE_ISSUER,
+        subject=parsed.sub,
+        display_name=GOOGLE_DISPLAY_NAME,
+        authenticated_at=authenticated_at,
     )
 
 
