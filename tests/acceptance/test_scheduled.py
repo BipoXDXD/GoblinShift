@@ -38,11 +38,22 @@ SCRIPT_TIMEOUT_S = 30
 SIGTERM_EXIT = 128 + signal.SIGTERM
 # EX_TEMPFAIL: a trava da publicação estava ocupada ou ausente e nada foi tocado.
 LOCK_BUSY_EXIT = 75
+# /proc/uptime: abaixo de 30 min o script espera o worker religar; acima, segue como sempre.
+JUST_BOOTED_S = 60
+LONG_AFTER_BOOT_S = 99999
 
 FAKE_DOCKER = """#!/bin/sh
 echo "docker $*" >>"$FAKE_CALLS"
 case "$1" in
-  ps) [ -n "$FAKE_WORKER" ] && echo "$FAKE_WORKER"; exit "${FAKE_PS_RC:-0}" ;;
+  ps)
+    # O worker só aparece a partir da consulta FAKE_WORKER_FROM_PS (o religamento da máquina).
+    n=$(($(cat "$FAKE_CALLS.ps" 2>/dev/null || echo 0) + 1))
+    echo "$n" >"$FAKE_CALLS.ps"
+    if [ -n "$FAKE_WORKER" ] && [ "$n" -ge "${FAKE_WORKER_FROM_PS:-1}" ]; then
+      echo "$FAKE_WORKER"
+    fi
+    exit "${FAKE_PS_RC:-0}"
+    ;;
   stop) sleep "${FAKE_STOP_SLEEP_S:-0}"; exit "${FAKE_STOP_RC:-0}" ;;
   start)
     if [ -n "$FAKE_START_SLEEP_S" ] && [ ! -e "$FAKE_CALLS.start" ]; then
@@ -112,6 +123,7 @@ def fakes(tmp_path: Path) -> Path:
         command.write_text(body)
         command.chmod(0o755)
     (tmp_path / "release.lock").touch()
+    (tmp_path / "uptime").write_text(f"{LONG_AFTER_BOOT_S}.42 1.00\n")
     return tmp_path
 
 
@@ -122,6 +134,7 @@ def script_env(fakes: Path, url: str | None, worker: str) -> dict[str, str]:
         "FAKE_ARGV": str(fakes / "argv"),
         "FAKE_WORKER": worker,
         "ACCEPTANCE_RELEASE_LOCK": str(fakes / "release.lock"),
+        "ACCEPTANCE_PROC_UPTIME": str(fakes / "uptime"),
     }
     if url is not None:
         env["ACCEPTANCE_HEALTHCHECK_URL"] = url
@@ -398,6 +411,63 @@ def test_trava_livre_e_segurada_durante_o_teste(fakes: Path) -> None:
 
     assert result.returncode == 0, result.stderr
     assert "python3 trava ocupada" in calls
+
+
+def booted(fakes: Path, seconds: int) -> None:
+    (fakes / "uptime").write_text(f"{seconds}.17 3.00\n")
+
+
+def test_logo_depois_do_boot_espera_o_worker_aparecer(fakes: Path) -> None:
+    # Persistent=true roda o teste perdido logo depois do boot: o worker pode ainda não ter subido.
+    booted(fakes, JUST_BOOTED_S)
+
+    result, calls = scheduled(
+        fakes,
+        extra_env={"FAKE_WORKER_FROM_PS": "2", "ACCEPTANCE_WORKER_POLL_S": "0"},
+    )
+
+    assert result.returncode == 0, result.stderr
+    assert calls.count(worker_lookup()) >= 2
+    stop = calls.index(f"docker stop --time=30 {WORKER}")
+    assert stop < calls.index("python3 -E -s -B -m acceptance.run (em deploy)")
+
+
+def test_longe_do_boot_nao_espera(fakes: Path) -> None:
+    booted(fakes, LONG_AFTER_BOOT_S)
+
+    result, calls = scheduled(
+        fakes,
+        extra_env={"FAKE_WORKER_FROM_PS": "2", "ACCEPTANCE_WORKER_POLL_S": "0"},
+    )
+
+    assert result.returncode == 0, result.stderr
+    assert calls.count(worker_lookup()) == 1
+    assert f"docker stop --time=30 {WORKER}" not in calls
+
+
+def test_worker_que_nao_aparece_no_prazo_segue_sem_parar(fakes: Path) -> None:
+    booted(fakes, JUST_BOOTED_S)
+
+    result, calls = scheduled(
+        fakes,
+        worker="",
+        extra_env={"ACCEPTANCE_WORKER_WAIT_S": "1", "ACCEPTANCE_WORKER_POLL_S": "0.2"},
+    )
+
+    assert result.returncode == 0, result.stderr
+    assert calls.count(worker_lookup()) >= 2
+    assert not [call for call in calls if call.startswith("docker stop")]
+    assert "python3 -E -s -B -m acceptance.run (em deploy)" in calls
+    assert "worker" in result.stderr
+
+
+def test_uptime_ilegivel_nao_espera(fakes: Path) -> None:
+    (fakes / "uptime").unlink()
+
+    result, calls = scheduled(fakes, extra_env={"FAKE_WORKER_FROM_PS": "2"})
+
+    assert result.returncode == 0, result.stderr
+    assert calls.count(worker_lookup()) == 1
 
 
 def test_sem_a_url_nao_roda_nada(fakes: Path) -> None:

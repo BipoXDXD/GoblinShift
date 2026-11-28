@@ -311,6 +311,8 @@ O `goblinshift-acceptance.timer` roda o mesmo teste uma vez por semana, no domin
 
 Antes de parar o worker, o script toma a trava da publicação do goblinshift (`/var/lib/coolify-release/goblinshift/release.lock`, a mesma do receptor em `deploy/coolify/release/receiver.py`) e a segura até o fim. Com uma publicação em curso, espera até 15 min; se ela não terminar, ou se a trava não existir, pinga `/fail` e sai com 75 sem tocar no worker, e a aceitação fica para a semana seguinte (ou para um `systemctl start` manual). O contrário também vale: **uma publicação que chegue durante a aceitação falha na hora** (o receptor toma a trava com `LOCK_NB`), o job de deploy fica vermelho com `BlockingIOError` e precisa ser rodado de novo depois da janela (domingo, 07:30 UTC mais até 30 min de sorteio e até 1 h de teste). A trava é a do projeto, não a `host.lock`, para não barrar a publicação dos outros projetos do host.
 
+Como o timer tem `Persistent=true`, o teste perdido com a máquina desligada roda logo depois do boot. A menos de 30 min do boot, o script espera até 10 min o worker aparecer no `docker ps` antes de pará-lo, para que as sondas não rodem enquanto ele sobe; se ele não aparecer no prazo, o teste segue sem worker para parar e o log diz isso.
+
 ```bash
 sudo bash "$gs_tmp/repo/deploy/acceptance/install.sh"   # copia o código e cria /etc/goblinshift/acceptance.env vazio (root, 600)
 sudoedit /etc/goblinshift/acceptance.env                # ACCEPTANCE_HEALTHCHECK_URL=<URL de ping do check>

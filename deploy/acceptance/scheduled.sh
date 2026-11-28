@@ -19,6 +19,10 @@
 # de novo depois da janela (README, "Aceitação semanal, agendada"). A trava não é a host.lock,
 # que barraria por até 1 h a publicação dos outros projetos do host.
 #
+# Com Persistent=true, o teste perdido roda logo depois do boot, e o worker pode ainda não ter
+# subido: a menos de 30 min do boot, o script espera até 10 min o worker aparecer no `docker ps`
+# antes de procurá-lo para parar. Se ele não aparecer, segue como hoje, sem worker para parar.
+#
 # Roda da cópia que o deploy/acceptance/install.sh faz em /usr/local/lib/goblinshift (do root), nunca
 # do checkout, que pertence ao usuário goblinshift; o lib.sh e o pacote vêm da mesma cópia.
 #
@@ -26,6 +30,9 @@
 #   ACCEPTANCE_HEALTHCHECK_URL   URL de ping do check; é segredo e vai pelo stdin do curl
 #   ACCEPTANCE_RELEASE_LOCK      opcional; a trava da publicação (padrão abaixo, só para o teste)
 #   ACCEPTANCE_LOCK_WAIT_S       opcional; espera pela trava, 900 s (só para o teste)
+#   ACCEPTANCE_PROC_UPTIME       opcional; /proc/uptime (só para o teste)
+#   ACCEPTANCE_WORKER_WAIT_S     opcional; espera pelo worker depois do boot, 600 s (só para o teste)
+#   ACCEPTANCE_WORKER_POLL_S     opcional; intervalo entre as consultas, 5 s (só para o teste)
 #
 # Uso: sudo systemctl start goblinshift-acceptance.service
 set -euo pipefail
@@ -44,6 +51,35 @@ RELEASE_LOCK="${ACCEPTANCE_RELEASE_LOCK:-/var/lib/coolify-release/${APP_PROJECT}
 LOCK_WAIT_S="${ACCEPTANCE_LOCK_WAIT_S:-900}"
 # EX_TEMPFAIL: a aceitação não rodou, mas nada foi tocado.
 LOCK_BUSY_EXIT=75
+PROC_UPTIME="${ACCEPTANCE_PROC_UPTIME:-/proc/uptime}"
+RECENT_BOOT_S=1800
+WORKER_WAIT_S="${ACCEPTANCE_WORKER_WAIT_S:-600}"
+WORKER_POLL_S="${ACCEPTANCE_WORKER_POLL_S:-5}"
+
+# find_workers: IDs dos workers rodando do projeto, um por linha.
+find_workers() {
+  docker ps --quiet \
+    --filter="label=com.docker.compose.project=${APP_PROJECT}" \
+    --filter="label=com.docker.compose.service=worker"
+}
+
+# wait_for_worker_after_boot: perto do boot, espera o worker religar antes da procura que decide
+# se ele para. Falha do `docker ps` aqui conta como "ainda não": o daemon pode estar subindo, e a
+# procura de verdade, depois, é que reprova se ele continuar falhando.
+wait_for_worker_after_boot() {
+  local uptime_s deadline
+  uptime_s="$(cut -d. -f1 "$PROC_UPTIME" 2>/dev/null)" || return 0
+  [[ "$uptime_s" =~ ^[0-9]+$ ]] && ((uptime_s < RECENT_BOOT_S)) || return 0
+  echo "máquina ligada há ${uptime_s} s: esperando o worker subir (até ${WORKER_WAIT_S} s)"
+  deadline=$((SECONDS + WORKER_WAIT_S))
+  while true; do
+    [[ -n "$(find_workers 2>/dev/null)" ]] && return 0
+    ((SECONDS < deadline && interrupted == 0)) || break
+    sleep "$WORKER_POLL_S"
+  done
+  echo "o worker não apareceu em ${WORKER_WAIT_S} s depois do boot; o teste segue sem parar" \
+    "worker nenhum" >&2
+}
 
 # restart_workers: religa e confere; sai com erro se algum não ficou rodando. Interrompido, o
 # cliente do `docker stop` pode ter morrido com a parada ainda em curso no daemon. O `start` nessa
@@ -78,12 +114,12 @@ healthcheck_ping "$ACCEPTANCE_HEALTHCHECK_URL" "/start"
 interrupted=0
 trap 'interrupted=1' TERM INT
 
+wait_for_worker_after_boot
+
 status=0
 # Em variável, e não em `< <(...)`: a substituição de processo esconde a falha do `docker ps`, e
 # uma lista vazia por erro pareceria worker parado.
-running="$(docker ps --quiet \
-  --filter="label=com.docker.compose.project=${APP_PROJECT}" \
-  --filter="label=com.docker.compose.service=worker")" || status=$?
+running="$(find_workers)" || status=$?
 mapfile -t workers < <(printf '%s' "$running")
 
 if ((${#workers[@]})); then
