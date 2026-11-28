@@ -24,6 +24,7 @@ from goblinshift.catalog.csv_janitor_v1 import CsvJanitorV1Parameters
 from goblinshift.catalog.downloads_detox_v1 import DownloadsDetoxV1Parameters
 from goblinshift.catalog.image_forge_v1 import ImageForgeV1Parameters
 from goblinshift.catalog.media_mill_v1 import MediaMillV1Parameters
+from goblinshift.catalog.media_mill_v2 import MediaMillV2Parameters
 from goblinshift.catalog.pdf_press_v1 import PdfPressV1Parameters, upload_references
 from goblinshift.catalog.references import UploadReference, no_upload_references
 from goblinshift.processing import downloads_detox, image_forge, media_mill, pdf_press
@@ -204,24 +205,36 @@ DOWNLOADS_DETOX_V1 = RecipeVersion(
 
 _MEDIA_LIMITS = media_mill.Limits()
 
+# As duas versões publicam os mesmos limites; cada uma leva a própria cópia.
+_MEDIA_MILL_LIMITS: dict[str, int] = {
+    "max_inputs": media_mill.MAX_INPUTS,
+    "max_input_bytes": media_mill.MAX_INPUT_BYTES,
+    "max_total_input_bytes": media_mill.MAX_TOTAL_INPUT_BYTES,
+    "max_duration_s": _MEDIA_LIMITS.max_duration_s,
+    "max_long_side_px": _MEDIA_LIMITS.max_long_side_px,
+    "max_short_side_px": _MEDIA_LIMITS.max_short_side_px,
+    "max_fps": _MEDIA_LIMITS.max_fps,
+    "max_audio_sample_rate_hz": _MEDIA_LIMITS.max_sample_rate_hz,
+    "max_audio_channels": _MEDIA_LIMITS.max_channels,
+    "thumbnail_max_side_px": _MEDIA_LIMITS.thumbnail_max_side_px,
+}
+
 # `max_input_bytes` sobe o teto por arquivo de 32 MiB para os 256 MiB de vídeo (1.7, ADR 036).
 MEDIA_MILL_V1 = RecipeVersion(
     recipe_id=media_mill.RECIPE_ID,
     version=media_mill.VERSION,
     status=VersionStatus.CURRENT,
     parameters_model=MediaMillV1Parameters,
-    limits={
-        "max_inputs": media_mill.MAX_INPUTS,
-        "max_input_bytes": media_mill.MAX_INPUT_BYTES,
-        "max_total_input_bytes": media_mill.MAX_TOTAL_INPUT_BYTES,
-        "max_duration_s": _MEDIA_LIMITS.max_duration_s,
-        "max_long_side_px": _MEDIA_LIMITS.max_long_side_px,
-        "max_short_side_px": _MEDIA_LIMITS.max_short_side_px,
-        "max_fps": _MEDIA_LIMITS.max_fps,
-        "max_audio_sample_rate_hz": _MEDIA_LIMITS.max_sample_rate_hz,
-        "max_audio_channels": _MEDIA_LIMITS.max_channels,
-        "thumbnail_max_side_px": _MEDIA_LIMITS.thumbnail_max_side_px,
-    },
+    limits=dict(_MEDIA_MILL_LIMITS),
+)
+
+# ADR 072: superconjunto da v1 (áudio com perda e trecho), com os mesmos limites.
+MEDIA_MILL_V2 = RecipeVersion(
+    recipe_id=media_mill.RECIPE_ID,
+    version=media_mill.VERSION_2,
+    status=VersionStatus.CURRENT,
+    parameters_model=MediaMillV2Parameters,
+    limits=dict(_MEDIA_MILL_LIMITS),
 )
 
 # ADR 035. O teto do lote é imposto na aceitação, como no Detox; páginas e documentos só se
@@ -243,7 +256,16 @@ PDF_PRESS_V1 = RecipeVersion(
     upload_references=upload_references,
 )
 
-CATALOG = Catalog([CSV_JANITOR_V1, IMAGE_FORGE_V1, DOWNLOADS_DETOX_V1, PDF_PRESS_V1, MEDIA_MILL_V1])
+CATALOG = Catalog(
+    [
+        CSV_JANITOR_V1,
+        IMAGE_FORGE_V1,
+        DOWNLOADS_DETOX_V1,
+        PDF_PRESS_V1,
+        MEDIA_MILL_V1,
+        MEDIA_MILL_V2,
+    ]
+)
 
 
 def _field_errors(error: ValidationError) -> list[FieldError]:

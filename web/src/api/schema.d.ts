@@ -2945,6 +2945,44 @@ export interface operations {
                          */
                         thumbnail_count?: 0 | 1 | 3;
                     };
+                } | {
+                    /** @constant */
+                    recipe_id: "media-mill";
+                    /** @constant */
+                    recipe_version: 2;
+                    /** MediaMillV2Parameters */
+                    parameters: {
+                        /**
+                         * Extract Audio
+                         * @default true
+                         */
+                        extract_audio?: boolean;
+                        /**
+                         * AudioFormatV2
+                         * @default wav
+                         * @enum {string}
+                         */
+                        audio_format?: "wav" | "flac" | "mp3" | "aac" | "opus";
+                        /** Audio Stream Index */
+                        audio_stream_index?: number | null;
+                        /**
+                         * @default 1
+                         * @enum {integer}
+                         */
+                        thumbnail_count?: 0 | 1 | 3;
+                        /**
+                         * @default 192
+                         * @enum {integer}
+                         */
+                        audio_bitrate_kbps?: 64 | 96 | 128 | 160 | 192 | 256 | 320;
+                        /**
+                         * Trim Start Ms
+                         * @default 0
+                         */
+                        trim_start_ms?: number;
+                        /** Trim End Ms */
+                        trim_end_ms?: number | null;
+                    } & (unknown & unknown & unknown);
                 });
             };
         };
@@ -3329,6 +3367,44 @@ export interface operations {
                          */
                         thumbnail_count?: 0 | 1 | 3;
                     };
+                } | {
+                    /** @constant */
+                    recipe_id: "media-mill";
+                    /** @constant */
+                    recipe_version: 2;
+                    /** MediaMillV2Parameters */
+                    parameters: {
+                        /**
+                         * Extract Audio
+                         * @default true
+                         */
+                        extract_audio?: boolean;
+                        /**
+                         * AudioFormatV2
+                         * @default wav
+                         * @enum {string}
+                         */
+                        audio_format?: "wav" | "flac" | "mp3" | "aac" | "opus";
+                        /** Audio Stream Index */
+                        audio_stream_index?: number | null;
+                        /**
+                         * @default 1
+                         * @enum {integer}
+                         */
+                        thumbnail_count?: 0 | 1 | 3;
+                        /**
+                         * @default 192
+                         * @enum {integer}
+                         */
+                        audio_bitrate_kbps?: 64 | 96 | 128 | 160 | 192 | 256 | 320;
+                        /**
+                         * Trim Start Ms
+                         * @default 0
+                         */
+                        trim_start_ms?: number;
+                        /** Trim End Ms */
+                        trim_end_ms?: number | null;
+                    } & (unknown & unknown & unknown);
                 });
             };
         };
@@ -3861,6 +3937,44 @@ export interface operations {
                          */
                         thumbnail_count?: 0 | 1 | 3;
                     };
+                } | {
+                    /** @constant */
+                    recipe_id: "media-mill";
+                    /** @constant */
+                    recipe_version: 2;
+                    /** MediaMillV2Parameters */
+                    parameters: {
+                        /**
+                         * Extract Audio
+                         * @default true
+                         */
+                        extract_audio?: boolean;
+                        /**
+                         * AudioFormatV2
+                         * @default wav
+                         * @enum {string}
+                         */
+                        audio_format?: "wav" | "flac" | "mp3" | "aac" | "opus";
+                        /** Audio Stream Index */
+                        audio_stream_index?: number | null;
+                        /**
+                         * @default 1
+                         * @enum {integer}
+                         */
+                        thumbnail_count?: 0 | 1 | 3;
+                        /**
+                         * @default 192
+                         * @enum {integer}
+                         */
+                        audio_bitrate_kbps?: 64 | 96 | 128 | 160 | 192 | 256 | 320;
+                        /**
+                         * Trim Start Ms
+                         * @default 0
+                         */
+                        trim_start_ms?: number;
+                        /** Trim End Ms */
+                        trim_end_ms?: number | null;
+                    } & (unknown & unknown & unknown);
                 });
             };
         };

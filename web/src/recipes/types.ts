@@ -10,7 +10,19 @@ export type RecipeId = RunCommand["recipe_id"];
 /** Receita, versão e parâmetros: o que o formulário da receita produz, sem as entradas. */
 export type RecipeCommand = DistributiveOmit<RunCommand, "input_upload_ids">;
 
-export type RecipeCommandFor<K extends RecipeId> = Extract<RecipeCommand, { recipe_id: K }>;
+/**
+ * Versão que o formulário escreve, nas receitas com mais de uma versão no catálogo. O Media Mill
+ * v2 já existe na API, mas a Bancada continua na v1 até ganhar o formulário da v2 (Tarefa 17).
+ */
+type FormVersions = Record<RecipeId, number> & { readonly "media-mill": 1 };
+
+/** A versão que o formulário da receita escreve. */
+export type RecipeFormVersion<K extends RecipeId> = FormVersions[K];
+
+export type RecipeCommandFor<K extends RecipeId> = Extract<
+  RecipeCommand,
+  { recipe_id: K; recipe_version: FormVersions[K] }
+>;
 
 export type RecipeParameters<K extends RecipeId> = RecipeCommandFor<K>["parameters"];
 

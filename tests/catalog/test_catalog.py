@@ -235,7 +235,7 @@ def test_schema_da_variante_fixa_receita_e_versao_e_recusa_campos_extras() -> No
 # --- Receitas da fatia 5 -------------------------------------------------------------------
 
 
-def test_catalogo_lista_as_receitas_implementadas_na_versao_1() -> None:
+def test_catalogo_lista_as_receitas_implementadas() -> None:
     keys = {(version.recipe_id, version.version) for version in CATALOG.list_versions()}
 
     assert keys == {
@@ -244,7 +244,16 @@ def test_catalogo_lista_as_receitas_implementadas_na_versao_1() -> None:
         ("downloads-detox", 1),
         ("pdf-press", 1),
         ("media-mill", 1),
+        ("media-mill", 2),
     }
+
+
+def test_media_mill_v2_entra_ao_lado_da_v1_com_os_mesmos_limites() -> None:
+    v1 = CATALOG.get_version("media-mill", 1)
+    v2 = CATALOG.get_version("media-mill", 2)
+
+    assert (v1.status, v2.status) == (VersionStatus.CURRENT, VersionStatus.CURRENT)
+    assert v2.limits == v1.limits
 
 
 def test_image_forge_publica_os_limites_de_1_7() -> None:

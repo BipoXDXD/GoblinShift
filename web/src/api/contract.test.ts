@@ -19,7 +19,7 @@ describe("contrato gerado de POST /runs", () => {
     expectTypeOf<Variant<"image-forge">["recipe_version"]>().toEqualTypeOf<1>();
     expectTypeOf<Variant<"downloads-detox">["recipe_version"]>().toEqualTypeOf<1>();
     expectTypeOf<Variant<"pdf-press">["recipe_version"]>().toEqualTypeOf<1>();
-    expectTypeOf<Variant<"media-mill">["recipe_version"]>().toEqualTypeOf<1>();
+    expectTypeOf<Variant<"media-mill">["recipe_version"]>().toEqualTypeOf<1 | 2>();
   });
 
   it("dá à CSV Janitor os próprios parâmetros, sem index signature", () => {
@@ -77,14 +77,35 @@ describe("contrato gerado de POST /runs", () => {
     expectTypeOf<keyof Parameters>().toEqualTypeOf<"operation" | "pages_per_document" | "select">();
   });
 
-  it("dá ao Media Mill os próprios parâmetros, sem index signature", () => {
-    type Parameters = Variant<"media-mill">["parameters"];
+  it("dá ao Media Mill v1 os próprios parâmetros, sem index signature", () => {
+    type Parameters = Extract<Variant<"media-mill">, { recipe_version: 1 }>["parameters"];
 
     expectTypeOf<Parameters["audio_format"]>().toEqualTypeOf<"wav" | "flac" | undefined>();
     expectTypeOf<Parameters["audio_stream_index"]>().toEqualTypeOf<number | null | undefined>();
     expectTypeOf<Parameters["thumbnail_count"]>().toEqualTypeOf<0 | 1 | 3 | undefined>();
     expectTypeOf<keyof Parameters>().toEqualTypeOf<
       "extract_audio" | "audio_format" | "audio_stream_index" | "thumbnail_count"
+    >();
+  });
+
+  it("dá ao Media Mill v2 os da v1 mais o bitrate e o trecho", () => {
+    type Parameters = Extract<Variant<"media-mill">, { recipe_version: 2 }>["parameters"];
+
+    expectTypeOf<Parameters["audio_format"]>().toEqualTypeOf<
+      "wav" | "flac" | "mp3" | "aac" | "opus" | undefined
+    >();
+    expectTypeOf<Parameters["audio_bitrate_kbps"]>().toEqualTypeOf<
+      64 | 96 | 128 | 160 | 192 | 256 | 320 | undefined
+    >();
+    expectTypeOf<Parameters["trim_end_ms"]>().toEqualTypeOf<number | null | undefined>();
+    expectTypeOf<keyof Parameters>().toEqualTypeOf<
+      | "extract_audio"
+      | "audio_format"
+      | "audio_stream_index"
+      | "thumbnail_count"
+      | "audio_bitrate_kbps"
+      | "trim_start_ms"
+      | "trim_end_ms"
     >();
   });
 
