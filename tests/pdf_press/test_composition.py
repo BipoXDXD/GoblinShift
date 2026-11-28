@@ -2,7 +2,7 @@
 
 import pytest
 
-from goblinshift.processing.pdf_press import Limits, Operation, PageSelection, Params
+from goblinshift.processing.pdf_press import Limits, Operation, PageRange, Params
 from goblinshift.processing.pdf_press.composition import (
     InputDocument,
     PlannedDocument,
@@ -110,9 +110,9 @@ def test_select_respeita_ordem_e_repeticoes_e_atribui_a_primeira_pagina() -> Non
     params = Params(
         operation=Operation.SELECT,
         select=(
-            PageSelection(UPLOAD_B, 2),
-            PageSelection(UPLOAD_A, 1),
-            PageSelection(UPLOAD_B, 2),
+            PageRange.single(UPLOAD_B, 2),
+            PageRange.single(UPLOAD_A, 1),
+            PageRange.single(UPLOAD_B, 2),
         ),
     )
     inputs = [document(0, "a.pdf", 1, UPLOAD_A), document(1, "b.pdf", 2, UPLOAD_B)]
@@ -125,14 +125,14 @@ def test_select_respeita_ordem_e_repeticoes_e_atribui_a_primeira_pagina() -> Non
 
 
 def test_select_de_pagina_inexistente_falha_a_execucao() -> None:
-    params = Params(operation=Operation.SELECT, select=(PageSelection(UPLOAD_A, 3),))
+    params = Params(operation=Operation.SELECT, select=(PageRange.single(UPLOAD_A, 3),))
     inputs = [document(0, "a.pdf", 2, UPLOAD_A)]
 
     assert failure_code(params, inputs, Limits()) is FailureCode.PDF_PAGE_NOT_FOUND
 
 
 def test_select_da_ultima_pagina_existe() -> None:
-    params = Params(operation=Operation.SELECT, select=(PageSelection(UPLOAD_A, 2),))
+    params = Params(operation=Operation.SELECT, select=(PageRange.single(UPLOAD_A, 2),))
     inputs = [document(0, "a.pdf", 2, UPLOAD_A)]
 
     assert plan_documents(params, inputs, Limits())[0].pages == pages(0, 2)
@@ -140,7 +140,7 @@ def test_select_da_ultima_pagina_existe() -> None:
 
 def test_select_de_upload_fora_das_entradas_e_defeito_de_infraestrutura() -> None:
     # A aceitação já recusa a referência (422); chegar aqui é job fora do contrato.
-    params = Params(operation=Operation.SELECT, select=(PageSelection(UPLOAD_C, 1),))
+    params = Params(operation=Operation.SELECT, select=(PageRange.single(UPLOAD_C, 1),))
     inputs = [document(0, "a.pdf", 1, UPLOAD_A)]
 
     with pytest.raises(InputContractError, match="entradas"):
@@ -148,14 +148,14 @@ def test_select_de_upload_fora_das_entradas_e_defeito_de_infraestrutura() -> Non
 
 
 def test_select_sem_ids_dos_uploads_no_contexto_e_defeito_de_infraestrutura() -> None:
-    params = Params(operation=Operation.SELECT, select=(PageSelection(UPLOAD_A, 1),))
+    params = Params(operation=Operation.SELECT, select=(PageRange.single(UPLOAD_A, 1),))
 
     with pytest.raises(InputContractError, match="upload"):
         plan_documents(params, [document(0, "a.pdf", 1, None)], Limits())
 
 
 def test_select_acima_do_teto_de_paginas_de_saida_falha() -> None:
-    params = Params(operation=Operation.SELECT, select=(PageSelection(UPLOAD_A, 1),) * 3)
+    params = Params(operation=Operation.SELECT, select=(PageRange.single(UPLOAD_A, 1),) * 3)
     inputs = [document(0, "a.pdf", 1, UPLOAD_A)]
 
     code = failure_code(params, inputs, Limits(max_output_pages=2))
@@ -164,7 +164,7 @@ def test_select_acima_do_teto_de_paginas_de_saida_falha() -> None:
 
 
 def test_select_no_teto_de_paginas_de_saida_passa() -> None:
-    params = Params(operation=Operation.SELECT, select=(PageSelection(UPLOAD_A, 1),) * 2)
+    params = Params(operation=Operation.SELECT, select=(PageRange.single(UPLOAD_A, 1),) * 2)
     inputs = [document(0, "a.pdf", 1, UPLOAD_A)]
 
     plan = plan_documents(params, inputs, Limits(max_output_pages=2))

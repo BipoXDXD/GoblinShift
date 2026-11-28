@@ -15,7 +15,7 @@ from typing import assert_never
 
 from goblinshift.processing.names import safe_stem
 from goblinshift.processing.pdf_press.limits import Limits
-from goblinshift.processing.pdf_press.params import Operation, PageSelection, Params
+from goblinshift.processing.pdf_press.params import Operation, PageRange, Params
 from goblinshift.processing.recipe import FailureCode, InputContractError, RecipeFailure
 
 MERGED_NAME = "merged.pdf"
@@ -93,9 +93,7 @@ def _part_name(stem: str, first: int, last: int) -> str:
     return f"{stem}-{pages}{PDF_EXTENSION}"
 
 
-def _selection(
-    selection: Sequence[PageSelection], inputs: Sequence[InputDocument]
-) -> PlannedDocument:
+def _selection(selection: Sequence[PageRange], inputs: Sequence[InputDocument]) -> PlannedDocument:
     by_upload = _inputs_by_upload(inputs)
     pages = tuple(_source_page(choice, by_upload) for choice in selection)
     return PlannedDocument(SELECTION_NAME, pages[0].position, pages)
@@ -107,17 +105,17 @@ def _inputs_by_upload(inputs: Sequence[InputDocument]) -> dict[str, InputDocumen
     return {entry.upload_id: entry for entry in inputs if entry.upload_id is not None}
 
 
-def _source_page(choice: PageSelection, by_upload: dict[str, InputDocument]) -> SourcePage:
+def _source_page(choice: PageRange, by_upload: dict[str, InputDocument]) -> SourcePage:
     entry = by_upload.get(choice.upload_id)
     if entry is None:
         raise InputContractError("select cita um upload que não está entre as entradas")
-    if choice.page_number > entry.page_count:
+    if choice.first_page > entry.page_count:
         raise RecipeFailure(
             FailureCode.PDF_PAGE_NOT_FOUND,
             f"a entrada {entry.position + 1} tem {entry.page_count} páginas; "
-            f"a seleção pede a página {choice.page_number}",
+            f"a seleção pede a página {choice.first_page}",
         )
-    return SourcePage(entry.position, choice.page_number)
+    return SourcePage(entry.position, choice.first_page)
 
 
 def _require_within_limits(plan: Sequence[PlannedDocument], limits: Limits) -> None:

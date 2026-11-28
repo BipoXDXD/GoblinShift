@@ -18,11 +18,14 @@ from goblinshift.processing.pdf_press.limits import (
 )
 from goblinshift.processing.pdf_press.params import (
     DEFAULT_PAGES_PER_DOCUMENT,
+    ROTATIONS,
+    Compression,
     InvalidParametersError,
     Operation,
-    PageSelection,
+    PageRange,
     Params,
     params_from_mapping,
+    params_v2_from_mapping,
 )
 
 __all__ = [
@@ -34,11 +37,14 @@ __all__ = [
     "MAX_OUTPUT_PAGES",
     "MAX_TOTAL_INPUT_BYTES",
     "RECIPE_ID",
+    "ROTATIONS",
     "VERSION",
+    "Compression",
     "InvalidParametersError",
     "Limits",
     "Operation",
-    "PageSelection",
+    "PageRange",
     "Params",
     "params_from_mapping",
+    "params_v2_from_mapping",
 ]

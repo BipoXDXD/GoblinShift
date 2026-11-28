@@ -5,11 +5,13 @@ import pytest
 from goblinshift.processing.pdf_press import (
     MAX_INPUT_PAGES,
     MAX_OUTPUT_PAGES,
+    Compression,
     InvalidParametersError,
     Operation,
-    PageSelection,
+    PageRange,
     Params,
     params_from_mapping,
+    params_v2_from_mapping,
 )
 
 UPLOAD_A = "4eb3e442-3f30-4d83-8d34-cb18a99a46cb"
@@ -33,9 +35,9 @@ def test_split_recusa_grupo_fora_da_faixa(size: int) -> None:
 
 def test_select_guarda_a_lista_na_ordem_com_repeticoes() -> None:
     pages = (
-        PageSelection(UPLOAD_B, 2),
-        PageSelection(UPLOAD_A, 1),
-        PageSelection(UPLOAD_B, 2),
+        PageRange.single(UPLOAD_B, 2),
+        PageRange.single(UPLOAD_A, 1),
+        PageRange.single(UPLOAD_B, 2),
     )
 
     assert Params(operation=Operation.SELECT, select=pages).select == pages
@@ -52,14 +54,14 @@ def test_select_com_lista_vazia_e_recusado() -> None:
 
 
 def test_select_acima_do_teto_de_paginas_de_saida_e_recusado() -> None:
-    pages = (PageSelection(UPLOAD_A, 1),) * (MAX_OUTPUT_PAGES + 1)
+    pages = (PageRange.single(UPLOAD_A, 1),) * (MAX_OUTPUT_PAGES + 1)
 
     with pytest.raises(InvalidParametersError, match=str(MAX_OUTPUT_PAGES)):
         Params(operation=Operation.SELECT, select=pages)
 
 
 def test_select_no_teto_de_paginas_de_saida_e_aceito() -> None:
-    pages = (PageSelection(UPLOAD_A, 1),) * MAX_OUTPUT_PAGES
+    pages = (PageRange.single(UPLOAD_A, 1),) * MAX_OUTPUT_PAGES
 
     assert len(Params(operation=Operation.SELECT, select=pages).select or ()) == MAX_OUTPUT_PAGES
 
@@ -67,18 +69,18 @@ def test_select_no_teto_de_paginas_de_saida_e_aceito() -> None:
 @pytest.mark.parametrize("operation", [Operation.MERGE, Operation.SPLIT])
 def test_lista_de_paginas_fora_do_select_e_recusada(operation: Operation) -> None:
     with pytest.raises(InvalidParametersError, match="select"):
-        Params(operation=operation, select=(PageSelection(UPLOAD_A, 1),))
+        Params(operation=operation, select=(PageRange.single(UPLOAD_A, 1),))
 
 
 @pytest.mark.parametrize("page", [0, -3, MAX_INPUT_PAGES + 1])
 def test_pagina_fora_da_faixa_e_recusada(page: int) -> None:
-    with pytest.raises(InvalidParametersError, match="page_number"):
-        PageSelection(UPLOAD_A, page)
+    with pytest.raises(InvalidParametersError, match="first_page"):
+        PageRange.single(UPLOAD_A, page)
 
 
 @pytest.mark.parametrize("page", [1, MAX_INPUT_PAGES])
 def test_pagina_na_fronteira_e_aceita(page: int) -> None:
-    assert PageSelection(UPLOAD_A, page).page_number == page
+    assert PageRange.single(UPLOAD_A, page) == PageRange(UPLOAD_A, page, page, 0)
 
 
 @pytest.mark.parametrize(
@@ -94,7 +96,7 @@ def test_pagina_na_fronteira_e_aceita(page: int) -> None:
 def test_upload_id_fora_da_forma_canonica_e_recusado(upload_id: str) -> None:
     # O catálogo normaliza o UUID; a forma canônica é a única que chega ao executor.
     with pytest.raises(InvalidParametersError, match="upload_id"):
-        PageSelection(upload_id, 1)
+        PageRange.single(upload_id, 1)
 
 
 def test_mapeamento_resolvido_do_merge_vira_params() -> None:
@@ -115,7 +117,7 @@ def test_mapeamento_resolvido_do_select_vira_params() -> None:
 
     assert params_from_mapping(raw) == Params(
         operation=Operation.SELECT,
-        select=(PageSelection(UPLOAD_A, 3), PageSelection(UPLOAD_A, 3)),
+        select=(PageRange.single(UPLOAD_A, 3), PageRange.single(UPLOAD_A, 3)),
     )
 
 
@@ -163,3 +165,156 @@ def test_campo_desconhecido_e_recusado() -> None:
 def test_tipo_errado_e_recusado(raw: dict[str, object], option: str) -> None:
     with pytest.raises(InvalidParametersError, match=option):
         params_from_mapping(raw)
+
+
+@pytest.mark.parametrize(
+    ("raw", "option"),
+    [
+        pytest.param(
+            {"operation": "select", "select": [{"upload_id": UPLOAD_A, "page_number": 0}]},
+            "page_number",
+            id="pagina-zero",
+        ),
+    ],
+)
+def test_parser_da_v1_mantem_a_mensagem_de_page_number(raw: dict[str, object], option: str) -> None:
+    with pytest.raises(InvalidParametersError, match=option):
+        params_from_mapping(raw)
+
+
+# --- v2: intervalos, rotação, compressão e strip_metadata (ADR 070) ----------------------------
+
+
+def test_intervalo_aberto_e_fechado_sao_validos() -> None:
+    assert PageRange(UPLOAD_A, 10, None).last_page is None
+    assert PageRange(UPLOAD_A, 1, 3, 90).rotation == 90
+
+
+@pytest.mark.parametrize(
+    ("first", "last", "rotation", "message"),
+    [
+        (0, 3, 0, "first_page"),
+        (4, 3, 0, "last_page"),
+        (1, MAX_INPUT_PAGES + 1, 0, "last_page"),
+        (1, 1, 45, "rotation"),
+    ],
+)
+def test_intervalo_invalido_e_recusado(first: int, last: int, rotation: int, message: str) -> None:
+    with pytest.raises(InvalidParametersError, match=message):
+        PageRange(UPLOAD_A, first, last, rotation)
+
+
+def test_intervalo_com_upload_fora_da_forma_canonica_e_recusado() -> None:
+    with pytest.raises(InvalidParametersError, match="upload_id"):
+        PageRange(UPLOAD_A.upper(), 1, None)
+
+
+def test_rotacao_global_no_select_e_recusada() -> None:
+    with pytest.raises(InvalidParametersError, match="rotation não se aplica ao select"):
+        Params(Operation.SELECT, select=(PageRange.single(UPLOAD_A, 1),), rotation=90)
+
+
+@pytest.mark.parametrize("operation", [Operation.MERGE, Operation.SPLIT])
+def test_rotacao_global_vale_em_merge_e_split(operation: Operation) -> None:
+    assert Params(operation, rotation=270).rotation == 270
+
+
+@pytest.mark.parametrize("rotation", [-90, 45, 360])
+def test_rotacao_global_fora_dos_angulos_e_recusada(rotation: int) -> None:
+    with pytest.raises(InvalidParametersError, match="rotation"):
+        Params(rotation=rotation)
+
+
+def test_defaults_da_biblioteca_sao_o_comportamento_da_v1() -> None:
+    params = Params()
+
+    assert (params.rotation, params.compression, params.strip_metadata) == (
+        0,
+        Compression.NONE,
+        False,
+    )
+
+
+def test_parser_da_v1_continua_com_paginas_avulsas() -> None:
+    params = params_from_mapping(
+        {"operation": "select", "select": [{"upload_id": UPLOAD_A, "page_number": 2}]}
+    )
+
+    assert params.select == (PageRange(UPLOAD_A, 2, 2),)
+
+
+@pytest.mark.parametrize("option", ["rotation", "compression", "strip_metadata"])
+def test_parser_da_v1_recusa_opcoes_da_v2(option: str) -> None:
+    with pytest.raises(InvalidParametersError, match="opções desconhecidas"):
+        params_from_mapping({option: 0})
+
+
+def test_parser_da_v2_le_intervalos_rotacao_e_compressao() -> None:
+    raw = {
+        "operation": "select",
+        "pages_per_document": 1,
+        "rotation": 0,
+        "compression": "lossless",
+        "strip_metadata": True,
+        "select": [{"upload_id": UPLOAD_A, "first_page": 10, "last_page": None, "rotation": 270}],
+    }
+
+    assert params_v2_from_mapping(raw) == Params(
+        Operation.SELECT, 1, (PageRange(UPLOAD_A, 10, None, 270),), 0, Compression.LOSSLESS, True
+    )
+
+
+def test_parser_da_v2_le_merge_girado() -> None:
+    raw = {"operation": "merge", "rotation": 180, "compression": "none", "strip_metadata": False}
+
+    assert params_v2_from_mapping(raw) == Params(rotation=180)
+
+
+def _range(**overrides: object) -> dict[str, object]:
+    return {"upload_id": UPLOAD_A, "first_page": 1, "last_page": 2, "rotation": 0, **overrides}
+
+
+@pytest.mark.parametrize(
+    ("raw", "option"),
+    [
+        pytest.param({"page_number": 1}, "desconhecidas", id="chave-da-v1"),
+        pytest.param({"rotation": True}, "rotation", id="rotacao-booleana"),
+        pytest.param({"rotation": "90"}, "rotation", id="rotacao-texto"),
+        pytest.param({"compression": "lossy"}, "compression", id="compressao-desconhecida"),
+        pytest.param({"compression": 1}, "compression", id="compressao-numero"),
+        pytest.param({"strip_metadata": 1}, "strip_metadata", id="strip-numero"),
+        pytest.param(
+            {"operation": "select", "select": [_range(first_page=True)]},
+            "first_page deve ser inteiro",
+            id="primeira-booleana",
+        ),
+        pytest.param(
+            {"operation": "select", "select": [_range(last_page="3")]},
+            "last_page",
+            id="ultima-texto",
+        ),
+        pytest.param(
+            {"operation": "select", "select": [_range(rotation=False)]},
+            "rotation",
+            id="rotacao-do-intervalo-booleana",
+        ),
+        pytest.param(
+            {"operation": "select", "select": [{"upload_id": UPLOAD_A, "first_page": 1}]},
+            "exatamente",
+            id="intervalo-sem-last-page",
+        ),
+        pytest.param(
+            {"operation": "select", "select": [{"upload_id": UPLOAD_A, "page_number": 1}]},
+            "exatamente",
+            id="item-da-v1",
+        ),
+        pytest.param(
+            {"operation": "select", "select": [_range(upload_id=7)]},
+            "upload_id",
+            id="upload-numero",
+        ),
+    ],
+)
+def test_parser_da_v2_recusa_tipo_errado(raw: dict[str, object], option: str) -> None:
+    with pytest.raises(InvalidParametersError, match=option):
+        params_v2_from_mapping(raw)

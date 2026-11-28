@@ -12,7 +12,7 @@ from goblinshift.processing.pdf_press import (
     MAX_INPUT_PAGES,
     MAX_OUTPUT_PAGES,
     Operation,
-    PageSelection,
+    PageRange,
     Params,
     params_from_mapping,
 )
@@ -61,7 +61,7 @@ def test_select_resolvido_normaliza_o_uuid_e_vira_os_params_da_biblioteca() -> N
 
     assert params_from_mapping(resolved) == Params(
         operation=Operation.SELECT,
-        select=(PageSelection(UPLOAD_A, 2), PageSelection(UPLOAD_A, 2)),
+        select=(PageRange.single(UPLOAD_A, 2), PageRange.single(UPLOAD_A, 2)),
     )
 
 

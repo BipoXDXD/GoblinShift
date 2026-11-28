@@ -23,7 +23,7 @@ from goblinshift.processing.pdf_press import (
     MAX_OUTPUT_PAGES,
     InvalidParametersError,
     Operation,
-    PageSelection,
+    PageRange,
     Params,
     params_from_mapping,
 )
@@ -69,7 +69,7 @@ class PdfPressV1Parameters(BaseModel):
     def to_params(self) -> Params:
         select = None
         if self.select is not None:
-            select = tuple(PageSelection(str(p.upload_id), p.page_number) for p in self.select)
+            select = tuple(PageRange.single(str(p.upload_id), p.page_number) for p in self.select)
         return Params(self.operation, self.pages_per_document, select)
 
 

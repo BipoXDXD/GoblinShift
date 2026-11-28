@@ -7,7 +7,7 @@ import pikepdf
 import pytest
 
 from goblinshift.processing.output_dir import FileSystemOutputDir
-from goblinshift.processing.pdf_press import RECIPE_ID, Limits, Operation, PageSelection, Params
+from goblinshift.processing.pdf_press import RECIPE_ID, Limits, Operation, PageRange, Params
 from goblinshift.processing.pdf_press.recipe import PdfPressV1
 from goblinshift.processing.recipe import (
     FailureCode,
@@ -30,7 +30,7 @@ NOT_SELECTED = ReportWarning("INPUT_NOT_SELECTED", "nenhuma página desta entrad
 def select(*pages: tuple[str, int]) -> Params:
     return Params(
         operation=Operation.SELECT,
-        select=tuple(PageSelection(upload_id, number) for upload_id, number in pages),
+        select=tuple(PageRange.single(upload_id, number) for upload_id, number in pages),
     )
 
 
