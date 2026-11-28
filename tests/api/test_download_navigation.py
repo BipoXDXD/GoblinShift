@@ -166,31 +166,21 @@ def test_cliente_que_nao_navega_continua_com_problem_json(
         "//outro.host/execucoes/{id}",
         "/execucoes/{upper}",
         "",
+        None,
     ],
+    ids=lambda path: "sem-referer" if path is None else None,
 )
 def test_referer_fora_da_tela_da_execucao_nao_redireciona(
-    client: TestClient, factory: sessionmaker[Session], published: Published, path: str
+    client: TestClient, factory: sessionmaker[Session], published: Published, path: str | None
 ) -> None:
     expire(factory, published)
-    run_page = path.format(id=published.run_id, upper=published.run_id.upper())
-    headers = {**published.auth, **NAV, "Referer": f"http://testserver{run_page}"}
+    headers = {**published.auth, **NAV}
+    if path is not None:
+        run_page = path.format(id=published.run_id, upper=published.run_id.upper())
+        headers["Referer"] = f"http://testserver{run_page}"
 
     response = client.get(
         download_url(published.artifact_id), headers=headers, follow_redirects=False
-    )
-
-    assert_problem(response, 410, "GONE")
-
-
-def test_sem_referer_nao_redireciona(
-    client: TestClient, factory: sessionmaker[Session], published: Published
-) -> None:
-    expire(factory, published)
-
-    response = client.get(
-        download_url(published.artifact_id),
-        headers={**published.auth, **NAV},
-        follow_redirects=False,
     )
 
     assert_problem(response, 410, "GONE")

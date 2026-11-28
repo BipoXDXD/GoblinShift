@@ -14,22 +14,27 @@ com o problem+json de sempre:
 - o caminho do `Referer` é, por inteiro, a tela de uma execução.
 
 O `Location` é relativo e montado só com o UUID validado do `Referer`, então nenhum `Referer`
-leva para fora da tela da execução. Este módulo não importa `problems.py`: é ele quem importa
-este.
+leva para fora da tela da execução. Este módulo não importa `problems.py` em execução (só a
+anotação de `ProblemCode`): é ele quem importa este.
 """
 
 import re
+from typing import TYPE_CHECKING
 from urllib.parse import urlsplit
 
 from fastapi import Request
 from fastapi.responses import RedirectResponse, Response
+
+if TYPE_CHECKING:
+    # Só para a anotação: em execução, `problems.py` importa este módulo, e não o contrário.
+    from goblinshift.entrypoints.api.problems import ProblemCode
 
 _DOWNLOAD_PATH = re.compile(r"/api/v1/artifacts/[^/]+/download")
 # UUID canônico: minúsculo, com hífens, como a interface monta a rota da execução.
 _RUN_PAGE = re.compile(r"/execucoes/([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})")
 
 
-def failure_redirect(request: Request, code: str) -> Response | None:
+def failure_redirect(request: Request, code: ProblemCode) -> Response | None:
     """303 de volta à tela da execução, ou `None` quando a recusa segue em problem+json."""
     if _DOWNLOAD_PATH.fullmatch(request.url.path) is None:
         return None
@@ -39,7 +44,7 @@ def failure_redirect(request: Request, code: str) -> Response | None:
     if run_id is None:
         return None
     return RedirectResponse(
-        f"/execucoes/{run_id}?falha={code}",
+        f"/execucoes/{run_id}?falha={code.value}",
         status_code=303,
         headers={"Cache-Control": "no-store"},
     )

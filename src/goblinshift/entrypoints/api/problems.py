@@ -332,10 +332,30 @@ def problem_response(
     headers: Mapping[str, str] | None = None,
     errors: Sequence[Mapping[str, str]] | None = None,
 ) -> JSONResponse:
+    record_error(code.value)
+    return _problem_json(
+        code=code,
+        detail=detail,
+        instance=instance,
+        request_id=request_id,
+        headers=headers,
+        errors=errors,
+    )
+
+
+def _problem_json(
+    *,
+    code: ProblemCode,
+    detail: str,
+    instance: str,
+    request_id: str,
+    headers: Mapping[str, str] | None,
+    errors: Sequence[Mapping[str, str]] | None,
+) -> JSONResponse:
+    """O problem+json sem registrar o código no evento: quem chama já o registrou."""
     # Também cobre o 429 e o 503 do framework (`HTTPException`), que não passam por `ApiProblem`.
     _require_retry_after(code, headers)
     spec = PROBLEMS[code]
-    record_error(code.value)
     body: dict[str, Any] = {
         "type": code.type_uri,
         "title": spec.title,
@@ -441,12 +461,13 @@ def request_id_of(request: Request) -> str:
 
 
 async def _handle_api_problem(request: Request, exc: ApiProblem) -> Response:
+    # Um registro só para as duas respostas: o 303 conta no evento como o problem+json.
+    record_error(exc.code.value)
     # O download por navegação que falha volta à tela da execução com o código (64a).
-    redirect = failure_redirect(request, exc.code.value)
+    redirect = failure_redirect(request, exc.code)
     if redirect is not None:
-        record_error(exc.code.value)
         return redirect
-    return problem_response(
+    return _problem_json(
         code=exc.code,
         detail=exc.detail,
         instance=request.url.path,
