@@ -37,14 +37,13 @@ o processo recusa subir com o Runner local, que não tem sandbox (3.9, fatia 4).
 
 import logging
 import time
-from collections.abc import Callable, Iterator
-from contextlib import contextmanager
+from collections.abc import Callable
 from datetime import timedelta
 
-from opentelemetry.trace import NoOpTracer, Tracer
 from sqlalchemy.orm import Session, sessionmaker
 
 import goblinshift.entrypoints.shutdown as process_shutdown
+from goblinshift.entrypoints.bootstrap import build_runner, process_tracer
 from goblinshift.entrypoints.shutdown import SHUTDOWN_POLL_S, ShutdownFlag
 from goblinshift.files.storage import FileStorage
 from goblinshift.platform.db import make_engine, make_session_factory
@@ -55,12 +54,7 @@ from goblinshift.platform.settings import (
     Settings,
     load_settings_or_exit,
 )
-from goblinshift.platform.telemetry import (
-    UserHasher,
-    configure_logging,
-    make_tracer_provider,
-    shut_down_tracer_provider,
-)
+from goblinshift.platform.telemetry import UserHasher, configure_logging
 from goblinshift.runs.finished import RunFinishedReporter
 from goblinshift.runs.worker.claim import ClaimedAttempt, QueueListener, claim_next
 from goblinshift.runs.worker.claim_pause import ClaimPause, orphan_cleanup_window
@@ -69,8 +63,7 @@ from goblinshift.runs.worker.coordinator import (
     Coordinator,
     CoordinatorConfig,
 )
-from goblinshift.runs.worker.executor_ctl_runner import ExecutorCtlRunner
-from goblinshift.runs.worker.runner import STOP_GRACE, LocalRunner, Runner
+from goblinshift.runs.worker.runner import STOP_GRACE, Runner
 from goblinshift.runs.worker.work_area_gate import WorkAreaGate
 
 logger = logging.getLogger("goblinshift.worker")
@@ -100,18 +93,6 @@ def main() -> int:
         logger.exception("worker encerrado por erro")
         return EXIT_FAILURE
     return EXIT_OK
-
-
-def build_runner(settings: Settings) -> Runner:
-    """Runner da configuração; `ExecutorConfigError` se ela não serve ao ambiente."""
-    settings.executor_image_for_runs()
-    if settings.runner == "executor_ctl":
-        return ExecutorCtlRunner(
-            settings.executor_ctl_socket, settings.work_root, work_group=settings.executor_group_id
-        )
-    return LocalRunner(
-        settings.work_root, attempt_timeout=timedelta(seconds=settings.attempt_timeout_s)
-    )
 
 
 def serve(settings: Settings, runner: Runner, shutdown: ShutdownFlag) -> None:
@@ -186,29 +167,6 @@ def claim_pause_for(settings: Settings) -> ClaimPause:
         stop_grace=STOP_GRACE,
     )
     return ClaimPause(window)
-
-
-@contextmanager
-def process_tracer(settings: Settings, default_service: str) -> Iterator[Tracer]:
-    """Tracer dos eventos amplos do processo (3.7); ao sair, exporta o lote pendente com prazo.
-
-    Sem endpoint OTLP (desenvolvimento e testes), um tracer que não grava.
-    """
-    provider = make_tracer_provider(settings, default_service)
-    try:
-        yield provider.get_tracer(__name__) if provider is not None else NoOpTracer()
-    finally:
-        shut_down_tracer_provider(provider)
-
-
-@contextmanager
-def run_finished_reporter(
-    settings: Settings, factory: sessionmaker[Session], default_service: str
-) -> Iterator[RunFinishedReporter]:
-    """Emissor do `run.finished` (3.7) do processo, com o próprio `process_tracer`."""
-    hasher = UserHasher(settings.user_hash_key())
-    with process_tracer(settings, default_service) as tracer:
-        yield RunFinishedReporter(factory, hasher, tracer)
 
 
 def _work_once(

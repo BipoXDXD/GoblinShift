@@ -5,7 +5,7 @@ from opentelemetry.sdk.trace import ReadableSpan
 from opentelemetry.sdk.trace import Tracer as SdkTracer
 from opentelemetry.trace import NoOpTracer
 
-from goblinshift.entrypoints.worker import process_tracer
+from goblinshift.entrypoints.bootstrap import process_tracer
 from goblinshift.platform.settings import Settings
 
 WORKER_SCOPE = "goblinshift.entrypoints.worker"

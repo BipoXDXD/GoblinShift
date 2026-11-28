@@ -26,8 +26,8 @@ from uuid import UUID
 from opentelemetry.trace import Status, StatusCode, Tracer
 from sqlalchemy.orm import Session, sessionmaker
 
+from goblinshift.entrypoints.bootstrap import build_runner, process_tracer
 from goblinshift.entrypoints.shutdown import ShutdownFlag, shutdown_on_signals
-from goblinshift.entrypoints.worker import build_runner, process_tracer
 from goblinshift.files import purge as files_purge
 from goblinshift.files.storage import FileStorage
 from goblinshift.identity import purge as identity_purge
