@@ -188,26 +188,36 @@ test('sem HEALTHCHECK_PING_URL nenhum ping sai', async () => {
   assert.deepEqual(h.pings, []);
 });
 
-test('recusas seguidas somam no registro undelivered e a entrega o apaga', async () => {
-  const h = harness([503, 503, 503, 503]);
+async function refuseTwice(h) {
   await checkOnce(h.env, h.fetcher, 0);
   h.discord.ok = false;
   h.discord.status = 404;
   await assert.rejects(checkOnce(h.env, h.fetcher, MINUTE_MS), /HTTP 404/);
   h.discord.status = 429;
   await assert.rejects(checkOnce(h.env, h.fetcher, 2 * MINUTE_MS), /HTTP 429/);
+}
+
+test('recusas seguidas somam no registro undelivered', async () => {
+  const h = harness([503, 503, 503]);
+  await refuseTwice(h);
   assert.deepEqual(h.undelivered(), {
     count: 2,
     firstAt: new Date(MINUTE_MS).toISOString(),
     lastAt: new Date(2 * MINUTE_MS).toISOString(),
     lastStatus: 429,
+    lastError: null,
   });
+});
+
+test('a primeira entrega apaga o registro undelivered', async () => {
+  const h = harness([503, 503, 503, 503]);
+  await refuseTwice(h);
   h.discord.ok = true;
   await checkOnce(h.env, h.fetcher, 3 * MINUTE_MS);
   assert.equal(h.undelivered(), null);
 });
 
-test('erro de rede no Discord também fica no registro undelivered', async () => {
+test('erro de rede no Discord fica no registro undelivered sem status', async () => {
   const h = harness([503, 503]);
   await checkOnce(h.env, h.fetcher, 0);
   const fetcher = async (url, init) => {
@@ -215,7 +225,20 @@ test('erro de rede no Discord também fica no registro undelivered', async () =>
     return h.fetcher(url, init);
   };
   await assert.rejects(checkOnce(h.env, fetcher, MINUTE_MS), { name: 'TimeoutError' });
-  assert.equal(h.undelivered().lastStatus, 'TimeoutError');
+  assert.equal(h.undelivered().lastStatus, null);
+  assert.equal(h.undelivered().lastError, 'TimeoutError');
+});
+
+test('KV fora do ar na recusa: o /fail sai e o erro do Discord é o propagado', async () => {
+  const h = harness([503, 503], { pingUrl: PING });
+  await checkOnce(h.env, h.fetcher, 0);
+  h.discord.ok = false;
+  h.discord.status = 404;
+  h.env.UPTIME_STATE.put = async () => {
+    throw new Error('KV fora do ar');
+  };
+  await assert.rejects(checkOnce(h.env, h.fetcher, MINUTE_MS), /HTTP 404/);
+  assert.deepEqual(h.pings, ['sucesso', '/fail']);
 });
 
 test('entrega sem registro undelivered não grava nada a mais', async () => {

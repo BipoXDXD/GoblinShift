@@ -1,7 +1,7 @@
 // Monitor de uptime externo (docs/GoblinShiftPlan.md, 3.7): roda fora da VPS, porque a telemetria
 // cai junto com ela, e avisa direto no Discord, sem passar por nada que dependa da VPS.
 //
-// Dead-man's switch (D15): com o secret HEALTHCHECK_PING_URL, cada volta em que o Discord não
+// Dead-man's switch: com o secret HEALTHCHECK_PING_URL, cada volta em que o Discord não
 // recusou pinga o check "uptime Worker" do healthchecks.io, e a recusa pinga /fail. O Worker
 // parado ou o Discord recusando (o mesmo canal dos avisos URGENT do OpenObserve) viram alarme por
 // outro caminho. Sem o secret, nada sai. A recusa também fica no KV, na chave `undelivered`.
@@ -28,7 +28,12 @@ export async function checkOnce(env, fetcher, nowMs) {
     try {
       await sendToDiscord(env.DISCORD_WEBHOOK_URL, content, fetcher);
     } catch (error) {
-      await recordUndelivered(env.UPTIME_STATE, error, nowMs);
+      // O KV fora do ar não pode calar o /fail nem trocar o erro do Discord pelo dele.
+      try {
+        await recordUndelivered(env.UPTIME_STATE, error, nowMs);
+      } catch (kvError) {
+        console.warn(`registro undelivered não gravado: ${kvError.name}`);
+      }
       await pingHealthcheck(env.HEALTHCHECK_PING_URL, '/fail', fetcher);
       throw error;
     }
@@ -49,7 +54,9 @@ async function recordUndelivered(kv, error, nowMs) {
     count: (previous?.count ?? 0) + 1,
     firstAt: previous?.firstAt ?? at,
     lastAt: at,
-    lastStatus: error.status ?? error.name,
+    // HTTP recusado: o status, sem erro. Timeout ou rede: sem status, com o nome do erro.
+    lastStatus: error.status ?? null,
+    lastError: error.status === undefined ? error.name : null,
   };
   await kv.put(UNDELIVERED_KEY, JSON.stringify(record));
 }

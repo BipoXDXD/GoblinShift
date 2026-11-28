@@ -13,7 +13,7 @@ O estado fica no KV `goblinshift-uptime-state`, gravado só quando muda (durante
 O heartbeat do OpenObserve (`gs-heartbeat`) prova que ele alcança o healthchecks.io, não que o Discord aceita os avisos. Como os avisos `URGENT` do OpenObserve vão para o mesmo canal, um webhook revogado calaria os dois sem ninguém perceber. Por isso:
 
 - **Ping de vida (dead-man's switch).** Com o secret `HEALTHCHECK_PING_URL`, o Worker pinga o check `uptime Worker` do healthchecks.io no fim de toda volta em que o Discord não recusou (inclusive as voltas sem aviso), e `<url>/fail` quando recusou, antes de relançar o erro. O Worker parado, o cron desligado ou o Discord recusando viram alarme pelo canal do healthchecks.io. A falha do próprio ping não muda nada: sem o ping no prazo, o healthchecks.io avisa sozinho. A URL é segredo (quem a tem cala o alarme) e não vai para log nem para mensagem de erro. Sem o secret, nenhum ping sai e o resto funciona igual.
-- **Registro do não entregue.** Quando o Discord recusa (status diferente de 2xx, timeout ou erro de rede), o Worker grava no KV a chave `undelivered` = `{count, firstAt, lastAt, lastStatus}`: quantas recusas seguidas, a primeira e a última (ISO 8601, UTC) e o último status HTTP (ou o nome do erro, como `TimeoutError`). A primeira entrega depois disso apaga a chave. Como o aviso pendente se repete a cada volta, são no máximo 720 escritas por dia. Para ler:
+- **Registro do não entregue.** Quando o Discord recusa (status diferente de 2xx, timeout ou erro de rede), o Worker grava no KV a chave `undelivered` = `{count, firstAt, lastAt, lastStatus, lastError}`: quantas recusas seguidas, a primeira e a última (ISO 8601, UTC) e como foi a última: `lastStatus` é o status HTTP da recusa (`null` em timeout ou erro de rede) e `lastError` é o nome do erro nesses casos, como `TimeoutError` (`null` quando houve resposta HTTP). Se o próprio KV falhar ao gravar, o `/fail` sai do mesmo jeito. A primeira entrega depois disso apaga a chave. Como o aviso pendente se repete a cada volta, são no máximo 720 escritas por dia. Para ler:
 
   ```bash
   cd deploy/uptime
@@ -31,7 +31,7 @@ npx wrangler secret put HEALTHCHECK_PING_URL   # só na primeira vez; URL de pin
 
 ### Ligar o ping de vida (operador, uma vez)
 
-Feito pelo dono, com autorização (Tarefa 28 do plano `build-e-conteineres`); até lá o Worker roda sem a variável e nada muda.
+Feito pelo dono, com autorização (#442); até lá o Worker roda sem a variável e nada muda.
 
 1. No healthchecks.io, criar o check `uptime Worker`: período 2 min, tolerância 10 min, mesmo canal de alerta dos outros checks (tabela em [`deploy/openobserve/README.md`](../openobserve/README.md#monitores-externos)).
 2. `cd deploy/uptime && npx wrangler secret put HEALTHCHECK_PING_URL` com a URL de ping do check, e `npx wrangler deploy`.
