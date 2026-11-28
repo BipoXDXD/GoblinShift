@@ -18,6 +18,7 @@ import {
 } from "../test/fakeApi";
 import { presetBody, PRESET_ID } from "../test/presets";
 import { escapeIsBlocked, forceClose } from "../test/dialog";
+import { fakeUploader } from "../test/fakeUploader";
 import { recordDescriptionOnFocus } from "../test/focus";
 import { renderRoutes } from "../test/renderRoutes";
 
@@ -479,12 +480,13 @@ describe("Bancada aberta com um preset", () => {
     expect(screen.getByLabelText("Delimitador dos arquivos de saída")).toHaveValue(",");
   });
 
-  it("preset do PDF Press com páginas escolhidas abre sem as páginas e pede para escolhê-las de novo", async () => {
+  it("preset PDF v1 abre na v2 sem o select e com o aviso de páginas descartadas", async () => {
     setup(`/bancada/pdf-press?preset=${PRESET_ID}`, {
       [`GET /api/v1/presets/${PRESET_ID}`]: () =>
         jsonResponse(
           presetBody({
             recipe_id: "pdf-press",
+            recipe_version: 1,
             parameters: {
               operation: "select",
               select: [{ upload_id: "0b9f6c1e-3a2d-4e5f-8a7b-6c5d4e3f2a1b", page_number: 2 }],
@@ -500,6 +502,67 @@ describe("Bancada aberta com um preset", () => {
     );
     expect(screen.queryByText(/Este preset é de outra receita/)).toBeNull();
     expect(screen.getByRole("combobox", { name: "O que fazer com os PDFs" })).toHaveValue("select");
+    expect(screen.queryByRole("textbox", { name: "Páginas do item 1" })).toBeNull();
+    // As opções da v2 ficam nos defaults dela.
+    expect(screen.getByRole("combobox", { name: "Compressão" })).toHaveValue("none");
+    expect(
+      screen.getByRole("checkbox", { name: "Remover autor e datas das anotações" }),
+    ).toBeChecked();
+  });
+
+  it("preset v1 abre e executa depois da v2", async () => {
+    const api = fakeApi(
+      {
+        "GET /api/v1/catalog": catalogHandler(),
+        "POST /api/v1/uploads": uploadIntentsHandler(),
+        "POST /api/v1/runs": () =>
+          jsonResponse({ ...runBody(), idempotency_expires_at: "2026-10-15T12:00:00Z" }, 202),
+        [`GET /api/v1/runs/${RUN_ID}`]: () => jsonResponse(runBody()),
+        [`GET /api/v1/presets/${PRESET_ID}`]: () =>
+          jsonResponse(
+            presetBody({
+              recipe_id: "pdf-press",
+              recipe_version: 1,
+              parameters: { operation: "split", pages_per_document: 5, select: null },
+            }),
+          ),
+      },
+      { csrfToken: CSRF },
+    );
+    const { uploader } = fakeUploader({ autoResolve: true });
+    renderRoutes({
+      routes: appRoutes(api.client, { uploader }),
+      path: `/bancada/pdf-press?preset=${PRESET_ID}`,
+      client: api.client,
+    });
+    const user = userEvent.setup();
+    expect(await screen.findByText("Parâmetros do preset Clientes do mês.")).toBeVisible();
+    expect(screen.getByRole("textbox", { name: "Páginas por parte" })).toHaveValue("5");
+
+    await user.upload(
+      screen.getByLabelText("Escolher arquivos"),
+      new File(["%PDF-1.7"], "a.pdf", { type: "application/pdf" }),
+    );
+    await waitFor(() => {
+      expect(screen.getAllByText("Enviado")).toHaveLength(1);
+    });
+    await user.click(screen.getByRole("button", { name: "Executar" }));
+
+    await waitFor(() => {
+      expect(sent(api.requests, "POST /api/v1/runs")).toHaveLength(1);
+    });
+    const [request] = sent(api.requests, "POST /api/v1/runs");
+    expect(await request?.json()).toMatchObject({
+      recipe_id: "pdf-press",
+      recipe_version: 2,
+      parameters: {
+        operation: "split",
+        pages_per_document: 5,
+        rotation: 0,
+        compression: "none",
+        strip_metadata: true,
+      },
+    });
   });
 
   it("preset que não existe mostra a falha e a Bancada com os padrões", async () => {

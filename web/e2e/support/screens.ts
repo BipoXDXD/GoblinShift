@@ -162,9 +162,9 @@ export const SCREENS: readonly Screen[] = [
       await bancada.open("pdf-press");
       await bancada.addFiles(PDF_FILES);
       await bancada.choose("O que fazer com os PDFs", "Montar um PDF com as páginas escolhidas");
-      await bancada.press("Adicionar página");
-      await bancada.press("Adicionar página");
-      await bancada.choose("PDF da página 2", "anexo.pdf");
+      await bancada.press("Adicionar item");
+      await bancada.press("Adicionar item");
+      await bancada.choose("PDF do item 2", "anexo.pdf");
       const pageMap = page.getByRole("region", { name: "Mapa de páginas previsto" });
       await expect(pageMap.getByText("anexo.pdf, página 1", { exact: true })).toBeVisible();
     },

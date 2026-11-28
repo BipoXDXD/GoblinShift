@@ -990,8 +990,9 @@ describe("Bancada do PDF Press", () => {
       screen.getByRole("combobox", { name: "O que fazer com os PDFs" }),
       "select",
     );
-    await user.click(screen.getByRole("button", { name: "Adicionar página" }));
-    await user.selectOptions(screen.getByRole("combobox", { name: "PDF da página 1" }), "b.pdf");
+    await user.click(screen.getByRole("button", { name: "Adicionar item" }));
+    await user.selectOptions(screen.getByRole("combobox", { name: "PDF do item 1" }), "b.pdf");
+    await user.type(screen.getByRole("textbox", { name: "Páginas do item 1" }), "-");
 
     await user.click(screen.getByRole("button", { name: "Executar" }));
 
@@ -999,9 +1000,12 @@ describe("Bancada do PDF Press", () => {
       expect(runRequests(api.requests)).toHaveLength(1);
     });
     const command = await bodyOf(runRequests(api.requests)[0]);
+    expect(command.recipe_version).toBe(2);
     expect(command.parameters).toEqual({
       operation: "select",
-      select: [{ upload_id: uploadIdFor(2), page_number: 1 }],
+      select: [{ upload_id: uploadIdFor(2), first_page: 1, last_page: null, rotation: 0 }],
+      compression: "none",
+      strip_metadata: true,
     });
   });
 });

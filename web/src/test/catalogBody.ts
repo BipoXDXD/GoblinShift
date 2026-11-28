@@ -129,7 +129,8 @@ export const CATALOG_BODY = {
       versions: [
         {
           version: 1,
-          status: "current",
+          status: "deprecated",
+          sunset_at: "2027-04-01T00:00:00Z",
           limits: {
             max_inputs: 20,
             max_input_bytes: 33554432,
@@ -162,6 +163,58 @@ export const CATALOG_BODY = {
                 ],
                 default: null,
               },
+            },
+          },
+        },
+        {
+          version: 2,
+          status: "current",
+          limits: {
+            max_inputs: 20,
+            max_input_bytes: 33554432,
+            max_total_input_bytes: 268435456,
+            max_input_pages: 200,
+            max_output_pages: 400,
+            max_output_documents: 200,
+          },
+          defaults: {
+            compression: "none",
+            operation: "merge",
+            pages_per_document: 1,
+            rotation: 0,
+            select: null,
+            strip_metadata: true,
+          },
+          parameters_schema: {
+            type: "object",
+            properties: {
+              operation: { type: "string", enum: ["merge", "split", "select"], default: "merge" },
+              pages_per_document: { type: "integer", minimum: 1, maximum: 200, default: 1 },
+              select: {
+                anyOf: [
+                  {
+                    type: "array",
+                    minItems: 1,
+                    maxItems: 400,
+                    items: {
+                      type: "object",
+                      properties: {
+                        upload_id: { type: "string", format: "uuid" },
+                        first_page: { type: "integer", minimum: 1, maximum: 200 },
+                        last_page: {
+                          anyOf: [{ type: "integer", minimum: 1, maximum: 200 }, { type: "null" }],
+                        },
+                        rotation: { enum: [0, 90, 180, 270], default: 0, type: "integer" },
+                      },
+                    },
+                  },
+                  { type: "null" },
+                ],
+                default: null,
+              },
+              rotation: { enum: [0, 90, 180, 270], default: 0, type: "integer" },
+              compression: { type: "string", enum: ["none", "lossless"], default: "none" },
+              strip_metadata: { type: "boolean", default: true },
             },
           },
         },

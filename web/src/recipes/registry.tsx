@@ -131,7 +131,8 @@ const RECIPES: { readonly [K in RecipeId]: RecipeModule<K> } = {
   },
   "pdf-press": {
     id: "pdf-press",
-    version: 1,
+    version: 2,
+    reusableVersions: [1],
     title: RECIPE_TITLES["pdf-press"],
     // A assinatura %PDF- é conferida no executor; aqui é só o filtro da janela de arquivos.
     accept: ".pdf,application/pdf",

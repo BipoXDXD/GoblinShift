@@ -11,7 +11,7 @@ const numberedPages = Array.from({ length: 401 }, (_, index) => ({
   page_number: index + 1,
 }));
 
-function requestPageMap(pages: PageMap["pages"]): Promise<PageMap> {
+function requestPageMap(pages: readonly unknown[]): Promise<PageMap> {
   const api = fakeApi({
     [route]: () =>
       jsonResponse({ ...mapHeader, pages }, 200, { "Content-Type": "application/octet-stream" }),
@@ -34,6 +34,23 @@ describe("prévia do mapa de páginas", () => {
 
   it.each([0, -1])("recusa o número de página %i", async (pageNumber) => {
     const pages = [{ input_position: 0, page_number: pageNumber }];
+
+    await expect(requestPageMap(pages)).rejects.toMatchObject({
+      failure: { kind: "unexpected-response", status: 200 },
+    });
+  });
+
+  it("lê rotation do preview e ignora página sem a chave", async () => {
+    const pages = [
+      { input_position: 0, page_number: 1, rotation: 90 },
+      { input_position: 0, page_number: 2 },
+    ];
+
+    await expect(requestPageMap(pages)).resolves.toEqual({ ...mapHeader, pages });
+  });
+
+  it.each([0, 45, 360])("recusa a rotação %i, que o produtor nunca escreve", async (rotation) => {
+    const pages = [{ input_position: 0, page_number: 1, rotation }];
 
     await expect(requestPageMap(pages)).rejects.toMatchObject({
       failure: { kind: "unexpected-response", status: 200 },

@@ -242,7 +242,8 @@ function PageList({
         >
           {pageMap.pages.map((page, index) => (
             <li key={index} className="tabular-nums">
-              {T.page(page.page_number, page.input_position)}
+              {T.page(page.page_number, page.input_position) +
+                TEXT.pdfPress.preview.rotated(page.rotation ?? 0)}
             </li>
           ))}
         </ol>

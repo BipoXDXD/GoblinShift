@@ -8,9 +8,17 @@ import { PdfPressFields } from "./PdfPressFields";
 import type { PdfPressSettings } from "./schema";
 
 const SETTINGS: PdfPressSettings = {
-  defaults: { operation: "merge", pages_per_document: "1", cards: [] },
-  limits: { maxPages: 200, maxSelectedPages: 2 },
+  defaults: {
+    operation: "merge",
+    pages_per_document: "1",
+    rotation: 0,
+    compression: "none",
+    strip_metadata: true,
+    cards: [],
+  },
+  limits: { maxPages: 200, maxRanges: 2, maxOutputPages: 400 },
 };
+const COMMON = { compression: "none", strip_metadata: true } as const;
 const A: RecipeInput = { uploadId: "4eb3e442-3f30-4d83-8d34-cb18a99a46cb", name: "a.pdf" };
 const B: RecipeInput = { uploadId: "1b8f283e-32ee-4687-9bd1-ae2f75f93cc2", name: "b.pdf" };
 
@@ -49,7 +57,9 @@ function setup(
 }
 
 const operation = () => screen.getByRole("combobox", { name: "O que fazer com os PDFs" });
-const addCard = () => screen.getByRole("button", { name: "Adicionar página" });
+const addCard = () => screen.getByRole("button", { name: "Adicionar item" });
+const pagesOf = (position: number) =>
+  screen.getByRole("textbox", { name: `Páginas do item ${String(position)}` });
 const preview = () => screen.getByRole("region", { name: "Mapa de páginas previsto" });
 
 function parametersOf(draft: RecipeDraft<"pdf-press">) {
@@ -64,7 +74,7 @@ describe("PdfPressFields", () => {
     const { lastDraft } = setup();
 
     expect(operation()).toHaveValue("merge");
-    expect(parametersOf(lastDraft())).toEqual({ operation: "merge" });
+    expect(parametersOf(lastDraft())).toEqual({ operation: "merge", rotation: 0, ...COMMON });
     expect(
       within(preview())
         .getAllByRole("listitem")
@@ -85,18 +95,26 @@ describe("PdfPressFields", () => {
     await user.type(size, "3");
 
     expect(size).toHaveAccessibleDescription(/De 1 a 200\./);
-    expect(parametersOf(lastDraft())).toEqual({ operation: "split", pages_per_document: 3 });
+    expect(parametersOf(lastDraft())).toEqual({
+      operation: "split",
+      pages_per_document: 3,
+      rotation: 0,
+      ...COMMON,
+    });
   });
 
-  it("monta a seleção por cartões numerados, com página repetida", async () => {
+  it("monta a seleção por cartões numerados, com intervalos e rotação por cartão", async () => {
     const { user, lastDraft } = setup();
     await user.selectOptions(operation(), "select");
 
     await user.click(addCard());
-    await user.selectOptions(screen.getByRole("combobox", { name: "PDF da página 1" }), "b.pdf");
-    const page = screen.getByRole("textbox", { name: "Número da página 1 no PDF" });
-    await user.clear(page);
-    await user.type(page, "4");
+    await user.selectOptions(screen.getByRole("combobox", { name: "PDF do item 1" }), "b.pdf");
+    await user.clear(pagesOf(1));
+    await user.type(pagesOf(1), "4-6");
+    await user.selectOptions(
+      screen.getByRole("combobox", { name: "Girar as páginas do item 1" }),
+      "90° no sentido horário",
+    );
     await user.click(addCard());
 
     expect(screen.getByText("1.")).toBeInTheDocument();
@@ -104,10 +122,74 @@ describe("PdfPressFields", () => {
     expect(parametersOf(lastDraft())).toEqual({
       operation: "select",
       select: [
-        { upload_id: B.uploadId, page_number: 4 },
-        { upload_id: A.uploadId, page_number: 1 },
+        { upload_id: B.uploadId, first_page: 4, last_page: 6, rotation: 90 },
+        { upload_id: A.uploadId, first_page: 1, last_page: 1, rotation: 0 },
       ],
+      ...COMMON,
     });
+  });
+
+  it("a rotação global aparece no merge e no split, e não no select", async () => {
+    const { user, lastDraft } = setup();
+    const rotation = () => screen.queryByRole("combobox", { name: "Girar as páginas" });
+
+    await user.selectOptions(screen.getByRole("combobox", { name: "Girar as páginas" }), "180°");
+    expect(parametersOf(lastDraft())).toMatchObject({ operation: "merge", rotation: 180 });
+
+    await user.selectOptions(operation(), "select");
+    expect(rotation()).toBeNull();
+  });
+
+  it("compressão e strip_metadata valem em todas as operações", async () => {
+    const { user, lastDraft } = setup([A]);
+    await user.selectOptions(operation(), "select");
+    await user.click(addCard());
+
+    await user.selectOptions(
+      screen.getByRole("combobox", { name: "Compressão" }),
+      "Sem perdas: reorganiza o arquivo e recomprime o que der, sem mexer na qualidade das imagens",
+    );
+    await user.click(screen.getByRole("checkbox", { name: "Remover autor e datas das anotações" }));
+
+    expect(parametersOf(lastDraft())).toMatchObject({
+      compression: "lossless",
+      strip_metadata: false,
+    });
+    expect(
+      screen.getByRole("checkbox", { name: "Remover autor e datas das anotações" }),
+    ).toHaveAccessibleDescription(
+      "Título, autor e programa do documento original nunca passam para o PDF gerado.",
+    );
+  });
+
+  it("o campo Páginas descreve o formato e o erro com aria-describedby", async () => {
+    const errors = new Map([["pdf-press-select-0-pages", "As páginas começam em 1."]]);
+    const { user } = setup([A], errors);
+    await user.selectOptions(operation(), "select");
+    await user.click(addCard());
+
+    expect(pagesOf(1)).toHaveAccessibleDescription(
+      /Como 1-3, 7, 10- \(do 10 até o fim\).*As páginas começam em 1\./,
+    );
+    expect(pagesOf(1)).toHaveAttribute("aria-invalid", "true");
+    expect(await axeViolations(document.body)).toEqual([]);
+  });
+
+  it("o mapa previsto descreve intervalos e rotação", async () => {
+    const { user } = setup([A]);
+    await user.selectOptions(operation(), "select");
+    await user.click(addCard());
+    await user.clear(pagesOf(1));
+    await user.type(pagesOf(1), "1-3, 10-");
+    await user.selectOptions(
+      screen.getByRole("combobox", { name: "Girar as páginas do item 1" }),
+      "180°",
+    );
+
+    expect(within(preview()).getByText("a.pdf, páginas 1 a 3, girada 180°")).toBeInTheDocument();
+    expect(
+      within(preview()).getByText("a.pdf, da página 10 até o fim, girada 180°"),
+    ).toBeInTheDocument();
   });
 
   it("adicionar leva o foco à página do cartão novo", async () => {
@@ -116,7 +198,7 @@ describe("PdfPressFields", () => {
 
     await user.click(addCard());
 
-    expect(screen.getByRole("textbox", { name: "Número da página 1 no PDF" })).toHaveFocus();
+    expect(pagesOf(1)).toHaveFocus();
   });
 
   it("reordena os cartões pelo botão, sem arrastar", async () => {
@@ -124,16 +206,17 @@ describe("PdfPressFields", () => {
     await user.selectOptions(operation(), "select");
     await user.click(addCard());
     await user.click(addCard());
-    await user.selectOptions(screen.getByRole("combobox", { name: "PDF da página 2" }), "b.pdf");
+    await user.selectOptions(screen.getByRole("combobox", { name: "PDF do item 2" }), "b.pdf");
 
-    await user.click(screen.getByRole("button", { name: "Mover para cima página 2 da seleção" }));
+    await user.click(screen.getByRole("button", { name: "Mover para cima item 2 da seleção" }));
 
     expect(parametersOf(lastDraft())).toEqual({
       operation: "select",
       select: [
-        { upload_id: B.uploadId, page_number: 1 },
-        { upload_id: A.uploadId, page_number: 1 },
+        { upload_id: B.uploadId, first_page: 1, last_page: 1, rotation: 0 },
+        { upload_id: A.uploadId, first_page: 1, last_page: 1, rotation: 0 },
       ],
+      ...COMMON,
     });
   });
 
@@ -142,7 +225,7 @@ describe("PdfPressFields", () => {
     await user.selectOptions(operation(), "select");
     await user.click(addCard());
 
-    await user.click(screen.getByRole("button", { name: "Remover a página 1" }));
+    await user.click(screen.getByRole("button", { name: "Remover o item 1" }));
 
     expect(addCard()).toHaveFocus();
     expect(lastDraft()).toMatchObject({ ok: false });
@@ -172,12 +255,12 @@ describe("PdfPressFields", () => {
       issues: [
         {
           fieldId: "pdf-press-select-0-upload_id",
-          label: "PDF da página 1",
+          label: "PDF do item 1",
           message: "Escolha um dos PDFs enviados.",
         },
       ],
     });
-    expect(screen.getByRole("combobox", { name: "PDF da página 1" })).toHaveDisplayValue(
+    expect(screen.getByRole("combobox", { name: "PDF do item 1" })).toHaveDisplayValue(
       "Escolha um PDF",
     );
   });
@@ -191,14 +274,14 @@ describe("PdfPressFields", () => {
   });
 
   it("mostra o erro do servidor no campo do cartão", async () => {
-    const errors = new Map([["pdf-press-select-0-page_number", "Página inválida."]]);
+    const errors = new Map([["pdf-press-select-0-upload_id", "Escolha um dos PDFs enviados."]]);
     const { user } = setup([A], errors);
     await user.selectOptions(operation(), "select");
     await user.click(addCard());
 
-    expect(
-      screen.getByRole("textbox", { name: "Número da página 1 no PDF" }),
-    ).toHaveAccessibleDescription(/Página inválida\./);
+    expect(screen.getByRole("combobox", { name: "PDF do item 1" })).toHaveAccessibleDescription(
+      /Escolha um dos PDFs enviados\./,
+    );
   });
 
   it("não tem violações de acessibilidade com cartões", async () => {

@@ -82,7 +82,7 @@ export class BancadaPage {
     await this.#page.getByLabel(field, { exact: true }).selectOption({ label: option });
   }
 
-  /** Aciona um botão do formulário pelo nome acessível (Adicionar página, no PDF Press). */
+  /** Aciona um botão do formulário pelo nome acessível (Adicionar item, no PDF Press). */
   async press(button: string): Promise<void> {
     await this.#page.getByRole("button", { name: button, exact: true }).click();
   }

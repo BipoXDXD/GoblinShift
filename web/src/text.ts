@@ -642,18 +642,36 @@ export const TEXT = {
     pagesPerDocument: "Páginas por parte",
     pagesPerDocumentHint: (max: number) =>
       `De 1 a ${String(max)}. Com 1, cada página vira um PDF; com 3, as partes têm 3 páginas, e a última pode ter menos.`,
+    rotation: "Girar as páginas",
+    rotations: {
+      0: "Não girar",
+      90: "90° no sentido horário",
+      180: "180°",
+      270: "90° no sentido anti-horário (270°)",
+    },
+    compression: "Compressão",
+    compressions: {
+      none: "Sem compressão",
+      lossless:
+        "Sem perdas: reorganiza o arquivo e recomprime o que der, sem mexer na qualidade das imagens",
+    },
+    stripMetadata: "Remover autor e datas das anotações",
+    stripMetadataHint:
+      "Título, autor e programa do documento original nunca passam para o PDF gerado.",
     select: "Páginas escolhidas",
     selectHint: (max: number) =>
-      `Cada cartão é uma página do PDF final, na ordem da lista. A mesma página pode aparecer mais de uma vez. Até ${String(max)} páginas.`,
-    selectWaitingFiles: "Envie os PDFs primeiro: cada cartão escolhe uma página de um deles.",
-    selectOrder: "Ordem das páginas",
-    addCard: "Adicionar página",
-    cardName: (position: number) => `página ${String(position)} da seleção`,
+      `Cada cartão escolhe páginas de um PDF, na ordem da lista. As mesmas páginas podem aparecer mais de uma vez. Até ${String(max)} páginas.`,
+    selectWaitingFiles: "Envie os PDFs primeiro: cada cartão escolhe páginas de um deles.",
+    selectOrder: "Ordem dos itens",
+    addCard: "Adicionar item",
+    cardName: (position: number) => `item ${String(position)} da seleção`,
     cardTitle: (position: number) => `${String(position)}.`,
-    cardFile: (position: number) => `PDF da página ${String(position)}`,
-    cardPage: (position: number) => `Número da página ${String(position)} no PDF`,
+    cardFile: (position: number) => `PDF do item ${String(position)}`,
+    cardPages: (position: number) => `Páginas do item ${String(position)}`,
+    cardPagesHint: "Como 1-3, 7, 10- (do 10 até o fim)",
+    cardRotation: (position: number) => `Girar as páginas do item ${String(position)}`,
     noFileChosen: "Escolha um PDF",
-    removeCard: (position: number) => `Remover a página ${String(position)}`,
+    removeCard: (position: number) => `Remover o item ${String(position)}`,
     preview: {
       heading: "Mapa de páginas previsto",
       empty: "O mapa aparece quando houver PDFs enviados ou páginas escolhidas.",
@@ -662,6 +680,10 @@ export const TEXT = {
       pages: ["página", "páginas"],
       groups: (size: string, pages: string) => `partes de ${size} ${pages}, na ordem`,
       page: (name: string, page: string) => `${name}, página ${page}`,
+      range: (name: string, first: number, last: number) =>
+        `${name}, páginas ${String(first)} a ${String(last)}`,
+      toEnd: (name: string, first: number) => `${name}, da página ${String(first)} até o fim`,
+      rotated: (angle: number) => (angle === 0 ? "" : `, girada ${String(angle)}°`),
       noFile: "PDF não escolhido",
     },
     errors: {
@@ -670,6 +692,7 @@ export const TEXT = {
       chooseFile: "Escolha um dos PDFs enviados.",
       noPages: "Adicione ao menos uma página.",
       tooManyPages: (max: number) => `Escolha no máximo ${String(max)} páginas.`,
+      tooManyRanges: (max: number) => `Use no máximo ${String(max)} intervalos.`,
     },
     ranges: {
       empty: "Informe as páginas, como 1-3, 7, 10-.",

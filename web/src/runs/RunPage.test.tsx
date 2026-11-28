@@ -977,7 +977,7 @@ describe("pré-visualização dos resultados", () => {
     expect(screen.queryByRole("table")).toBeNull();
   });
 
-  it("PDF: mapa de páginas em ordem", async () => {
+  it("PDF: mapa de páginas em ordem, com a rotação da v2", async () => {
     setupPreview({ fileName: "selecao.pdf", previewName: "selecao.json" }, () =>
       bytes(
         JSON.stringify({
@@ -985,7 +985,7 @@ describe("pré-visualização dos resultados", () => {
           path: "selecao.pdf",
           pages: [
             { input_position: 1, page_number: 3 },
-            { input_position: 0, page_number: 1 },
+            { input_position: 0, page_number: 1, rotation: 90 },
           ],
         }),
       ),
@@ -996,7 +996,7 @@ describe("pré-visualização dos resultados", () => {
       within(list)
         .getAllByRole("listitem")
         .map((li) => li.textContent),
-    ).toEqual(["Página 3 do arquivo 2", "Página 1 do arquivo 1"]);
+    ).toEqual(["Página 3 do arquivo 2", "Página 1 do arquivo 1, girada 90°"]);
   });
 
   it("PDF: a caixa rolável do mapa recebe foco e tem o nome da legenda", async () => {

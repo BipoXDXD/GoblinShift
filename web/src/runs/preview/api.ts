@@ -22,6 +22,8 @@ const pageMapSchema = z.object({
       z.object({
         input_position: z.number().int().nonnegative(),
         page_number: z.number().int().positive(),
+        // PDF Press v2 (ADR 070): só aparece quando a página foi girada.
+        rotation: z.union([z.literal(90), z.literal(180), z.literal(270)]).optional(),
       }),
     )
     .max(MAX_PAGE_MAP_PAGES),

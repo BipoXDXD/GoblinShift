@@ -70,15 +70,18 @@ const JOURNEYS: readonly Journey[] = [
     files: PDF_FILES,
     fillParameters: async (bancada) => {
       await bancada.choose("O que fazer com os PDFs", "Montar um PDF com as páginas escolhidas");
-      await bancada.press("Adicionar página");
-      await bancada.choose("PDF da página 1", "contrato.pdf");
+      await bancada.press("Adicionar item");
+      await bancada.choose("PDF do item 1", "contrato.pdf");
       // Um PDF sem nenhuma página escolhida conclui com aviso na API real: os dois entram.
-      await bancada.press("Adicionar página");
-      await bancada.choose("PDF da página 2", "anexo.pdf");
+      await bancada.press("Adicionar item");
+      await bancada.choose("PDF do item 2", "anexo.pdf");
     },
     expectedParameters: {
       operation: "select",
-      select: [{ page_number: 1 }, { page_number: 1 }],
+      select: [
+        { first_page: 1, last_page: 1, rotation: 0 },
+        { first_page: 1, last_page: 1, rotation: 0 },
+      ],
     },
     singleDownload: null,
   },
