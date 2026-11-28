@@ -392,18 +392,21 @@ def complete_after_commit(
 
     Devolve quantos candidatos ficaram no disco, para o evento de quem chamou. Cada um fica
     sob `runs/{run}/g{n}/` até a manutenção repetir a remoção pela outbox (`file_removal`).
+
+    Os usos saem antes da limpeza da outbox: uma falha do banco ao tirar as linhas não deixa os
+    usos presos até a manutenção, e a chave que fica na outbox só se repete.
     """
-    left_on_disk: tuple[str, ...] = ()
-    if applied.discarded_keys:
-        with factory() as session:
-            left_on_disk = remove_files_after_commit(session, storage, applied.discarded_keys)
     if applied.release_pending:
         run_transaction(
             factory,
             lambda session: release_run_holds(session, applied.run_id, applied.state.generation),
         )
-        if on_finished is not None:
-            on_finished(applied.run_id)
+    left_on_disk: tuple[str, ...] = ()
+    if applied.discarded_keys:
+        with factory() as session:
+            left_on_disk = remove_files_after_commit(session, storage, applied.discarded_keys)
+    if applied.release_pending and on_finished is not None:
+        on_finished(applied.run_id)
     return len(left_on_disk)
 
 

@@ -112,7 +112,7 @@ Os logs dos containers não são exportados. Cada evento com o campo `alert` no 
 | `alert.run_without_reservation` | worker | `gs-causa-sem-reserva` |
 | `alert.login_state_cap` | API (início de login recusado no teto de estados vivos) | `gs-causa-login-anonimo-no-teto` |
 | `alert.login_failure_audit_cap` | API (`LOGIN_FAILED` sem conta acima do teto por minuto, só no log) | `gs-causa-login-anonimo-no-teto` |
-| `alert.purge_file_not_removed` | manutenção, API (cancelamento) e worker (fim da tentativa) | `gs-causa-arquivos-nao-removidos` |
+| `alert.purge_file_not_removed` | worker (chave reservada na cópia de saída que não chegou ao banco nem à outbox; nada repete a remoção). As remoções da manutenção, do cancelamento e do fim da tentativa passam pela outbox e não emitem o evento | `gs-causa-arquivos-nao-removidos` |
 | `alert.executor_start_failed` | worker (start recusado ou área de trabalho não criada) | `gs-causa-executor-nao-iniciou` |
 | `alert.google_auth_time_missing` | API (callback do Google sem o claim `auth_time`) | `gs-causa-google-sem-auth-time` |
 | `alert.input_tampered` | worker (entrada que o storage devolve adulterada) e manutenção (symlink ou diretório no lugar de um objeto, achado pela varredura de ausentes; no span `maintenance.cycle`) | `gs-causa-entrada-adulterada` |
@@ -163,7 +163,7 @@ O worker emite um span `attempt` por tentativa (`goblinshift.runs.worker.attempt
 | `attempt.inputs`, `attempt.outputs`, `attempt.output_bytes`, `attempt.rejected` | entradas, saídas de conteúdo (quantidade e bytes) e rejeições do relatório; nunca nomes |
 | `attempt.rejected.<CODE>` | rejeições por código, um atributo por código do catálogo fechado `ItemRejectionCode` presente no relatório |
 | `queue_wait_ms` | da elegibilidade da Run (`eligible_at`, que na retentativa inclui o jitter) ao início da tentativa, pelo relógio do banco |
-| `attempt.candidates_left_on_disk` | só se algum ficou: candidatos descartados que o disco recusou apagar no fim da tentativa; cada um no log `arquivo não removido do disco`, com a chave (`alert = purge_file_not_removed`) |
+| `attempt.candidates_left_on_disk` | só se algum ficou: candidatos descartados que o disco recusou apagar no fim da tentativa; cada um no log `arquivo não removido do disco`, com a chave, sem `alert`: a chave fica na outbox `file_removal`, e a manutenção repete a remoção (`maintenance.file_removals_pending`) |
 | `alert.executor_start_failed` | só se o `executor-ctl` recusou o start (log `executor não iniciou`) ou se a área de trabalho da tentativa não pôde ser criada antes dele (log `área de trabalho falhou`): `1` na tentativa, com `alert = executor_start_failed` no log, ausente nos outros desfechos; lido por `gs-causa-executor-nao-iniciou` |
 | `attempt.stop_reason` | razão de parada persistida quando a tentativa termina por parada (`CANCELED`, `DEADLINE_EXCEEDED`) |
 | `attempt.cancel_latency_ms` | só no cancelamento: do `cancel_requested_at` até o coordenador confirmar a parada, pelo relógio do banco |
