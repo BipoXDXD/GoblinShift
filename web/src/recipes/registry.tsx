@@ -52,6 +52,9 @@ export interface RecipeModule<K extends RecipeId = RecipeId> {
    * arquivos, então um preset ou uma execução reusada abre sem eles, no default.
    */
   readonly uploadBoundParameters?: readonly string[];
+  /** Versões anteriores cujos parâmetros este formulário aceita como estão, sobre os defaults da
+   * versão atual. */
+  readonly reusableVersions?: readonly number[];
 }
 
 interface FormParts<K extends RecipeId, S> {
@@ -166,6 +169,30 @@ export function withoutUploadBoundParameters(
     ([key, value]) => bound.has(key) && value !== null,
   );
   return { parameters: Object.fromEntries(kept), dropped };
+}
+
+/** O que basta de uma receita para decidir se ela abre uma origem (preset ou execução). */
+interface SourceTarget {
+  readonly id: string;
+  readonly version: number;
+  readonly reusableVersions?: readonly number[];
+}
+
+/**
+ * A origem abre no formulário da receita: mesmo id, e versão igual à atual ou uma das anteriores
+ * que a receita declara reaproveitar.
+ */
+export function acceptsSource(
+  recipe: SourceTarget,
+  source: { readonly recipeId: string; readonly recipeVersion: number },
+): boolean {
+  if (source.recipeId !== recipe.id) {
+    return false;
+  }
+  return (
+    source.recipeVersion === recipe.version ||
+    (recipe.reusableVersions ?? []).includes(source.recipeVersion)
+  );
 }
 
 /** Receitas na ordem de exibição. */

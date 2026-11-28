@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 
 import { catalogVersion } from "../test/catalog";
 import {
+  acceptsSource,
   findRecipe,
   RECIPE_LIST,
   withoutUploadBoundParameters,
@@ -107,5 +108,27 @@ describe("withoutUploadBoundParameters", () => {
       parameters,
       dropped: false,
     });
+  });
+});
+
+describe("acceptsSource", () => {
+  const MODULE = { id: "csv-janitor", version: 2, reusableVersions: [1] } as const;
+
+  it.each([
+    [{ recipeId: "csv-janitor", recipeVersion: 2 }, true],
+    [{ recipeId: "csv-janitor", recipeVersion: 1 }, true],
+    [{ recipeId: "csv-janitor", recipeVersion: 3 }, false],
+    [{ recipeId: "pdf-press", recipeVersion: 1 }, false],
+  ])("acceptsSource(%j) é %s", (source, expected) => {
+    expect(acceptsSource(MODULE, source)).toBe(expected);
+  });
+
+  it("sem reusableVersions, só a versão atual", () => {
+    expect(
+      acceptsSource(
+        { id: "csv-janitor", version: 2 },
+        { recipeId: "csv-janitor", recipeVersion: 1 },
+      ),
+    ).toBe(false);
   });
 });
