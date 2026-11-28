@@ -30,8 +30,8 @@ runsc --version | sed -n 1p
 # O runner é efêmero e só roda este job, então reiniciar o Docker aqui não derruba nada.
 # Na VPS isso nunca se faz: lá o Docker é só recarregado (deploy/gvisor.sh), porque o host é
 # compartilhado com outro projeto.
-if ! docker info --format '{{json .Runtimes}}' | grep '"runsc"' >/dev/null; then
+if ! grep -q '"runsc"' <<<"$(docker info --format '{{json .Runtimes}}')"; then
   sudo runsc install
 fi
 sudo systemctl restart docker
-docker info --format '{{json .Runtimes}}' | grep '"runsc"' >/dev/null
+grep -q '"runsc"' <<<"$(docker info --format '{{json .Runtimes}}')"
