@@ -95,6 +95,7 @@ def test_allowlist_publica_e_a_esperada() -> None:
         ("GET", "/docs"),
         ("GET", "/docs/assets/{name}"),
         ("GET", "/openapi.json"),
+        ("GET", "/api/v1/status"),
         ("GET", "/auth/login/{provider}"),
         ("GET", "/auth/callback/{provider}"),
     }

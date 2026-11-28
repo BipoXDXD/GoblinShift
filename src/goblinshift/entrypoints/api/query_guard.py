@@ -27,6 +27,11 @@ def reject_unknown_query(request: Request, _authenticated: CurrentPrincipal) -> 
     rota de `/api` já autentica, e o FastAPI resolve `authenticate` uma vez por requisição: a
     rota reaproveita o mesmo Principal, sem contar duas vezes no limite por conta.
     """
+    reject_unknown_public_query(request)
+
+
+def reject_unknown_public_query(request: Request) -> None:
+    """A mesma recusa nas rotas públicas de `/api` (`/status`), que não autenticam."""
     route: APIRoute = request.scope["route"]
     if not set(request.query_params) <= declared_query_names(route.dependant):
         raise ApiProblem(
