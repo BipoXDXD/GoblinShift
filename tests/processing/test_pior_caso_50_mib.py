@@ -38,6 +38,8 @@ MEMORY_BUDGET = MEMORY_BYTES * 3 // 4
 STREAMING_GROWTH_BUDGET = MAX_FILE_BYTES // 2
 # Abaixo dos 24 MP do Image Forge (4898² = 23.990.404 px).
 IMAGE_SIDE = 4898
+# Meio do intervalo de `assert_near_the_ceiling` (45 MiB, 50 MiB].
+PNG_TARGET_BYTES = 95 * MIB // 2
 
 type Outcome = tuple[str, str]
 
@@ -79,14 +81,30 @@ def input_files(paths: Sequence[Path], names: Sequence[str]) -> list[InputFile]:
 
 
 def write_noisy_png(path: Path, side: int) -> Path:
-    """RGBA (o modo aceito de mais bytes por pixel) com 3 bits aleatórios em cada byte.
+    """RGBA (o modo aceito de mais bytes por pixel), lado fixo, perto de `PNG_TARGET_BYTES`.
 
-    O deflate guarda cerca de 3 bits por byte, e o PNG de 4898 x 4898 fica perto de 47 MiB. Ruído
-    em todos os pixels, e não ruído pleno numa parte e zeros no resto: o macOS comprime páginas
-    de zeros na memória e o pico medido escondia metade da imagem decodificada.
+    Quanto o deflate encolhe ruído parcial depende da implementação do zlib (no Mac, 3 bits por
+    byte davam 47 MiB; na wheel Linux do Pillow, 43 MiB), e o lado não pode crescer sem passar dos
+    24 MP. Por isso o lado fica fixo e a entropia é calibrada: grava com 1 bit aleatório por byte
+    (bem abaixo do alvo em qualquer nível de compressão), mede e troca as primeiras linhas por ruído
+    pleno, que nenhum deflate comprime, na fração que leva o arquivo ao alvo. O tamanho é linear
+    nessa fração, então uma correção basta em qualquer zlib. Ruído em todos os pixels, e não zeros
+    em parte: o macOS comprime páginas de zeros na memória e o pico medido escondia metade da
+    imagem decodificada.
     """
-    noise = os.urandom(side * side * 4).translate(bytes(range(8)) * 32)
-    Image.frombytes("RGBA", (side, side), noise).save(path)
+    row_bytes = side * 4
+    raw = bytearray(os.urandom(side * row_bytes).translate(bytes(range(2)) * 128))
+
+    def save() -> int:
+        Image.frombytes("RGBA", (side, side), bytes(raw)).save(path)
+        return path.stat().st_size
+
+    partial = save()
+    full_fraction = (PNG_TARGET_BYTES - partial) / (side * row_bytes - partial)
+    full_rows = round(side * min(max(full_fraction, 0.0), 1.0))
+    if full_rows:
+        raw[: full_rows * row_bytes] = os.urandom(full_rows * row_bytes)
+        save()
     return path
 
 
