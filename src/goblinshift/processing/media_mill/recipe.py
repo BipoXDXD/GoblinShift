@@ -52,7 +52,7 @@ from goblinshift.processing.media_mill.tools import (
     run_tool,
 )
 from goblinshift.processing.names import safe_stem
-from goblinshift.processing.previews import PendingPreview, attach_previews, write_previews
+from goblinshift.processing.previews import PendingPreview, process_each, report_with_previews
 from goblinshift.processing.recipe import (
     DetailValue,
     InputFile,
@@ -126,21 +126,22 @@ class MediaMillV1:
         require_max_inputs(inputs, self._max_inputs, "vídeos")
         tools = self._tools or Tools.discover()
         budget = TimeBudget(self._budget_s, self._clock)
-        items: list[ItemOk | ItemRejected] = []
-        pending: list[PendingPreview] = []
         # O diretório de rascunho vem de `tempfile.tempdir`, que o executor aponta para a área de
         # trabalho da tentativa (a raiz do container é somente leitura).
         with tempfile.TemporaryDirectory(prefix="media-mill-") as scratch:
-            for source in inputs:
+
+            def mill_one(source: InputFile, pending: list[PendingPreview]) -> ItemOk | ItemRejected:
                 work = Path(scratch, f"{source.position:04}")
                 mill = _Mill(_Runner(tools, budget, self._timeouts, work), self._limits, params)
-                items.append(mill.process(source, out, pending))
-                progress.item_done(source.position)
+                return mill.process(source, out, pending)
+
+            processed = process_each(inputs, mill_one, progress)
         details: dict[str, DetailValue] = {
             "audio_bit_depth": AUDIO_BIT_DEPTH,
             "thumbnail_max_side_px": self._limits.thumbnail_max_side_px,
         }
-        return Report(attach_previews(items, write_previews(out, pending)), details=details)
+        # Fora do `with`: os previews são gravados depois que o rascunho sai.
+        return report_with_previews(processed, out, details=details)
 
 
 @dataclass(frozen=True)

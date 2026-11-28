@@ -2,6 +2,7 @@ import { describe, expect, expectTypeOf, it, vi } from "vitest";
 
 import { createApiClient } from "../api/client";
 import type { components } from "../api/schema";
+import { testNow } from "../test/clock";
 import {
   createUploads,
   deleteUpload,
@@ -35,7 +36,7 @@ describe("createUploads", () => {
         }),
       ),
     );
-    const client = createApiClient({ fetch: fetchMock, csrfToken: () => null, now: Date.now });
+    const client = createApiClient({ fetch: fetchMock, csrfToken: () => null, now: testNow });
 
     const created = await createUploads(client, [{ name: "clientes.csv", size: 4 }]);
 
@@ -64,7 +65,7 @@ describe("tipos de upload espelham a spec", () => {
 describe("deleteUpload", () => {
   function clientAnswering(response: () => Response) {
     const fetchMock = vi.fn<typeof fetch>(() => Promise.resolve(response()));
-    const client = createApiClient({ fetch: fetchMock, csrfToken: () => "csrf", now: Date.now });
+    const client = createApiClient({ fetch: fetchMock, csrfToken: () => "csrf", now: testNow });
     return { client, fetchMock };
   }
 

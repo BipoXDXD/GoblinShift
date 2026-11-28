@@ -5,7 +5,7 @@ O `redirect_uri` sai de `WebIdentityConfig.public_origin`, nunca do header `Host
 
 O Authlib cuida do protocolo: Authorization Code com PKCE S256, `state` e, no Google, `nonce` e
 a validação do ID token (assinatura RS256 pela JWKS, `iss`, `aud`, `exp`, `nonce`). O `state`
-fica em `login_state` e só vale no navegador que tem o marcador no cookie `__Secure-gs_login`.
+fica em `login_state` e só vale no navegador que tem o marcador no cookie `__Host-gs_login`.
 Toda recusa (provedor, state, token, conta bloqueada ou pendente) responde o mesmo redirect
 genérico, sem dizer qual foi o caso; o log do servidor registra só o provedor e o tipo da falha.
 O redirect leva no fragmento um código de referência, o `request_id` do callback (o mesmo do
@@ -13,12 +13,26 @@ header `X-Request-ID`), gravado no evento `LOGIN_FAILED` com a conta recusada: a
 recurso contra o bloqueio e o operador acha a conta (J-10). O código é aleatório e igual em forma
 para toda recusa; no fragmento, o navegador não o envia a servidor nenhum, nem no `Referer`.
 
+Reautenticação (`reauth=1`): o início guarda, no cookie de login, a conta da sessão que o
+navegador já tem, e o callback só aceita a identidade dessa mesma conta. Outra conta (ou outro
+provedor) é recusada antes de qualquer escrita: a sessão anterior continua valendo e nenhuma
+sessão recente nasce para quem não pediu a confirmação. Sem sessão válida, é um login comum.
+
 As rotas são `async` porque a integração Starlette do Authlib é; o banco é acessado numa thread
 do pool, em transação curta, e nunca durante uma chamada ao provedor.
+
+O início sem autenticação grava um estado em `login_state`. Com `MAX_LIVE_LOGIN_STATES` vivos, o
+início novo recebe a mesma recusa genérica, sem gravar estado nem auditoria, e o log avisa no
+máximo uma vez por minuto (`alert=login_state_cap`); o estado de quem já está no provedor fica.
+A recusa sem conta grava `LOGIN_FAILED` até `MAX_ANONYMOUS_LOGIN_FAILURES_PER_MINUTE` por minuto;
+acima disso fica só no log (`alert=login_failure_audit_cap`, também uma vez por minuto). Provedor
+desligado é erro de configuração e não grava nada.
 """
 
+import asyncio
 import logging
 import re
+import time
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
 from datetime import datetime
@@ -33,27 +47,39 @@ from authlib.integrations.starlette_client import (  # type: ignore[import-untyp
 )
 from fastapi import APIRouter, FastAPI, Request
 from fastapi.responses import RedirectResponse, Response
-from httpx2 import HTTPError, HTTPStatusError
+from httpx2 import AsyncBaseTransport, AsyncHTTPTransport, HTTPError, HTTPStatusError
 from joserfc.errors import JoseError
 from sqlalchemy.orm import Session, sessionmaker
 from starlette.concurrency import run_in_threadpool
 
 from goblinshift.entrypoints.api.cookies import SESSION_COOKIE, set_session_cookies
 from goblinshift.entrypoints.api.dependencies import Now
+from goblinshift.entrypoints.api.oauth_http import MAX_PROVIDER_RESPONSE_BYTES, CappedTransport
 from goblinshift.entrypoints.api.problems import ApiProblem, ProblemCode, request_id_of
 from goblinshift.identity import (
+    MAX_ANONYMOUS_LOGIN_FAILURES_PER_MINUTE,
     AuditEventType,
     AuditOutcome,
     ExternalIdentity,
     IssuedSession,
     LoginRefusal,
+    LoginRefused,
+    Principal,
     authenticate_session,
+    find_login_account,
+    record_anonymous_login_failure,
     record_audit_event,
     resolve_login,
+    resolve_session,
     revoke_session,
     start_session,
 )
-from goblinshift.identity.login_state import LOGIN_STATE_TTL, PostgresLoginStateCache
+from goblinshift.identity.login_state import (
+    LOGIN_STATE_TTL,
+    MAX_LIVE_LOGIN_STATES,
+    PostgresLoginStateCache,
+    login_states_full,
+)
 from goblinshift.identity.providers import (
     GITHUB_ACCEPT,
     GITHUB_AUTHORIZE_URL,
@@ -66,6 +92,7 @@ from goblinshift.identity.providers import (
     GOOGLE_JWKS_URL,
     GOOGLE_SCOPE,
     GOOGLE_TOKEN_URL,
+    MalformedProviderResponseError,
     ProviderName,
     github_identity,
     google_identity,
@@ -87,8 +114,24 @@ MAX_RETURN_TO_CHARS = 512
 DEFAULT_RETURN_TO = "/"
 REAUTH_PROMPT = "select_account"
 # Falhas esperadas de um provedor externo ou de um callback forjado. Qualquer outra exceção é
-# defeito nosso e segue para o handler de erro 500.
-LOGIN_ERRORS = (OAuthError, JoseError, HTTPError, ValueError)
+# defeito nosso e segue para o handler de erro 500. `TimeoutError` é o prazo total;
+# `MalformedProviderResponseError`, o JSON válido com forma errada (`_consume_provider`).
+LOGIN_ERRORS = (
+    OAuthError,
+    JoseError,
+    HTTPError,
+    ValueError,
+    TimeoutError,
+    MalformedProviderResponseError,
+)
+# O que o Authlib levanta ao ler um token ou uma JWKS com forma errada (a JWKS em lista ou `null`,
+# o `token_type` numérico).
+_SHAPE_ERRORS = (KeyError, AttributeError, TypeError)
+# Prazo do callback inteiro (token, JWKS, `/user`) em múltiplos de `oauth_http_timeout_s`, que o
+# httpx aplica a cada fase de cada chamada.
+LOGIN_FETCH_TIMEOUT_FACTOR = 2
+# Avisos de teto do login anônimo: no máximo um por intervalo, por processo.
+CAP_WARNING_INTERVAL_S = 60.0
 
 IdentityReader = Callable[[Any, Request], Awaitable[ExternalIdentity]]
 
@@ -100,27 +143,57 @@ class LoginProvider:
     oauth_app: Any  # StarletteOAuth2App do Authlib
     read_identity: IdentityReader
 
-    async def fetch_identity(self, request: Request) -> ExternalIdentity:
-        return await self.read_identity(self.oauth_app, request)
+    async def fetch_identity(self, request: Request, deadline_s: float) -> ExternalIdentity:
+        """Token, JWKS e `/user` dentro de um prazo só: o do httpx vale por fase de cada chamada,
+        e um provedor que pinga bytes nunca estoura nenhuma delas."""
+        async with asyncio.timeout(deadline_s):
+            return await self.read_identity(self.oauth_app, request)
 
 
 LoginProviders = dict[ProviderName, LoginProvider]
 
 
+class WarningThrottle:
+    """Libera um aviso no máximo uma vez por `interval_s` (relógio monotônico de quem chama).
+
+    Numa enxurrada, cada recusa cairia no log; basta uma linha por intervalo para o alerta acender.
+    Usado só no laço de eventos, sem concorrência entre threads.
+    """
+
+    def __init__(self, interval_s: float) -> None:
+        self._interval_s = interval_s
+        self._last: float | None = None
+
+    def ready(self, monotonic_now: float) -> bool:
+        if self._last is not None and monotonic_now - self._last < self._interval_s:
+            return False
+        self._last = monotonic_now
+        return True
+
+
 def install(app: FastAPI, web: WebIdentityConfig) -> None:
-    """Registra os provedores ligados na configuração em `app.state`; chamado pelo `create_app`."""
+    """Registra os provedores ligados na configuração em `app.state`; chamado pelo `create_app`.
+
+    O pool HTTP dos provedores fica em `app.state.login_transport`, e o lifespan o fecha na parada.
+    """
     cache = PostgresLoginStateCache(app.state.session_factory)
-    app.state.login_providers = build_login_providers(web, cache)
+    app.state.login_transport = AsyncHTTPTransport()
+    app.state.login_providers = build_login_providers(
+        web, cache, transport=app.state.login_transport
+    )
+    app.state.login_cap_warnings = WarningThrottle(CAP_WARNING_INTERVAL_S)
+    app.state.login_failure_cap_warnings = WarningThrottle(CAP_WARNING_INTERVAL_S)
 
 
 def build_login_providers(
-    web: WebIdentityConfig, cache: PostgresLoginStateCache, *, transport: Any = None
+    web: WebIdentityConfig, cache: PostgresLoginStateCache, *, transport: AsyncBaseTransport
 ) -> LoginProviders:
-    """Clientes do Authlib para os provedores configurados; `transport` existe para os testes."""
+    """Clientes do Authlib para os provedores configurados, todos sobre `transport` com teto."""
     oauth = OAuth(cache=cache)
-    http = {"timeout": web.oauth_http_timeout_s}
-    if transport is not None:
-        http["transport"] = transport
+    http = {
+        "timeout": web.oauth_http_timeout_s,
+        "transport": CappedTransport(transport, MAX_PROVIDER_RESPONSE_BYTES),
+    }
     providers: LoginProviders = {}
     if web.google is not None:
         providers[ProviderName.GOOGLE] = LoginProvider(
@@ -169,9 +242,23 @@ def _limit_state_lifetime(app: Any) -> None:
     app.framework.expires_in = int(LOGIN_STATE_TTL.total_seconds())
 
 
+async def _consume_provider[T](call: Awaitable[T]) -> T:
+    """Uma chamada do Authlib que lê a resposta do provedor; só ela fica neste `try`.
+
+    O erro de forma vira erro de domínio aqui, na fronteira: o mesmo tipo de erro no resto do
+    callback é defeito nosso e segue para o 500.
+    """
+    try:
+        return await call
+    except _SHAPE_ERRORS as exc:
+        raise MalformedProviderResponseError(type(exc).__name__) from exc
+
+
 async def _read_google_identity(oauth_app: Any, request: Request) -> ExternalIdentity:
-    token = await oauth_app.authorize_access_token(
-        request, claims_options=_google_claims_options(oauth_app.client_id)
+    token = await _consume_provider(
+        oauth_app.authorize_access_token(
+            request, claims_options=_google_claims_options(oauth_app.client_id)
+        )
     )
     # Sem `id_token` o Authlib não valida nada e não devolve `userinfo`.
     userinfo = token.get("userinfo")
@@ -196,9 +283,12 @@ def _google_claims_options(client_id: str) -> dict[str, Any]:
 
 
 async def _read_github_identity(oauth_app: Any, request: Request) -> ExternalIdentity:
-    token = await oauth_app.authorize_access_token(request)
-    # O token só existe nesta função: nunca é gravado nem registrado no log.
-    response = await oauth_app.get(GITHUB_USER_URL, token=token, headers={"Accept": GITHUB_ACCEPT})
+    token = await _consume_provider(oauth_app.authorize_access_token(request))
+    # O token só existe nesta função: nunca é gravado nem registrado no log. O Authlib lê o
+    # `token_type` dele ao montar o pedido, então a chamada também consome dado do provedor.
+    response = await _consume_provider(
+        oauth_app.get(GITHUB_USER_URL, token=token, headers={"Accept": GITHUB_ACCEPT})
+    )
     response.raise_for_status()
     return github_identity(response.content)
 
@@ -216,14 +306,26 @@ async def start_login(
 ) -> Response:
     """Redireciona ao provedor com PKCE e `state`; só `return_to` e `reauth=1` são aceitos."""
     name = _provider_name(provider)
+    factory: sessionmaker[Session] = request.app.state.session_factory
     login_provider = _providers(request).get(name)
     if login_provider is None:
-        attempt = _attempt(request, now)
-        factory: sessionmaker[Session] = request.app.state.session_factory
-        await run_in_threadpool(_record_login_failure, factory, attempt)
-        return _login_failed(attempt)
+        logger.info("login %s: provedor desligado", name)
+        return _login_failed(_attempt(request, now))
+    if await run_in_threadpool(_login_states_full, factory, now):
+        _warn_login_state_cap(request)
+        return _login_failed(_attempt(request, now))
     request.session[_return_to_key(name)] = _safe_return_to(return_to)
-    extra = {"prompt": REAUTH_PROMPT} if reauth == "1" else {}
+    reauthenticating = reauth == "1"
+    reauth_user = None
+    if reauthenticating:
+        reauth_user = await run_in_threadpool(
+            _session_owner, factory, request.cookies.get(SESSION_COOKIE), now
+        )
+    if reauth_user is None:
+        request.session.pop(_reauth_key(name), None)
+    else:
+        request.session[_reauth_key(name)] = str(reauth_user)
+    extra = {"prompt": REAUTH_PROMPT} if reauthenticating else {}
     response: Response = await login_provider.oauth_app.authorize_redirect(
         request, _redirect_uri(request, name), **extra
     )
@@ -237,18 +339,22 @@ async def finish_login(request: Request, provider: str, now: Now) -> Response:
     factory: sessionmaker[Session] = request.app.state.session_factory
     attempt = _attempt(request, now)
     return_to = _safe_return_to(request.session.pop(_return_to_key(name), None))
+    reauth_user = _parse_reauth_user(request.session.pop(_reauth_key(name), None))
     login_provider = _providers(request).get(name)
     if login_provider is None:
-        await run_in_threadpool(_record_login_failure, factory, attempt)
+        logger.info("login %s: provedor desligado", name)
         return _login_failed(attempt)
+    web: WebIdentityConfig = request.app.state.web_identity
     try:
-        identity = await login_provider.fetch_identity(request)
+        identity = await login_provider.fetch_identity(
+            request, LOGIN_FETCH_TIMEOUT_FACTOR * web.oauth_http_timeout_s
+        )
     except LOGIN_ERRORS as exc:
         logger.warning("login %s recusado: %s", name, _failure_kind(exc))
-        await run_in_threadpool(_record_login_failure, factory, attempt)
+        if not await run_in_threadpool(_record_login_failure, factory, attempt):
+            _warn_login_failure_audit_cap(request)
         return _login_failed(attempt)
 
-    web: WebIdentityConfig = request.app.state.web_identity
     result = await run_in_threadpool(
         _complete_login,
         factory,
@@ -257,6 +363,7 @@ async def finish_login(request: Request, provider: str, now: Now) -> Response:
         web.csrf_key,
         request.cookies.get(SESSION_COOKIE),
         attempt,
+        reauth_user,
     )
     if isinstance(result, LoginRefusal):
         logger.info("login %s recusado: conta %s", name, result.reason.name)
@@ -285,10 +392,18 @@ def _complete_login(
     csrf_key: bytes,
     previous_token: str | None,
     attempt: LoginAttempt,
+    reauth_user: UUID | None,
 ) -> IssuedSession | LoginRefusal:
-    """Conta, sessão nova e auditoria numa transação só (a conta pendente também é gravada)."""
+    """Conta, sessão nova e auditoria numa transação só (a conta pendente também é gravada).
+
+    Com `reauth_user`, a identidade precisa ser a dessa conta, conferida antes de qualquer
+    escrita: senão a recusa é auditada na conta da sessão, e nada mais muda.
+    """
     now = attempt.now
     with unit_of_work(factory) as session:
+        if reauth_user is not None and find_login_account(session, identity) != reauth_user:
+            _record(session, AuditEventType.LOGIN_FAILED, reauth_user, attempt)
+            return LoginRefusal(reauth_user, LoginRefused.REAUTH_MISMATCH)
         resolved = resolve_login(session, identity, signup_open=signup_open, now=now)
         if isinstance(resolved, LoginRefusal):
             _record(session, AuditEventType.LOGIN_FAILED, resolved.account_id, attempt)
@@ -310,9 +425,32 @@ def _revoke_previous_session(session: Session, token: str | None, now: datetime)
         revoke_session(session, previous.session_id, now)
 
 
-def _record_login_failure(factory: sessionmaker[Session], attempt: LoginAttempt) -> None:
+def _session_owner(factory: sessionmaker[Session], token: str | None, now: datetime) -> UUID | None:
+    """Dono da sessão válida do cookie, sem registrar o uso (é só o início do login)."""
+    if token is None:
+        return None
     with unit_of_work(factory) as session:
-        _record(session, AuditEventType.LOGIN_FAILED, None, attempt)
+        resolved = resolve_session(session, token, now)
+    return resolved.owner_id if isinstance(resolved, Principal) else None
+
+
+def _login_states_full(factory: sessionmaker[Session], now: datetime) -> bool:
+    # O teto é lido aqui, e não no import, para o teste trocá-lo com `monkeypatch`.
+    with unit_of_work(factory) as session:
+        return login_states_full(session, now, MAX_LIVE_LOGIN_STATES)
+
+
+def _record_login_failure(factory: sessionmaker[Session], attempt: LoginAttempt) -> bool:
+    """`LOGIN_FAILED` sem conta, dentro do teto por minuto; devolve se gravou."""
+    with unit_of_work(factory) as session:
+        return record_anonymous_login_failure(
+            session,
+            ip=attempt.ip,
+            request_id=attempt.request_id,
+            now=attempt.now,
+            # Lido aqui, e não no import, para o teste trocá-lo com `monkeypatch`.
+            limit=MAX_ANONYMOUS_LOGIN_FAILURES_PER_MINUTE,
+        )
 
 
 def _record(
@@ -356,6 +494,20 @@ def _return_to_key(name: ProviderName) -> str:
     return f"return_to_{name.value}"
 
 
+def _reauth_key(name: ProviderName) -> str:
+    return f"reauth_{name.value}"
+
+
+def _parse_reauth_user(value: object) -> UUID | None:
+    """A conta guardada no início; o cookie é assinado, mas o valor é conferido mesmo assim."""
+    if not isinstance(value, str):
+        return None
+    try:
+        return UUID(value)
+    except ValueError:
+        return None
+
+
 def _safe_return_to(value: object) -> str:
     if (
         isinstance(value, str)
@@ -379,6 +531,25 @@ def _failure_kind(exc: Exception) -> str:
     if isinstance(exc, HTTPStatusError):
         return f"{type(exc).__name__} {exc.response.status_code}"
     return type(exc).__name__
+
+
+def _warn_login_state_cap(request: Request) -> None:
+    throttle: WarningThrottle = request.app.state.login_cap_warnings
+    if throttle.ready(time.monotonic()):
+        logger.warning(
+            "login: teto de estados vivos, início recusado",
+            extra={"fields": {"alert": "login_state_cap"}},
+        )
+
+
+def _warn_login_failure_audit_cap(request: Request) -> None:
+    # O código de referência desta recusa não leva a evento nenhum: o `request_id` fica no log.
+    throttle: WarningThrottle = request.app.state.login_failure_cap_warnings
+    if throttle.ready(time.monotonic()):
+        logger.warning(
+            "login: teto da auditoria de falha sem conta, evento só no log",
+            extra={"fields": {"alert": "login_failure_audit_cap"}},
+        )
 
 
 def _login_failed(attempt: LoginAttempt) -> Response:

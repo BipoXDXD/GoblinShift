@@ -87,6 +87,10 @@ services:
       interval: 5s
       timeout: 3s
       retries: 20
+    # 60 s para o checkpoint final do fast shutdown, sem SIGKILL no meio (o padrão é 10 s), e
+    # 128 MiB de /dev/shm para as queries paralelas (o padrão é 64 MiB; conta no teto de memória).
+    stop_grace_period: 60s
+    shm_size: 128m
     networks: [internal]
     restart: unless-stopped
     logging: *logging

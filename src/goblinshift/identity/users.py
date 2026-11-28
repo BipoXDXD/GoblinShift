@@ -11,6 +11,7 @@ from datetime import datetime
 from enum import Enum, auto
 from uuid import UUID
 
+from sqlalchemy import ColumnElement, and_, select
 from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.orm import Session
 
@@ -35,6 +36,8 @@ class LoginRefused(Enum):
     BLOCKED = auto()
     PENDING_APPROVAL = auto()
     DELETION_REQUESTED = auto()
+    # Reautenticação (`reauth=1`) que voltou com a identidade de outra conta, ou de nenhuma.
+    REAUTH_MISMATCH = auto()
 
 
 @dataclass(frozen=True)
@@ -43,6 +46,19 @@ class LoginRefusal:
 
     account_id: UUID
     reason: LoginRefused
+
+
+def _is_identity(identity: ExternalIdentity) -> ColumnElement[bool]:
+    """A linha de `app_user` da identidade: `(issuer, subject)` é a chave única dela."""
+    return and_(app_user.c.issuer == identity.issuer, app_user.c.subject == identity.subject)
+
+
+def find_login_account(session: Session, identity: ExternalIdentity) -> UUID | None:
+    """A conta da identidade, sem criar nem atualizar nada; None se ela ainda não existe."""
+    user_id: UUID | None = session.execute(
+        select(app_user.c.id).where(_is_identity(identity))
+    ).scalar_one_or_none()
+    return user_id
 
 
 def resolve_login(
@@ -54,7 +70,17 @@ def resolve_login(
     "consultar e depois inserir": dois callbacks simultâneos da mesma identidade chegam à mesma
     linha. A conta nova nasce `active` só com o cadastro aberto (ADR 023); o cadastro aberto não
     reativa uma conta que já existe bloqueada.
+
+    O nome só é regravado em conta ativa e sem exclusão pedida: a conta recusada não grava dado do
+    provedor. Aí o `RETURNING` volta vazio, e as mesmas colunas são lidas da linha, que o
+    `ON CONFLICT` já travou nesta transação.
     """
+    columns = (
+        app_user.c.id,
+        app_user.c.status,
+        app_user.c.awaiting_approval,
+        app_user.c.deletion_requested_at,
+    )
     statement = (
         insert(app_user)
         .values(
@@ -68,15 +94,15 @@ def resolve_login(
         .on_conflict_do_update(
             index_elements=[app_user.c.issuer, app_user.c.subject],
             set_={"display_name": identity.display_name},
+            where=and_(
+                app_user.c.status == ACTIVE_STATUS, app_user.c.deletion_requested_at.is_(None)
+            ),
         )
-        .returning(
-            app_user.c.id,
-            app_user.c.status,
-            app_user.c.awaiting_approval,
-            app_user.c.deletion_requested_at,
-        )
+        .returning(*columns)
     )
-    account = session.execute(statement).one()
+    account = session.execute(statement).one_or_none()
+    if account is None:
+        account = session.execute(select(*columns).where(_is_identity(identity))).one()
     user_id: UUID = account.id
     if account.deletion_requested_at is not None:
         return LoginRefusal(user_id, LoginRefused.DELETION_REQUESTED)

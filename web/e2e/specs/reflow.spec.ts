@@ -49,7 +49,7 @@ test("Execução a 320 px: o link Baixar com nome longo quebra linha, sem rolage
   const link = page.getByRole("link", { name: `Baixar ${LONG_NAME}` });
   await expect(link).toBeVisible();
   await expect(link).toHaveText(`Baixar ${LONG_NAME}`);
-  await expect(page.locator("main a[download]")).toHaveCount(1);
+  await expect(page.locator('main a[href$="/download"]')).toHaveCount(1);
   expect(await isClipped(link), "[sabotage:run-name-reflow]").toBe(false);
   const textRight = await link.evaluate((anchor) => {
     const text = document.createRange();

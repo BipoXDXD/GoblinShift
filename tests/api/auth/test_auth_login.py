@@ -1,5 +1,6 @@
 """`GET /auth/login/{provider}`: pedido de autorização e cookie de login (3.6; ADRs 008, 025)."""
 
+import logging
 from pathlib import Path
 
 import pytest
@@ -8,6 +9,8 @@ from fastapi.testclient import TestClient
 from sqlalchemy import select
 from sqlalchemy.orm import Session, sessionmaker
 
+from goblinshift.entrypoints.api import auth_login
+from goblinshift.entrypoints.api.auth_login import WarningThrottle
 from goblinshift.identity.providers import GITHUB_AUTHORIZE_URL, GOOGLE_AUTHORIZE_URL
 from goblinshift.identity.tables import login_state
 from goblinshift.platform.db import unit_of_work
@@ -17,6 +20,7 @@ from tests.api.auth.support import (
     PUBLIC_ORIGIN,
     StoredSessions,
     assert_login_failed,
+    audit_events,
     authorize_query,
     browser,
     build_login_app,
@@ -25,6 +29,7 @@ from tests.api.auth.support import (
     login_cookie_payload,
     login_settings,
     open_signup,
+    set_cookie_headers,
     start_login,
 )
 from tests.api.support import assert_problem
@@ -122,15 +127,58 @@ def test_provedor_desligado_responde_o_erro_generico(
         assert_login_failed(client.get("/auth/callback/github?code=x&state=y"))
 
 
-def test_cookie_de_login_tem_os_atributos_do_adr_024(client: TestClient) -> None:
-    header = cookie_header(start_login(client, "google"), "__Secure-gs_login").lower()
+def test_provedor_desligado_nao_grava_auditoria(
+    db_settings: Settings, tmp_path: Path, fake: FakeProviders
+) -> None:
+    # Erro de configuração, não tentativa de login: cada pedido gravaria uma linha por 90 dias.
+    app = build_login_app(login_settings(db_settings, tmp_path, github=False), fake)
 
-    assert "path=/auth" in header
+    with browser(app) as client:
+        assert_login_failed(client.get("/auth/login/github"))
+        assert_login_failed(client.get("/auth/callback/github?code=x&state=y"))
+
+    assert audit_events(app.state.session_factory) == []
+    app.state.engine.dispose()
+
+
+def test_cookie_de_login_tem_os_atributos_do_adr_024(client: TestClient) -> None:
+    [header] = [
+        value.lower()
+        for value in set_cookie_headers(start_login(client, "google"))
+        if "gs_login" in value
+    ]
+
+    # `__Host-`: o navegador recusa o cookie plantado por subdomínio irmão com `Domain=`.
+    assert header.startswith("__host-gs_login=")
+    assert "path=/;" in header
     assert "secure" in header
     assert "httponly" in header
     assert "samesite=lax" in header
     assert "max-age=600" in header
     assert "domain=" not in header
+
+
+def test_cookie_de_login_nao_e_regravado_fora_de_auth(client: TestClient) -> None:
+    start_login(client, "google")
+    assert "__Host-gs_login" in client.cookies
+
+    response = client.get("/livez")
+
+    assert response.status_code == 200
+    assert set_cookie_headers(response) == []
+
+
+def test_cookie_de_login_com_o_nome_antigo_nao_vale(
+    client: TestClient, fake: FakeProviders, sessions: StoredSessions, login_app: FastAPI
+) -> None:
+    open_signup(login_app)
+    started = start_login(client, "google")
+    marker = client.cookies["__Host-gs_login"]
+    client.cookies.clear()
+    client.cookies.set("__Secure-gs_login", marker, path="/auth")
+
+    assert_login_failed(client.get(fake.consent(started.headers["location"])))
+    assert sessions.started == []
 
 
 def test_estado_fica_no_servidor_e_o_cookie_leva_so_o_marcador(
@@ -139,7 +187,7 @@ def test_estado_fica_no_servidor_e_o_cookie_leva_so_o_marcador(
     response = start_login(client, "google")
     query = authorize_query(response)
 
-    value = cookie_header(response, "__Secure-gs_login").split(";")[0].split("=", 1)[1]
+    value = cookie_header(response, "__Host-gs_login").split(";")[0].split("=", 1)[1]
     payload = login_cookie_payload(value)
     assert query["nonce"] not in str(payload)
     assert "code_verifier" not in str(payload)
@@ -216,3 +264,61 @@ def test_return_to_e_de_cada_provedor(
 def test_erro_generico_e_um_caminho_local(client: TestClient) -> None:
     assert LOGIN_FAILED_LOCATION.startswith("/?")
     assert_login_failed(client.get("/auth/callback/google"))
+
+
+# --- Teto de estados vivos ---------------------------------------------------------------------
+
+
+def stored_states(factory: sessionmaker[Session]) -> list[str]:
+    with unit_of_work(factory) as session:
+        return list(session.execute(select(login_state.c.key)).scalars())
+
+
+def test_teto_de_estados_recusa_o_inicio_sem_gravar(
+    client: TestClient,
+    factory: sessionmaker[Session],
+    monkeypatch: pytest.MonkeyPatch,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    monkeypatch.setattr(auth_login, "MAX_LIVE_LOGIN_STATES", 2)
+    start_login(client, "google")
+    start_login(client, "github")
+
+    with caplog.at_level(logging.WARNING, logger=auth_login.__name__):
+        assert_login_failed(client.get("/auth/login/google"))
+
+    assert len(stored_states(factory)) == 2
+    assert audit_events(factory) == []
+    alerts = [getattr(record, "fields", {}).get("alert") for record in caplog.records]
+    assert alerts == ["login_state_cap"]
+
+
+def test_teto_de_login_state_nao_despeja_login_em_curso(
+    login_app: FastAPI,
+    fake: FakeProviders,
+    factory: sessionmaker[Session],
+    sessions: StoredSessions,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    # Com o teto cheio, o início novo é recusado, e o estado já gravado de quem
+    # está no provedor continua valendo para o callback (nada é despejado para abrir vaga).
+    monkeypatch.setattr(auth_login, "MAX_LIVE_LOGIN_STATES", 1)
+    open_signup(login_app)
+    with browser(login_app) as legitimate, browser(login_app) as flood:
+        started = start_login(legitimate, "github")
+
+        assert_login_failed(flood.get("/auth/login/github"))
+        assert len(stored_states(factory)) == 1
+
+        finished = legitimate.get(fake.consent(started.headers["location"]))
+
+    assert finished.status_code == 303
+    assert finished.headers["location"] == "/"
+    assert len(sessions.started) == 1
+    assert stored_states(factory) == []
+
+
+def test_aviso_do_teto_sai_uma_vez_por_minuto() -> None:
+    throttle = WarningThrottle(60.0)
+
+    assert [throttle.ready(0.0), throttle.ready(59.9), throttle.ready(60.0)] == [True, False, True]
