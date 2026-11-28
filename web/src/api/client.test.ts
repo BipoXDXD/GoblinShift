@@ -434,6 +434,29 @@ describe("createApiClient: relógio do servidor", () => {
     expect(observeServerDate).toHaveBeenCalledExactlyOnceWith(SERVER_DATE);
   });
 
+  it.each(["request", "requestText"] as const)(
+    "%s entrega o Date mesmo quando a leitura do corpo falha",
+    async (method) => {
+      const observeServerDate = vi.fn<(dateHeader: string | null) => void>();
+      const brokenBody = new ReadableStream({
+        start(controller) {
+          controller.error(new Error("conexão caiu no meio do corpo"));
+        },
+      });
+      const client = createApiClient({
+        fetch: () => Promise.resolve(new Response(brokenBody, { headers: { Date: SERVER_DATE } })),
+        csrfToken: () => null,
+        now: () => NOW_MS,
+        observeServerDate,
+      });
+
+      const failure = await failureOf(calls[method](client));
+
+      expect(failure).toEqual({ kind: "network" });
+      expect(observeServerDate).toHaveBeenCalledExactlyOnceWith(SERVER_DATE);
+    },
+  );
+
   it("entrega null quando a resposta vem sem Date", async () => {
     const observeServerDate = vi.fn<(dateHeader: string | null) => void>();
     const client = createApiClient({

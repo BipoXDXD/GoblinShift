@@ -40,6 +40,7 @@ export function App(): ReactElement {
             createXhr: () => new XMLHttpRequest(),
             csrfToken: readCsrfCookie,
             now: clock.now,
+            observeServerDate: clock.observe,
           }),
           rateLimit: {
             maxAttempts: UPLOAD_RATE_LIMIT_ATTEMPTS,
