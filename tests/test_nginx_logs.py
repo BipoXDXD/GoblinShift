@@ -19,6 +19,7 @@ from pathlib import Path
 from typing import Any
 
 import pytest
+import yaml
 
 pytestmark = pytest.mark.nginx
 
@@ -47,6 +48,17 @@ API_STUB = (
     " location / { return 204; } }' > /etc/nginx/conf.d/default.conf"
     " && exec nginx -g 'daemon off;'"
 )
+
+
+def nginx_read_only_args() -> list[str]:
+    """`read_only` e `tmpfs` do Nginx no compose.yaml, como argumentos do `docker run`.
+
+    Os testes sobem o Nginx com a raiz só leitura da produção: se ele precisar escrever fora dos
+    tmpfs medidos, o teste falha aqui, e não só no e2e.
+    """
+    nginx = yaml.safe_load((ROOT / "compose.yaml").read_text())["services"]["nginx"]
+    assert nginx["read_only"] is True
+    return ["--read-only", *(arg for mount in nginx["tmpfs"] for arg in ("--tmpfs", mount))]
 
 
 def _docker(*args: str, timeout: int = DOCKER_TIMEOUT_SECONDS) -> str:
@@ -100,6 +112,7 @@ class NginxLogs:
         _docker(
             "run", "-d", "--name", self.nginx, "--network", self.network,
             "--network-alias", "nginx", "-e", "GS_DOMAIN=_", "-e", "NGINX_ENVSUBST_FILTER=^GS_",
+            *nginx_read_only_args(),
             "-v", f"{self.templates}:/etc/nginx/templates:ro", self.image,
         )  # fmt: skip
 

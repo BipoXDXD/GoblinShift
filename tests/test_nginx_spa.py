@@ -29,6 +29,7 @@ import yaml
 
 from goblinshift.entrypoints.api.security_headers import _COMMON_HEADERS
 from tests.api.test_security_headers import PERMISSIONS_POLICY
+from tests.test_nginx_logs import nginx_read_only_args
 
 ROOT = Path(__file__).resolve().parent.parent
 DOCKERFILE = ROOT / "docker" / "web.Dockerfile"
@@ -315,7 +316,8 @@ def stack() -> Iterator[Stack]:
         docker_ok(*common, api, "--network", network, "--network-alias", "api",
                   PYTHON_IMAGE, "python", "-c", FAKE_API)  # fmt: skip
         docker_ok(*common, nginx, "--network", network, "--ip", NGINX_IP,
-                  "--publish", "127.0.0.1::80", *_compose_privileges("nginx"), IMAGE)  # fmt: skip
+                  "--publish", "127.0.0.1::80", *_compose_privileges("nginx"),
+                  *nginx_read_only_args(), IMAGE)  # fmt: skip
         port = docker_ok("port", nginx, "80/tcp").splitlines()[0].rsplit(":", 1)[1]
         current = Stack(f"http://127.0.0.1:{port}", nginx)
         _wait_until_ready(current)

@@ -16,7 +16,7 @@ Uso numa rota:
 
 from collections.abc import Callable, Iterator
 from datetime import UTC, datetime
-from typing import Annotated
+from typing import Annotated, NoReturn
 
 from fastapi import Depends, Request
 from fastapi.routing import iter_route_contexts
@@ -50,6 +50,8 @@ from goblinshift.identity import (
     csrf_token_matches,
     find_account,
     record_audit_event,
+    record_csrf_failure,
+    record_session_use,
     resolve_session,
 )
 from goblinshift.platform.settings import WebIdentityConfig
@@ -141,17 +143,22 @@ def authenticate(request: Request, session: DbSession, now: Now) -> Principal:
     desconhecida, expirada, revogada ou de conta bloqueada: o cliente não aprende qual foi o
     caso. No servidor, o motivo da recusa da sessão vai no evento amplo da requisição
     (`auth.refusal`), sem linha de log, porque um cookie vencido se repete a cada requisição; a
-    chave conhecida recusada vai ao log pelo identificador público, e a malformada ou desconhecida
-    fica só como o 401 do evento.
+    chave conhecida recusada vai ao log com o `user.hash` do dono, nunca com o identificador
+    público, e a malformada ou desconhecida fica só como o 401 do evento.
 
-    Toda requisição autenticada conta no limite por conta e classe de rota (1.7); acima dele,
-    429 `RATE_LIMITED` com `Retry-After`. Depois, conta do login sem o aceite dos termos vigentes
-    recebe 403 `TERMS_NOT_ACCEPTED`, salvo nas rotas de `_TERMS_EXEMPT_ROUTES`. Os dois ficam
-    aqui para nenhuma rota escapar deles.
+    A ordem é: identificar (sem CSRF e sem gravar o uso da sessão), contar, conferir o CSRF e só
+    então registrar o uso da sessão. Toda requisição autenticada conta no limite por conta e
+    classe de rota (1.7), inclusive a mutação que o CSRF recusa depois; acima dele, 429
+    `RATE_LIMITED` com `Retry-After`, atribuído à conta no evento amplo. A recusa do CSRF não
+    estende a sessão nem é atribuída à conta do cookie (fica na auditoria). Depois, conta do
+    login sem o aceite dos termos vigentes recebe 403 `TERMS_NOT_ACCEPTED`, salvo nas rotas de
+    `_TERMS_EXEMPT_ROUTES`. Tudo fica aqui para nenhuma rota escapar.
     """
     principal = _identify(request, session, now)
     route = _route_template(request)
     _count_request(request.method, route, session, principal, now)
+    if principal.via == "session":
+        _accept_session(request, session, principal, now)
     if (request.method, route) not in _TERMS_EXEMPT_ROUTES:
         _require_current_terms(session, principal, terms_version(request))
     return principal
@@ -174,21 +181,39 @@ def _identify(request: Request, session: Session, now: datetime) -> Principal:
     return principal
 
 
+def _accept_session(
+    request: Request, session: Session, principal: Principal, now: datetime
+) -> None:
+    if principal.session_id is None:
+        raise RuntimeError("Principal de sessão sem session_id")
+    if request.method not in SAFE_METHODS:
+        _verify_csrf(request, session, principal, now)
+    with session.begin():
+        record_session_use(session, principal.session_id, now)
+    # Depois do CSRF: o cookie vai junto no pedido forjado por outro site, e a recusa não é da
+    # conta. Ela fica na auditoria.
+    record_principal(principal.owner_id, principal.via)
+
+
 CurrentPrincipal = Annotated[Principal, Depends(authenticate)]
 
 
 def optional_session(request: Request, session: DbSession, now: Now) -> Principal | None:
     """Sessão do cookie, ou None sem sessão válida (`POST /auth/logout`).
 
-    A mutação passa pelo CSRF com ou sem sessão. Com sessão válida, como em `authenticate`: sem
-    isso, outro site derrubaria a sessão do usuário. Sem ela (expirada ou revogada), não há sessão
-    a que o HMAC se ligue: valem a mesma origem e o par cookie e header, que outro site não monta,
-    para que ninguém de fora mande o navegador apagar os dados da origem (`Clear-Site-Data`).
+    A mutação confere a mesma origem e o par cookie e header, com ou sem sessão, e não o HMAC:
+    outro site não monta o par (o cookie é `__Host-`), então não derruba a sessão do usuário nem
+    manda o navegador apagar os dados da origem (`Clear-Site-Data`). Sem o HMAC, a troca do
+    segredo do CSRF não impede ninguém de sair (#442, 46a). A recusa com sessão válida vai à
+    auditoria, como em `authenticate`.
     """
     _reject_simultaneous_credentials(request)
     principal = _session_from_cookie(request, session, now)
-    if principal is None and request.method not in SAFE_METHODS:
-        _verify_anonymous_csrf(request)
+    if request.method not in SAFE_METHODS:
+        _verify_csrf_pair(request, session, principal, now)
+    # Sair não é uso: a sessão vai ser revogada, e o uso não é registrado.
+    if principal is not None:
+        record_principal(principal.owner_id, principal.via)
     return principal
 
 
@@ -260,6 +285,10 @@ def _count_request(
             count_request(session, principal.owner_id, request_class, now)
     except RequestLimitExceededError as error:
         record_rate_limit(limited=True)
+        # A recusa pelo limite é da conta, que é dona do balde, e o evento amplo a atribui a ela
+        # (a sessão só registra a conta depois do CSRF, que vem a seguir). A recusa do CSRF não:
+        # o pedido forjado leva o cookie da vítima, e ela fica na auditoria.
+        record_principal(principal.owner_id, principal.via)
         raise ApiProblem(
             ProblemCode.RATE_LIMITED,
             f"A conta atingiu o limite de {REQUESTS_PER_MINUTE[request_class]} requisições por "
@@ -304,6 +333,7 @@ def _reject_simultaneous_credentials(request: Request) -> None:
 
 
 def _session_from_cookie(request: Request, session: Session, now: datetime) -> Principal | None:
+    """A sessão do cookie, sem CSRF e sem gravar o uso; None sem cookie ou com sessão recusada."""
     token = request.cookies.get(SESSION_COOKIE)
     if token is None:
         return None
@@ -312,11 +342,6 @@ def _session_from_cookie(request: Request, session: Session, now: datetime) -> P
     if isinstance(resolved, SessionRefusal):
         record_auth_refusal(resolved.value)
         return None
-    if request.method not in SAFE_METHODS:
-        _verify_csrf(request, session, resolved, now)
-    # Depois do CSRF: o cookie vai junto no pedido forjado por outro site, e a recusa não é da
-    # conta. Ela fica na auditoria.
-    record_principal(resolved.owner_id, resolved.via)
     return resolved
 
 
@@ -334,13 +359,15 @@ def _verify_csrf(request: Request, session: Session, principal: Principal, now: 
         principal.session_id,
         request.cookies.get(CSRF_COOKIE),
         request.headers.get(CSRF_HEADER),
+        previous_key=web_identity.csrf_previous_key,
     )
     if cross_site or not token_matches:
-        _audit_failure(session, AuditEventType.CSRF_FAILED, principal, request, now)
-        raise ApiProblem(ProblemCode.CSRF_FAILED, _CSRF_DETAIL)
+        _refuse_csrf(request, session, principal, now)
 
 
-def _verify_anonymous_csrf(request: Request) -> None:
+def _verify_csrf_pair(
+    request: Request, session: Session, principal: Principal | None, now: datetime
+) -> None:
     web_identity: WebIdentityConfig = request.app.state.web_identity
     cross_site = cross_site_request(
         request.headers.get("sec-fetch-site"),
@@ -351,7 +378,18 @@ def _verify_anonymous_csrf(request: Request) -> None:
         request.cookies.get(CSRF_COOKIE), request.headers.get(CSRF_HEADER)
     )
     if cross_site or not pair_matches:
-        raise ApiProblem(ProblemCode.CSRF_FAILED, _CSRF_DETAIL)
+        _refuse_csrf(request, session, principal, now)
+
+
+def _refuse_csrf(
+    request: Request, session: Session, principal: Principal | None, now: datetime
+) -> NoReturn:
+    if principal is not None:
+        # Transação própria, como em `_audit_failure`; agregada por conta e minuto, para que a
+        # rajada forjada por outro site não inunde a auditoria.
+        with session.begin():
+            record_csrf_failure(session, user_id=principal.owner_id, ip=client_ip(request), now=now)
+    raise ApiProblem(ProblemCode.CSRF_FAILED, _CSRF_DETAIL)
 
 
 def _audit_failure(

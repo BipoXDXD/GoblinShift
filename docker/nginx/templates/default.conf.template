@@ -74,9 +74,9 @@ limit_req_status 429;
 # canários de IP e de query.
 # O `crit` é raro, mas não limpo: falta de recurso (disco cheio no `proxy_temp`, EMFILE, malloc)
 # ainda grava `client:` e `request:` com o IP completo e a query. Nesse caso o log de acesso pode
-# mostrar 200 para uma resposta cortada no meio. O download de artefatos já não passa pelo disco
-# (`proxy_buffering off` e `proxy_max_temp_file_size 0` na location dele); nas outras rotas da API
-# as respostas são pequenas.
+# mostrar 200 para uma resposta cortada no meio. Nenhuma resposta da API passa pelo disco
+# (`proxy_max_temp_file_size 0` em snippets/proxy-api.conf), e o download de artefatos nem usa
+# buffer (`proxy_buffering off` na location dele).
 error_log /var/log/nginx/error.log crit;
 
 # A API é resolvida pelo DNS do Docker em tempo de requisição (proxy_pass com variável), não só
@@ -298,7 +298,6 @@ server {
         error_page 413 = @body_too_large;
         error_page 502 504 = @upstream_unavailable;
         proxy_buffering off;
-        proxy_max_temp_file_size 0;
         send_timeout 30s;
         include /etc/nginx/snippets/proxy-api.conf;
     }

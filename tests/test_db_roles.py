@@ -352,6 +352,8 @@ def test_manutencao_apaga_o_audit_event_vencido_e_a_conta_pedida(
     # ciclo inteiro, e a prova de que a conta pedida sumiu é relê-la.
     assert counts["audit_events_removed"] >= 1
     assert counts["accounts_purged"] >= 1
+    # Passo que falha fica fora das contagens: o papel conta o atraso e lê o `pg_class`.
+    assert {"audit_events_overdue", "audit_events_estimated"} <= counts.keys()
     with owner.connect() as connection:
         remaining = connection.execute(
             text("SELECT count(*) FROM app_user WHERE id = :id"), {"id": user_id}

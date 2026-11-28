@@ -1,8 +1,10 @@
 """`POST /auth/logout` e `POST /auth/logout-all` (docs/GoblinShiftPlan.md, 3.6; Frente B).
 
-Fora de `/api/v1` e do OpenAPI. CSRF exigido nas duas; `logout` sem sessão válida também
-responde 204, porque o estado final é o mesmo, desde que traga o par CSRF da própria origem. As
-duas apagam os cookies e mandam o navegador limpar os dados da origem (`Clear-Site-Data`).
+Fora de `/api/v1` e do OpenAPI. CSRF exigido nas duas. `logout-all` confere o HMAC ligado à
+sessão; `logout` confere só a própria origem e o par cookie e header, com ou sem sessão válida,
+para que a troca do segredo do CSRF não impeça ninguém de sair (ADR 025). Sem sessão válida ele
+também responde 204, porque o estado final é o mesmo. As duas apagam os cookies e mandam o
+navegador limpar os dados da origem (`Clear-Site-Data`).
 """
 
 from fastapi import APIRouter, Request, Response, status

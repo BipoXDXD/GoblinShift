@@ -5,6 +5,7 @@ A manutenção roda os dois ciclos, o de execuções e arquivos (`Maintenance`) 
 """
 
 import hashlib
+import itertools
 import logging
 import secrets
 import uuid
@@ -65,6 +66,8 @@ INSUFFICIENT_PRIVILEGE = "42501"
 # Curto para o teste não esperar os 2 s do `db_lock_timeout_ms` padrão.
 LOCK_TIMEOUT_MS = 100
 MAINTENANCE_LOG = "goblinshift.maintenance"
+# Instante fixo dos testes da retenção da auditoria.
+NOW = datetime(2026, 10, 14, 12, 0, tzinfo=UTC)
 
 
 def full_account(
@@ -356,6 +359,151 @@ def test_exclusao_atrasada_gera_alerta(
     assert [r.fields["alert"] for r in alerts] == ["account_deletion_overdue"]  # type: ignore[attr-defined]
 
 
+def insert_audit_events(factory: sessionmaker[Session], *occurred_at: datetime) -> None:
+    with unit_of_work(factory) as session:
+        session.execute(
+            insert(audit_event),
+            [
+                {"event_type": "LOGOUT", "outcome": "success", "occurred_at": moment}
+                for moment in occurred_at
+            ],
+        )
+
+
+def audit_events_left(factory: sessionmaker[Session]) -> int:
+    with factory() as session:
+        left: int = session.execute(select(func.count()).select_from(audit_event)).scalar_one()
+    return left
+
+
+def logged_fields(record: logging.LogRecord) -> dict[str, object]:
+    """Os campos de evento que o `extra={"fields": ...}` pôs no registro de log."""
+    fields = vars(record)["fields"]
+    assert isinstance(fields, dict)
+    return fields
+
+
+def advancing_clock(step_s: float) -> Callable[[], float]:
+    """Relógio monotônico falso que anda `step_s` a cada leitura."""
+    ticks = itertools.count(step=step_s)
+    return lambda: float(next(ticks))
+
+
+def test_um_ciclo_apaga_mais_que_um_lote(factory: sessionmaker[Session]) -> None:
+    insert_audit_events(factory, *[NOW - timedelta(days=91)] * 5, NOW - timedelta(days=89))
+    jobs = AccountJobs(
+        factory,
+        cancel_active_run=keep_run,
+        clock=lambda: NOW,
+        config=AccountJobsConfig(batch_size=2),
+    )
+
+    counts = jobs.run_cycle()
+
+    assert counts["audit_events_removed"] == 5
+    assert audit_events_left(factory) == 1
+
+
+def test_retencao_para_no_prazo_e_continua_no_ciclo_seguinte(
+    factory: sessionmaker[Session],
+) -> None:
+    insert_audit_events(factory, *[NOW - timedelta(days=91)] * 3)
+    # Cada leitura passa o prazo de 20 s: só um lote por ciclo.
+    jobs = AccountJobs(
+        factory,
+        cancel_active_run=keep_run,
+        clock=lambda: NOW,
+        config=AccountJobsConfig(batch_size=2),
+        monotonic=advancing_clock(21),
+    )
+
+    first = jobs.run_cycle()
+    second = jobs.run_cycle()
+
+    assert (first["audit_events_removed"], first["account_steps_failed"]) == (2, 0)
+    assert second["audit_events_removed"] == 1
+    assert audit_events_left(factory) == 0
+
+
+def test_falha_num_lote_do_meio_conta_as_remocoes_ja_confirmadas(
+    factory: sessionmaker[Session],
+    monkeypatch: pytest.MonkeyPatch,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    insert_audit_events(factory, *[NOW - timedelta(days=91)] * 5)
+    real_delete = identity_purge.delete_old_audit_events
+    calls = itertools.count(1)
+
+    def failing_on_second(session: Session, at: datetime, limit: int) -> int:
+        if next(calls) == 2:
+            raise statement_timeout()
+        return real_delete(session, at, limit)
+
+    monkeypatch.setattr(identity_purge, "delete_old_audit_events", failing_on_second)
+    jobs = AccountJobs(
+        factory,
+        cancel_active_run=keep_run,
+        clock=lambda: NOW,
+        config=AccountJobsConfig(batch_size=2),
+    )
+
+    with caplog.at_level(logging.ERROR):
+        counts = jobs.run_cycle()
+
+    assert (counts["audit_events_removed"], counts["account_steps_failed"]) == (2, 1)
+    assert audit_events_left(factory) == 3
+    [failure] = [r for r in caplog.records if r.getMessage() == "passo da manutenção falhou"]
+    assert logged_fields(failure) == {
+        "step": "audit_events_removed",
+        "error_type": "OperationalError",
+        "sqlstate": QUERY_CANCELED,
+    }
+
+
+@pytest.mark.parametrize("field", ["batch_size", "accounts_per_cycle"])
+def test_configuracao_do_ciclo_de_contas_recusa_zero(field: str) -> None:
+    with pytest.raises(ValueError, match=field):
+        AccountJobsConfig(**{field: 0})
+
+
+def run_behind_cycle(factory: sessionmaker[Session]) -> dict[str, int]:
+    """Uma volta com dois eventos vencidos há mais de um dia e só um lote dentro do prazo."""
+    insert_audit_events(factory, *[NOW - timedelta(days=91, seconds=1)] * 2)
+    jobs = AccountJobs(
+        factory,
+        cancel_active_run=keep_run,
+        clock=lambda: NOW,
+        config=AccountJobsConfig(batch_size=1),
+        monotonic=advancing_clock(21),
+    )
+    return jobs.run_cycle()
+
+
+def test_retencao_atrasada_remove_so_o_lote_que_coube_no_prazo(
+    factory: sessionmaker[Session],
+) -> None:
+    counts = run_behind_cycle(factory)
+
+    assert counts["audit_events_removed"] == 1
+
+
+def test_retencao_atrasada_conta_o_atraso_e_a_estimativa(factory: sessionmaker[Session]) -> None:
+    counts = run_behind_cycle(factory)
+
+    assert counts["audit_events_overdue"] == 1
+    assert counts["audit_events_estimated"] >= 0
+
+
+def test_atraso_de_mais_de_um_dia_gera_o_alerta(
+    factory: sessionmaker[Session], caplog: pytest.LogCaptureFixture
+) -> None:
+    with caplog.at_level(logging.WARNING, logger="goblinshift.maintenance"):
+        run_behind_cycle(factory)
+
+    [alert] = [r for r in caplog.records if getattr(r, "fields", {}).get("alert")]
+    assert logged_fields(alert) == {"alert": "audit_retention_behind", "events": 1}
+
+
 def test_serve_roda_o_ciclo_de_contas_mesmo_se_o_de_execucoes_falhar(
     db_settings: Settings, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -481,6 +629,22 @@ def test_ciclo_de_contas_sem_falha_conta_zero_passos_falhos(factory: sessionmake
     counts = AccountJobs(factory, cancel_active_run=keep_run).run_cycle()
 
     assert (counts["account_steps_failed"], counts["accounts_purge_failed"]) == (0, 0)
+
+
+def test_duracao_do_ciclo_de_contas_usa_o_relogio_injetado(
+    factory: sessionmaker[Session], caplog: pytest.LogCaptureFixture
+) -> None:
+    # Cada leitura do relógio falso anda 1 s: só ele dá uma duração em segundos inteiros.
+    jobs = AccountJobs(factory, cancel_active_run=keep_run, monotonic=advancing_clock(1))
+
+    with caplog.at_level(logging.INFO, logger="goblinshift.maintenance"):
+        jobs.run_cycle()
+
+    [cycle] = [r for r in caplog.records if r.getMessage() == "ciclo de contas"]
+    duration_ms = logged_fields(cycle)["duration_ms"]
+    assert isinstance(duration_ms, int)
+    assert duration_ms > 0
+    assert duration_ms % 1000 == 0
 
 
 def test_banco_inalcancavel_ainda_derruba_o_ciclo_de_contas(

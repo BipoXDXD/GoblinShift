@@ -28,6 +28,7 @@ ACCEPTANCE_SUSPENSION_MINUTES = 20
 # Cada evento `alert=` do log e o alerta que o torna visível fora da VPS.
 LOG_EVENT_ALERTS = {
     "account_deletion_overdue": "gs-causa-exclusao-de-conta-atrasada",
+    "audit_retention_behind": "gs-causa-auditoria-atrasada",
     "capacity_divergence": "gs-causa-capacidade-divergente",
     "capacity_over_max": "gs-causa-capacidade-divergente",
     "executor_image_missing": "gs-causa-imagem-executor-ausente",
@@ -48,6 +49,7 @@ LOG_EVENT_ALERTS = {
 # quem é emitido dentro da manutenção: fora dela, a contagem do ciclo não enxerga o evento.
 CYCLE_COUNTERS = {
     "account_deletion_overdue": "maintenance_accounts_deletion_overdue",
+    "audit_retention_behind": "maintenance_audit_events_overdue",
     "executor_image_missing": "maintenance_executor_image_missing",
     "executor_image_probe_failed": "maintenance_executor_image_probe_failed",
     "missing_governor": "maintenance_missing_governor_tripped",
@@ -101,6 +103,7 @@ def test_catalogo_tem_queima_por_slo_e_nivel_causas_e_heartbeat() -> None:
         "gs-causa-execucao-presa",
         "gs-causa-limitador-de-exclusoes",
         "gs-causa-exclusao-de-conta-atrasada",
+        "gs-causa-auditoria-atrasada",
         "gs-causa-capacidade-global",
         "gs-causa-storage-sem-sentinela",
         "gs-causa-limitador-de-ausentes",
@@ -193,6 +196,7 @@ def test_alertas_da_manutencao_leem_o_span_do_ciclo_no_stream_de_traces() -> Non
         "gs-causa-execucao-presa",
         "gs-causa-limitador-de-exclusoes",
         "gs-causa-exclusao-de-conta-atrasada",
+        "gs-causa-auditoria-atrasada",
         "gs-causa-capacidade-global",
         "gs-causa-storage-sem-sentinela",
         "gs-causa-limitador-de-ausentes",
