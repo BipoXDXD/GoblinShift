@@ -49,12 +49,21 @@ RecipeIdField = Annotated[
 RecipeVersionField = Annotated[int, Field(ge=1, le=MAX_RECIPE_VERSION)]
 
 
+class SystemPresetResponse(BaseModel):
+    key: str
+    name: str
+    # Já resolvidos: os defaults da versão completam o que o ajuste não fixa.
+    parameters: dict[str, Any]
+
+
 class RecipeVersionResponse(BaseModel):
     version: int
     status: VersionStatus
     limits: dict[str, int]
     defaults: dict[str, Any]
     parameters_schema: dict[str, Any]
+    # Ajustes prontos, só leitura; não são presets da conta nem aparecem em /presets.
+    system_presets: list[SystemPresetResponse]
 
 
 class RecipeResponse(BaseModel):
@@ -93,6 +102,12 @@ def _version_response(version: RecipeVersion) -> RecipeVersionResponse:
         limits=dict(version.limits),
         defaults=version.resolve({}),
         parameters_schema=version.parameters_schema(),
+        system_presets=[
+            SystemPresetResponse(
+                key=preset.key, name=preset.name, parameters=version.resolve(preset.parameters)
+            )
+            for preset in version.system_presets
+        ],
     )
 
 

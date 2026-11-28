@@ -12,6 +12,7 @@ from goblinshift.catalog import (
     Catalog,
     InvalidParametersError,
     RecipeVersionRetiredError,
+    SystemPreset,
     UnknownRecipeVersionError,
     VersionStatus,
 )
@@ -358,3 +359,62 @@ def test_detox_aceita_com_preserve_o_name_prefix_default_enviado() -> None:
 def test_detox_recusa_com_preserve_outro_name_prefix() -> None:
     with pytest.raises(InvalidParametersError):
         CATALOG.resolve("downloads-detox", 1, {"name_mode": "preserve", "name_prefix": "doc"})
+
+
+# Ajustes prontos do sistema (D2/D3 do plano de paridade): dado do catálogo, só leitura.
+
+
+def test_image_forge_v2_traz_os_tres_ajustes_prontos_resolvidos() -> None:
+    v2 = CATALOG.get_version("image-forge", 2)
+
+    assert [(preset.key, preset.name) for preset in v2.system_presets] == [
+        ("web-1600", "Web 1600"),
+        ("email-1024", "E-mail 1024"),
+        ("redes-1080", "Redes 1080"),
+    ]
+    web, email, redes = (v2.resolve(preset.parameters) for preset in v2.system_presets)
+    assert (web["fit"], web["max_width"], web["output_format"], web["webp_quality"]) == (
+        "contain",
+        1600,
+        "webp",
+        80,
+    )
+    assert (email["max_height"], email["output_format"], email["jpeg_quality"]) == (
+        1024,
+        "jpeg",
+        80,
+    )
+    assert (redes["fit"], redes["max_width"], redes["max_height"], redes["jpeg_quality"]) == (
+        "cover",
+        1080,
+        1080,
+        85,
+    )
+
+
+def test_versoes_sem_ajustes_prontos_ficam_com_a_tupla_vazia() -> None:
+    assert CATALOG.get_version("image-forge", 1).system_presets == ()
+
+
+@pytest.mark.parametrize(
+    ("presets", "message"),
+    [
+        (
+            (SystemPreset("a", "A", {}), SystemPreset("a", "B", {})),
+            "chave de ajuste pronto repetida",
+        ),
+        (
+            (SystemPreset("a", "A", {}), SystemPreset("b", "A", {})),
+            "nome de ajuste pronto repetido",
+        ),
+        ((SystemPreset("a", "A", {"max_width": 0}),), "ajuste pronto 'a' inválido"),
+    ],
+    ids=["chave", "nome", "parametros"],
+)
+def test_ajuste_pronto_invalido_e_recusado_no_import(
+    presets: tuple[SystemPreset, ...], message: str
+) -> None:
+    v2 = CATALOG.get_version("image-forge", 2)
+
+    with pytest.raises(ValueError, match=message):
+        replace(v2, system_presets=presets)

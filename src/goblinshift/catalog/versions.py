@@ -76,6 +76,18 @@ class InvalidParametersError(ValueError):
 
 
 @dataclass(frozen=True)
+class SystemPreset:
+    """Ajuste pronto de uma versão (D2): dado do produto, só leitura, fora de `/presets`.
+
+    `parameters` é parcial; o resto vem dos defaults da versão ao resolver.
+    """
+
+    key: str
+    name: str
+    parameters: Mapping[str, object]
+
+
+@dataclass(frozen=True)
 class RecipeVersion:
     recipe_id: str
     version: int
@@ -90,6 +102,8 @@ class RecipeVersion:
     # Data de desligamento (header `Sunset`, RFC 8594): obrigatória em `deprecated`, que continua
     # aceita por pelo menos 90 dias (1.6); a retirada pode guardar a data em que saiu.
     sunset_at: datetime | None = None
+    # Ajustes prontos publicados em `GET /catalog`; validados pelo modelo da versão no import.
+    system_presets: tuple[SystemPreset, ...] = ()
 
     def __post_init__(self) -> None:
         if self.sunset_at is not None and self.sunset_at.tzinfo is None:
@@ -98,6 +112,22 @@ class RecipeVersion:
             raise ValueError("versão deprecated exige sunset_at")
         if self.status is VersionStatus.CURRENT and self.sunset_at is not None:
             raise ValueError("versão current não tem sunset_at")
+        self._check_system_presets()
+
+    def _check_system_presets(self) -> None:
+        keys = [preset.key for preset in self.system_presets]
+        if len(set(keys)) != len(keys):
+            raise ValueError("chave de ajuste pronto repetida")
+        names = [preset.name for preset in self.system_presets]
+        if len(set(names)) != len(names):
+            raise ValueError("nome de ajuste pronto repetido")
+        # O modelo direto, e não `resolve`: as versões nascem no import, antes dos auxiliares de
+        # canonização definidos mais abaixo neste módulo.
+        for preset in self.system_presets:
+            try:
+                self.parameters_model.model_validate(preset.parameters)
+            except ValidationError as error:
+                raise ValueError(f"ajuste pronto {preset.key!r} inválido: {error}") from None
 
     def resolve(self, raw_params: object) -> dict[str, object]:
         """Parâmetros validados com os defaults da versão, em forma canônica.
@@ -196,6 +226,41 @@ IMAGE_FORGE_V2 = RecipeVersion(
     status=VersionStatus.CURRENT,
     parameters_model=ImageForgeV2Parameters,
     limits=IMAGE_FORGE_V1.limits,
+    system_presets=(
+        SystemPreset(
+            "web-1600",
+            "Web 1600",
+            {
+                "fit": "contain",
+                "max_width": 1600,
+                "max_height": 1600,
+                "output_format": "webp",
+                "webp_quality": 80,
+            },
+        ),
+        SystemPreset(
+            "email-1024",
+            "E-mail 1024",
+            {
+                "fit": "contain",
+                "max_width": 1024,
+                "max_height": 1024,
+                "output_format": "jpeg",
+                "jpeg_quality": 80,
+            },
+        ),
+        SystemPreset(
+            "redes-1080",
+            "Redes 1080",
+            {
+                "fit": "cover",
+                "max_width": 1080,
+                "max_height": 1080,
+                "output_format": "jpeg",
+                "jpeg_quality": 85,
+            },
+        ),
+    ),
 )
 
 # O teto do lote fica abaixo dos 480 MiB de conteúdo de saída (1.7): o Detox copia cada entrada

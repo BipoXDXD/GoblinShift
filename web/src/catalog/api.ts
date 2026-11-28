@@ -10,6 +10,17 @@ const catalogVersionSchema = z.object({
   limits: z.record(z.string(), z.int()),
   defaults: z.record(z.string(), z.unknown()),
   parameters_schema: z.record(z.string(), z.unknown()),
+  // Ajustes prontos do sistema, já resolvidos. O default vazio poupa o corpo de exemplo dos testes
+  // (test/catalogBody.ts), que só traz os trechos que a interface lê.
+  system_presets: z
+    .array(
+      z.object({
+        key: z.string(),
+        name: z.string(),
+        parameters: z.record(z.string(), z.unknown()),
+      }),
+    )
+    .default([]),
 });
 
 const catalogSchema = z.object({

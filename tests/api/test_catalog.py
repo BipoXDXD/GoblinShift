@@ -19,7 +19,7 @@ from tests.api.support import assert_problem
 from tests.identity.support import new_key, new_user
 
 CATALOG_PATH = "/api/v1/catalog"
-VERSION_KEYS = {"version", "status", "limits", "defaults", "parameters_schema"}
+VERSION_KEYS = {"version", "status", "limits", "defaults", "parameters_schema", "system_presets"}
 DETAIL_KEYS = {"recipe_id", *VERSION_KEYS, "sunset_at"}
 SUNSET = datetime(2027, 1, 15, 12, 30, tzinfo=UTC)
 
@@ -84,7 +84,21 @@ def test_versao_traz_estado_limites_e_defaults_resolvidos() -> None:
             "output_format": "preserve",
         },
         "parameters_schema": version_of(body, "image-forge")["parameters_schema"],
+        "system_presets": [],
     }
+
+
+def test_ajustes_prontos_saem_com_chave_nome_e_parametros_resolvidos() -> None:
+    body = catalog_response(CATALOG).model_dump(mode="json")
+    v2 = CATALOG.get_version("image-forge", 2)
+
+    presets = version_of(body, "image-forge", 2)["system_presets"]
+
+    assert presets == [
+        {"key": preset.key, "name": preset.name, "parameters": v2.resolve(preset.parameters)}
+        for preset in v2.system_presets
+    ]
+    assert [preset["key"] for preset in presets] == ["web-1600", "email-1024", "redes-1080"]
 
 
 def test_limites_do_detox_incluem_o_teto_de_bytes_do_lote() -> None:

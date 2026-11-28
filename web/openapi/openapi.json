@@ -6688,6 +6688,13 @@
             "type": "object",
             "title": "Parameters Schema"
           },
+          "system_presets": {
+            "items": {
+              "$ref": "#/components/schemas/SystemPresetResponse"
+            },
+            "type": "array",
+            "title": "System Presets"
+          },
           "recipe_id": {
             "type": "string",
             "title": "Recipe Id"
@@ -6712,6 +6719,7 @@
           "limits",
           "defaults",
           "parameters_schema",
+          "system_presets",
           "recipe_id",
           "sunset_at"
         ],
@@ -6742,6 +6750,13 @@
             "additionalProperties": true,
             "type": "object",
             "title": "Parameters Schema"
+          },
+          "system_presets": {
+            "items": {
+              "$ref": "#/components/schemas/SystemPresetResponse"
+            },
+            "type": "array",
+            "title": "System Presets"
           }
         },
         "type": "object",
@@ -6750,7 +6765,8 @@
           "status",
           "limits",
           "defaults",
-          "parameters_schema"
+          "parameters_schema",
+          "system_presets"
         ],
         "title": "RecipeVersionResponse"
       },
@@ -7320,6 +7336,30 @@
           "failed"
         ],
         "title": "Status"
+      },
+      "SystemPresetResponse": {
+        "properties": {
+          "key": {
+            "type": "string",
+            "title": "Key"
+          },
+          "name": {
+            "type": "string",
+            "title": "Name"
+          },
+          "parameters": {
+            "additionalProperties": true,
+            "type": "object",
+            "title": "Parameters"
+          }
+        },
+        "type": "object",
+        "required": [
+          "key",
+          "name",
+          "parameters"
+        ],
+        "title": "SystemPresetResponse"
       },
       "TableComparisonResponse": {
         "properties": {

@@ -1,3 +1,4 @@
+import type { CatalogVersion } from "../catalog/api";
 import { CATALOG_BODY } from "./catalogBody";
 import { jsonResponse } from "./fakeApi";
 
@@ -5,14 +6,19 @@ type CatalogBody = typeof CATALOG_BODY;
 type RecipeEntry = CatalogBody["recipes"][number];
 type VersionEntry = RecipeEntry["versions"][number];
 
-/** Versão da receita no catálogo de exemplo; lança se o exemplo não a tiver. */
-export function catalogVersion(recipeId: RecipeEntry["recipe_id"]): VersionEntry {
+/**
+ * Versão da receita no catálogo de exemplo, como o zod a entrega (com os ajustes prontos, vazios no
+ * exemplo); lança se o exemplo não a tiver.
+ */
+export function catalogVersion(
+  recipeId: RecipeEntry["recipe_id"],
+): VersionEntry & Pick<CatalogVersion, "system_presets"> {
   const recipe = CATALOG_BODY.recipes.find((entry) => entry.recipe_id === recipeId);
   const version = recipe?.versions[0];
   if (version === undefined) {
     throw new Error(`receita ${recipeId} ausente do catálogo de exemplo`);
   }
-  return version;
+  return { ...version, system_presets: [] };
 }
 
 /** Catálogo de exemplo com a versão de uma receita trocada (ou removida, com `null`). */

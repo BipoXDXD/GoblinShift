@@ -878,6 +878,8 @@ export interface components {
             parameters_schema: {
                 [key: string]: unknown;
             };
+            /** System Presets */
+            system_presets: components["schemas"]["SystemPresetResponse"][];
             /** Recipe Id */
             recipe_id: string;
             /** Sunset At */
@@ -900,6 +902,8 @@ export interface components {
             parameters_schema: {
                 [key: string]: unknown;
             };
+            /** System Presets */
+            system_presets: components["schemas"]["SystemPresetResponse"][];
         };
         /** ResultReferenceResponse */
         ResultReferenceResponse: {
@@ -1083,6 +1087,17 @@ export interface components {
          * @enum {string}
          */
         Status: "queued" | "running" | "stopping" | "succeeded" | "succeeded_with_warnings" | "canceled" | "failed";
+        /** SystemPresetResponse */
+        SystemPresetResponse: {
+            /** Key */
+            key: string;
+            /** Name */
+            name: string;
+            /** Parameters */
+            parameters: {
+                [key: string]: unknown;
+            };
+        };
         /**
          * TableComparisonResponse
          * @description CSV Janitor: registros lidos → escritos.

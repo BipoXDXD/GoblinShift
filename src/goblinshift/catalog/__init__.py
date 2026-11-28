@@ -10,6 +10,7 @@ from goblinshift.catalog.versions import (
     InvalidParametersError,
     RecipeVersion,
     RecipeVersionRetiredError,
+    SystemPreset,
     UnknownRecipeVersionError,
     VersionStatus,
 )
@@ -21,6 +22,7 @@ __all__ = [
     "InvalidParametersError",
     "RecipeVersion",
     "RecipeVersionRetiredError",
+    "SystemPreset",
     "UnknownRecipeVersionError",
     "VersionStatus",
 ]
