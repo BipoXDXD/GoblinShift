@@ -118,10 +118,17 @@ def create_app(
                 # trocada pela do `dispose`.
                 logger.exception("liberação do banco falhou: conexões podem ter ficado abertas")
             finally:
-                # Por último: depois do encerramento, o processador descarta em silêncio todo
-                # span novo. O que rodar antes daqui na parada ainda entra no lote, inclusive a
-                # janela final de saturação, relatada ao sair do `async with` acima.
-                running.state.tracing.shut_down()
+                try:
+                    # O pool HTTP do login (`auth_login.install`); o httpcore blinda o
+                    # fechamento contra o cancelamento da parada.
+                    await running.state.login_transport.aclose()
+                except Exception:
+                    logger.exception("liberação do pool HTTP do login falhou")
+                finally:
+                    # Por último: depois do encerramento, o processador descarta em silêncio
+                    # todo span novo. O que rodar antes daqui na parada ainda entra no lote,
+                    # inclusive a janela final de saturação, relatada ao sair do `async with`.
+                    running.state.tracing.shut_down()
 
     app = _GoblinShiftAPI(
         title="GoblinShift",
@@ -157,7 +164,8 @@ def create_app(
     app.add_middleware(ConcurrencyLimitMiddleware, limit=MAX_CONCURRENT_REQUESTS)
     install_problem_handlers(app)
     # Cookie de login (ADR 025): só o marcador do estado do Authlib, cujo conteúdo fica em
-    # `login_state`. Middleware ASGI puro, que não toca respostas fora de `/auth`.
+    # `login_state`. Middleware ASGI puro; só regrava o cookie quando a sessão de login muda, o que
+    # só as rotas de `/auth` fazem.
     app.add_middleware(
         SessionMiddleware,
         secret_key=web_identity.login_cookie_key.decode(),

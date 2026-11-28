@@ -454,6 +454,8 @@ export const TEXT = {
       heading: "Resultados",
       loading: "Carregando os resultados.",
       download: (fileName: string) => `Baixar ${fileName}`,
+      // O motivo é o texto do catálogo (`failure.problems`), que sozinho não diz que foi o download.
+      downloadFailed: (reason: string) => `Não foi possível baixar o arquivo. ${reason}`,
       otherFiles: "Arquivos avulsos",
       roles: {
         output: "arquivo processado",
@@ -477,6 +479,12 @@ export const TEXT = {
         },
         tableCaption: (fileName: string, rows: number) =>
           `Amostra de ${fileName}: ${rows === 1 ? "1 registro" : `${String(rows)} registros`}`,
+        // Nome em branco no cabeçalho; `position` começa em 1 (D7 do plano contrato-e-front).
+        // `copy` acima de 1 desfaz a colisão com um cabeçalho real de mesmo texto.
+        unnamedColumn: (position: number, copy: number) =>
+          copy === 1
+            ? `Coluna ${String(position)}`
+            : `Coluna ${String(position)} (${String(copy)})`,
         pagesCaption: (fileName: string, pages: number) =>
           `Páginas de ${fileName}: ${pages === 1 ? "1 página" : `${String(pages)} páginas`}`,
         page: (pageNumber: number, inputPosition: number) =>
