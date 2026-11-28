@@ -487,6 +487,12 @@ jobs:
     name: Imagem
     runs-on: ubuntu-24.04
     timeout-minutes: 30
+    # OIDC e escrita de atestado no nível do job, não do workflow; o atestado sai só no push
+    # (#442, 68c; D10).
+    permissions:
+      contents: read
+      id-token: write
+      attestations: write
     outputs:
       digest: ${{ steps.build.outputs.digest }}
       artifact: ${{ steps.layout.outputs.artifact-id }}
@@ -524,6 +530,16 @@ jobs:
           scripts/ci-oci.sh registry
           scripts/ci-oci.sh stage app "$INDEX_DIGEST" "$RUNNER_TEMP/oci-app"
           scripts/ci-oci.sh scan app "$INDEX_DIGEST"
+      # Proveniência do índice que passou no scan, ligada a este run; o publish-images do
+      # coolify.yml confere o atestado antes de gravar no GHCR. Sem push ao registro: a imagem
+      # só chega ao GHCR pelo publish-images, e o atestado fica na API de atestados do GitHub.
+      - name: Atestar a proveniência do índice
+        if: github.event_name == 'push'
+        uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8 # v4.2.2
+        with:
+          subject-name: ghcr.io/bipoxdxd/goblinshift
+          subject-digest: ${{ steps.build.outputs.digest }}
+          push-to-registry: false
       - id: layout
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
@@ -536,6 +552,12 @@ jobs:
     name: Imagem do executor
     runs-on: ubuntu-24.04
     timeout-minutes: 60
+    # OIDC e escrita de atestado no nível do job, não do workflow; o atestado sai só no push
+    # (#442, 68c; D10).
+    permissions:
+      contents: read
+      id-token: write
+      attestations: write
     outputs:
       digest: ${{ steps.build.outputs.digest }}
       artifact: ${{ steps.layout.outputs.artifact-id }}
@@ -570,6 +592,13 @@ jobs:
           scripts/ci-oci.sh registry
           scripts/ci-oci.sh stage executor "$INDEX_DIGEST" "$RUNNER_TEMP/oci-executor"
           scripts/ci-oci.sh scan executor "$INDEX_DIGEST"
+      - name: Atestar a proveniência do índice
+        if: github.event_name == 'push'
+        uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8 # v4.2.2
+        with:
+          subject-name: ghcr.io/bipoxdxd/goblinshift-executor
+          subject-digest: ${{ steps.build.outputs.digest }}
+          push-to-registry: false
       - id: layout
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
@@ -582,6 +611,12 @@ jobs:
     name: Imagem do Nginx com a SPA
     runs-on: ubuntu-24.04
     timeout-minutes: 30
+    # OIDC e escrita de atestado no nível do job, não do workflow; o atestado sai só no push
+    # (#442, 68c; D10).
+    permissions:
+      contents: read
+      id-token: write
+      attestations: write
     outputs:
       digest: ${{ steps.build.outputs.digest }}
       artifact: ${{ steps.layout.outputs.artifact-id }}
@@ -616,6 +651,13 @@ jobs:
           scripts/ci-oci.sh registry
           scripts/ci-oci.sh stage web "$INDEX_DIGEST" "$RUNNER_TEMP/oci-web"
           scripts/ci-oci.sh scan web "$INDEX_DIGEST"
+      - name: Atestar a proveniência do índice
+        if: github.event_name == 'push'
+        uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8 # v4.2.2
+        with:
+          subject-name: ghcr.io/bipoxdxd/goblinshift-web
+          subject-digest: ${{ steps.build.outputs.digest }}
+          push-to-registry: false
       - id: layout
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:

@@ -9,7 +9,19 @@
       "pids_limit": 128,
       "mem_limit": "256m",
       "cap_drop": [
-        "NET_RAW"
+        "AUDIT_WRITE",
+        "CHOWN",
+        "DAC_OVERRIDE",
+        "FOWNER",
+        "FSETID",
+        "KILL",
+        "MKNOD",
+        "NET_RAW",
+        "SETFCAP",
+        "SETGID",
+        "SETPCAP",
+        "SETUID",
+        "SYS_CHROOT"
       ],
       "security_opt": [
         "no-new-privileges:true"
