@@ -3,7 +3,7 @@
 A v2 é a v1 mais três opções: a codificação declarada da entrada, o BOM do UTF-8 na saída e as
 colunas com espaços internos colapsados. Herda o modelo da v1 só para reaproveitar os
 validadores; o schema e os defaults de cada versão ficam congelados em
-`tests/catalog/congeladas/` (ADR 066).
+`tests/catalog/congeladas/` (ADR 067).
 """
 
 from dataclasses import replace

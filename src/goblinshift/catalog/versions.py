@@ -167,7 +167,7 @@ _CSV_JANITOR_LIMITS: Mapping[str, int] = {
     **dataclasses.asdict(Limits()),
 }
 
-# Primeiro dia do mês seguinte a (merge da v2 + 90 dias), a regra de 1.6 (ADR 066).
+# Primeiro dia do mês seguinte a (merge da v2 + 90 dias), a regra de 1.6 (ADR 067).
 CSV_JANITOR_V1_SUNSET = datetime(2027, 3, 1, tzinfo=UTC)
 
 CSV_JANITOR_V1 = RecipeVersion(

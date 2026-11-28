@@ -1,4 +1,4 @@
-# ADR 066. Primeiras versões 2 das receitas, começando pelo CSV Janitor
+# ADR 067. Primeiras versões 2 das receitas, começando pelo CSV Janitor
 
 - **Estado:** Aceito (2026-11-22, por decisão do dono: D4 = a, D6 = a, D7 = a, plano `paridade-pdf-csv-detox-v2`)
 - **Plano:** [1.3](../GoblinShiftPlan.md#s1-3) e [1.6](../GoblinShiftPlan.md#s1-6) (versões, `deprecated` e `Sunset`)
