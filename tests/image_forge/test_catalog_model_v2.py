@@ -120,4 +120,6 @@ def test_importar_o_modelo_v2_nao_carrega_o_pil() -> None:
         "import sys, goblinshift.catalog.image_forge_v2;"
         "sys.exit(1 if any(m == 'PIL' or m.startswith('PIL.') for m in sys.modules) else 0)"
     )
-    assert subprocess.run([sys.executable, "-c", code], check=False).returncode == 0  # noqa: S603
+    # Processo novo para ver o `sys.modules` limpo; o código é a constante acima, sem entrada.
+    result = subprocess.run([sys.executable, "-c", code], check=False)  # noqa: S603 - código fixo
+    assert result.returncode == 0

@@ -39,10 +39,17 @@ def test_defaults_da_v2_sao_os_da_v1_mais_os_novos() -> None:
         80,
         False,
     )
-    v1 = Params()
-    for name in ("max_width", "max_height", "jpeg_quality", "jpeg_background", "make_thumbnails"):
-        assert getattr(v2, name) == getattr(v1, name)
-    assert v2.output_format.value == v1.output_format.value
+
+
+@pytest.mark.parametrize(
+    "name", ["max_width", "max_height", "jpeg_quality", "jpeg_background", "make_thumbnails"]
+)
+def test_default_da_v2_igual_ao_da_v1(name: str) -> None:
+    assert getattr(ParamsV2(), name) == getattr(Params(), name)
+
+
+def test_formato_de_saida_padrao_da_v2_e_o_da_v1() -> None:
+    assert ParamsV2().output_format.value == Params().output_format.value
 
 
 @pytest.mark.parametrize(

@@ -85,7 +85,7 @@ def test_png_animado_continua_com_o_motivo_de_sempre_na_v2(tmp_path: Path) -> No
 def test_gif_com_transparencia_sai_com_alfa(tmp_path: Path) -> None:
     prepared = prepare(_write(tmp_path, "a.gif", palette_gif(0)), Limits(), V2_FORMATS)
     assert prepared.image.mode in {"RGBA", "LA"}
-    assert prepared.image.getpixel((1, 1))[-1] == 0  # type: ignore[index]
+    assert prepared.image.getchannel("A").getpixel((1, 1)) == 0
     assert prepared.image.getpixel((0, 0)) == (0, 0, 255, 255)
 
 

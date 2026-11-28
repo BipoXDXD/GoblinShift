@@ -1,5 +1,7 @@
 """Image Forge v2 de ponta a ponta: ajustes, WebP e GIF sobre o mesmo pipeline da v1."""
 
+from collections.abc import Callable
+
 import pytest
 from PIL import Image
 
@@ -83,7 +85,7 @@ def test_v2_pad_em_png_deixa_a_margem_transparente(work: Workspace) -> None:
     output = work.open_output("images/a.png")
     assert output.size == (400, 400)
     assert output.mode == "RGBA"
-    assert output.getpixel((0, 0))[3] == 0  # type: ignore[index]
+    assert output.getchannel("A").getpixel((0, 0)) == 0
     assert output.getpixel((200, 200)) == (40, 80, 120, 255)
 
 
@@ -110,18 +112,29 @@ def test_v2_contain_registra_so_o_modo(work: Workspace) -> None:
     assert not {"crop_x", "content_width", "scale_percent"} & set(item.details)
 
 
-def test_v2_preserva_webp_e_converte_gif_para_png(work: Workspace) -> None:
-    work.add("a.webp", media.webp(media.solid("RGB", (8, 8), (40, 80, 120))))
-    work.add("b.gif", media.gif(media.solid("RGB", (8, 8), (40, 80, 120))))
+@pytest.mark.parametrize(
+    ("name", "encode", "before", "after", "output", "pil_format"),
+    [
+        ("a.webp", media.webp, "webp", "webp", "images/a.webp", "WEBP"),
+        ("a.gif", media.gif, "gif", "png", "images/a.png", "PNG"),
+    ],
+    ids=["webp-fica-webp", "gif-vira-png"],
+)
+def test_v2_preserve_escolhe_o_formato_de_saida_pela_entrada(
+    work: Workspace,
+    name: str,
+    encode: Callable[[Image.Image], bytes],
+    before: str,
+    after: str,
+    output: str,
+    pil_format: str,
+) -> None:
+    work.add(name, encode(media.solid("RGB", (8, 8), (40, 80, 120))))
 
-    report = run_v2(work, ParamsV2())
+    item = only_ok(run_v2(work, ParamsV2()))
 
-    first, second = report.items
-    assert isinstance(first, ItemOk) and isinstance(second, ItemOk)
-    assert (first.details["format_before"], first.details["format_after"]) == ("webp", "webp")
-    assert (second.details["format_before"], second.details["format_after"]) == ("gif", "png")
-    assert work.open_output("images/a.webp").format == "WEBP"
-    assert work.open_output("images/b.png").format == "PNG"
+    assert (item.details["format_before"], item.details["format_after"]) == (before, after)
+    assert work.open_output(output).format == pil_format
 
 
 def test_v2_converte_para_webp_com_miniatura(work: Workspace) -> None:

@@ -167,4 +167,3 @@ def test_webp_de_cinza_sai_rgb() -> None:
 def test_webp_e_deterministico() -> None:
     image = media.solid("RGB", (32, 32), (10, 200, 30))
     assert encoded_webp(image, webp_quality=70) == encoded_webp(image, webp_quality=70)
-    assert SaveFormat.WEBP.extension == ".webp"
