@@ -219,8 +219,10 @@ def delete_unknown_upload(client: TestClient, auth: dict[str, str]) -> httpx.Res
 def test_chave_que_esgota_a_conta_nao_tranca_a_sessao(
     app: FastAPI, client: TestClient, factory: sessionmaker[Session]
 ) -> None:
+    # A revogação pela sessão e o 401 da chave revogada ficam em test_api_keys e
+    # test_authentication; aqui, só que a sessão segue passando nas duas classes.
     owner = new_user(factory)
-    key_id, key = key_auth(factory, owner, frozenset({Scope.FILES_WRITE}))
+    _, key = key_auth(factory, owner, frozenset({Scope.FILES_WRITE}))
     send_many(client, key, read_catalog, 120)
     send_many(client, key, delete_unknown_upload, 60, accepted=404)
     assert_problem(read_catalog(client, key), 429, "RATE_LIMITED")
@@ -228,12 +230,10 @@ def test_chave_que_esgota_a_conta_nao_tranca_a_sessao(
     titular = session_auth(app, owner)
 
     listed = client.get(KEYS, headers=titular)
-    revoked = client.delete(f"{KEYS}/{key_id}", headers=titular)
+    deleted = delete_unknown_upload(client, titular)
 
     assert listed.status_code == 200, listed.text
-    assert str(key_id) in {item["id"] for item in listed.json()["data"]}
-    assert revoked.status_code == 204, revoked.text
-    assert_problem(read_catalog(client, key), 401, "AUTHENTICATION_REQUIRED")
+    assert deleted.status_code == 404, deleted.text
 
 
 def test_chave_esgotada_nao_bloqueia_a_sessao_da_mesma_conta(

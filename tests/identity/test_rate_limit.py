@@ -15,9 +15,9 @@ from sqlalchemy import Table, func, insert, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session, sessionmaker
 
+from goblinshift.identity.principal import RequestChannel
 from goblinshift.identity.rate_limit import (
     REQUESTS_PER_MINUTE,
-    RequestChannel,
     RequestClass,
     RequestLimitExceededError,
     count_request,
@@ -366,19 +366,19 @@ def test_banco_recusa_classe_ou_canal_desconhecido_e_contagem_nao_positiva(
         )
 
 
+@pytest.mark.parametrize("request_class", list(RequestClass))
+@pytest.mark.parametrize("channel", get_args(RequestChannel.__value__))
 def test_check_do_banco_lista_as_classes_e_os_canais_do_codigo(
-    factory: sessionmaker[Session],
+    factory: sessionmaker[Session], channel: str, request_class: RequestClass
 ) -> None:
     owner = new_user(factory)
-    for channel in get_args(RequestChannel.__value__):
-        for request_class in RequestClass:
-            with unit_of_work(factory) as session:
-                session.execute(
-                    insert(channel_request_window).values(
-                        owner_id=owner,
-                        channel=channel,
-                        request_class=request_class.value,
-                        window_start=WINDOW_START,
-                        request_count=1,
-                    )
-                )
+    with unit_of_work(factory) as session:
+        session.execute(
+            insert(channel_request_window).values(
+                owner_id=owner,
+                channel=channel,
+                request_class=request_class.value,
+                window_start=WINDOW_START,
+                request_count=1,
+            )
+        )

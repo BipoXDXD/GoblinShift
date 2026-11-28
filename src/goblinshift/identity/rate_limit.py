@@ -15,20 +15,18 @@ uma chave que esgota a conta não tranca o titular fora da sessão que a lista e
 
 from datetime import UTC, datetime, timedelta
 from enum import StrEnum
-from typing import Final, Literal
+from typing import Final
 from uuid import UUID
 
 from sqlalchemy import Table, delete, func, select, tuple_
 from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.orm import Session
 
+from goblinshift.identity.principal import RequestChannel
 from goblinshift.identity.tables import channel_request_window, legacy_request_window
 from goblinshift.platform.sql import skip_locked_batch
 
 WINDOW: Final = timedelta(minutes=1)
-
-# O `Principal.via`: as chaves da conta dividem um balde, e a sessão web tem o seu.
-type RequestChannel = Literal["session", "api_key"]
 
 
 class RequestClass(StrEnum):
@@ -68,9 +66,8 @@ def count_request(
     requisição falhar depois.
     """
     window_start = _window_start(now)
-    table = channel_request_window
     statement = (
-        insert(table)
+        insert(channel_request_window)
         .values(
             owner_id=owner_id,
             channel=channel,
@@ -80,15 +77,15 @@ def count_request(
         )
         .on_conflict_do_update(
             index_elements=[
-                table.c.owner_id,
-                table.c.channel,
-                table.c.request_class,
-                table.c.window_start,
+                channel_request_window.c.owner_id,
+                channel_request_window.c.channel,
+                channel_request_window.c.request_class,
+                channel_request_window.c.window_start,
             ],
-            set_={"request_count": table.c.request_count + 1},
-            where=table.c.request_count < REQUESTS_PER_MINUTE[request_class],
+            set_={"request_count": channel_request_window.c.request_count + 1},
+            where=channel_request_window.c.request_count < REQUESTS_PER_MINUTE[request_class],
         )
-        .returning(table.c.request_count)
+        .returning(channel_request_window.c.request_count)
     )
     if session.execute(statement).first() is None:
         raise RequestLimitExceededError(request_class, window_start + WINDOW - now)
@@ -119,7 +116,7 @@ def count_windows(session: Session) -> int:
 
 def _delete_expired(session: Session, table: Table, previous_window: datetime, limit: int) -> int:
     # A chave primária inteira identifica a linha; a da 0007 não tem `channel`.
-    key_columns = [column for column in table.primary_key.columns]
+    key_columns = list(table.primary_key.columns)
     chosen = skip_locked_batch(
         select(*key_columns).where(table.c.window_start < previous_window), limit
     )
