@@ -2,9 +2,7 @@
 // página e fica no lugar sem WebGL acelerado, com movimento reduzido ou se a cena falhar; com GPU,
 // a cena chega depois do `load`, sem CDN, sem violar a CSP e com a entrada parando em até 5 s.
 // Trocar de goblin no seletor baixa só o GLB dela; mouse, setas e os botões mexem a vista.
-import AxeBuilder from "@axe-core/playwright";
-
-import { describeViolation, WCAG_22_AA } from "../support/axe";
+import { expectNoWcagViolations } from "../support/axe";
 import { E2E } from "../support/env";
 import {
   HERO,
@@ -525,20 +523,7 @@ test.describe("com GPU", () => {
       await expect(hero).toHaveAccessibleName("Rúbia em 3D");
       await expect(heroImage(page)).toBeAttached();
 
-      const results = await new AxeBuilder({ page }).withTags(WCAG_22_AA).analyze();
-
-      // Sem isso, um axe que deixou de avaliar o contraste passaria em silêncio.
-      const ranContrast = [...results.passes, ...results.violations].some(
-        (rule) => rule.id === "color-contrast",
-      );
-      expect(ranContrast, "a regra color-contrast avaliou algum elemento").toBe(true);
-      expect(
-        results.violations
-          .filter((violation) => violation.id === "color-contrast")
-          .map(describeViolation),
-        `[sabotage:contrast-3d-${theme}]`,
-      ).toEqual([]);
-      expect(results.violations.map(describeViolation)).toEqual([]);
+      await expectNoWcagViolations(page, `contrast-3d-${theme}`);
     });
   }
 

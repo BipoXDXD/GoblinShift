@@ -8,6 +8,8 @@ import { fileURLToPath } from "node:url";
 
 import { z } from "zod";
 
+import { NOTICE_ENV, type NoticeKind, type Phase, PHASE_NOTICE, PHASES } from "./support/phases.ts";
+
 interface ListedTest {
   projectName: string;
   timeout: number;
@@ -54,10 +56,6 @@ const reportSchema = z.object({
   suites: z.array(suiteSchema),
 });
 
-type Phase = "ui" | "gpu" | "notice" | "notice-incident";
-/** Valor de `E2E_NOTICE` do build de cada aviso (support/env.ts). */
-const NOTICE_ENV = { "terms-change": "1", incident: "incident" } as const;
-type Notice = keyof typeof NOTICE_ENV;
 interface SelectedTest {
   project: string;
   gpu: boolean;
@@ -79,7 +77,7 @@ function fail(reason: string): never {
   throw new Error(reason);
 }
 
-function list(phase: Phase | undefined, notice?: Notice): Selection {
+function list(phase: Phase | undefined, notice?: NoticeKind): Selection {
   // Só entradas locais explícitas: sem URL remota, conta ou segredo herdado do ambiente.
   const env = {
     PATH: `${dirname(process.execPath)}:/usr/bin:/bin`,
@@ -145,17 +143,26 @@ function equalTests(expected: Selection, actual: Selection): void {
   }
 }
 
+/** A fase de um aviso roda tudo o que o build dele coleta sem fase, nem mais nem menos. */
+function checkNoticePhase(phase: Phase, kind: NoticeKind): Selection {
+  const selection = list(phase, kind);
+  equalTests(list(undefined, kind), selection);
+  return selection;
+}
+
+function nonEmpty(selection: Selection): Selection {
+  if (selection.tests.size === 0) fail("Partição vazia não é evidência de cobertura");
+  return selection;
+}
+
 try {
-  const canonical = list(undefined);
-  const ui = list("ui");
-  const gpu = list("gpu");
-  const noticeCanonical = list(undefined, "terms-change");
-  const notice = list("notice", "terms-change");
-  const incidentCanonical = list(undefined, "incident");
-  const incident = list("notice-incident", "incident");
-  if ([canonical, ui, gpu, notice, incident].some((selection) => selection.tests.size === 0)) {
-    fail("Partição vazia não é evidência de cobertura");
-  }
+  const canonical = nonEmpty(list(undefined));
+  const ui = nonEmpty(list("ui"));
+  const gpu = nonEmpty(list("gpu"));
+  const noticePhases = PHASES.flatMap((phase) => {
+    const kind = PHASE_NOTICE[phase];
+    return kind === null ? [] : [{ phase, selection: nonEmpty(checkNoticePhase(phase, kind)) }];
+  });
   if (gpu.workers !== 1) fail("A fase GPU precisa de exatamente um worker");
   const combined = new Map(ui.tests);
   for (const [id, entry] of gpu.tests) {
@@ -163,13 +170,11 @@ try {
     combined.set(id, entry);
   }
   equalTests(canonical, { ...ui, tests: combined });
-  equalTests(noticeCanonical, notice);
-  equalTests(incidentCanonical, incident);
   for (const [id, entry] of canonical.tests) {
     if (!(entry.gpu ? gpu : ui).tests.has(id)) fail("Teste foi para a fase incorreta");
   }
   const usedOutputs = new Set<string>();
-  for (const selection of [ui, gpu, notice, incident]) {
+  for (const selection of [ui, gpu, ...noticePhases.map((entry) => entry.selection)]) {
     for (const directory of selection.outputDirs) {
       if (usedOutputs.has(directory)) fail("As fases sobrescrevem os mesmos resultados");
       usedOutputs.add(directory);
@@ -185,8 +190,9 @@ try {
       canonical: canonical.tests.size,
       ui: ui.tests.size,
       gpu: gpu.tests.size,
-      notice: notice.tests.size,
-      notice_incident: incident.tests.size,
+      ...Object.fromEntries(
+        noticePhases.map(({ phase, selection }) => [phase.replace("-", "_"), selection.tests.size]),
+      ),
       gpu_workers: gpu.workers,
       gpu_by_project: byProject,
     }),

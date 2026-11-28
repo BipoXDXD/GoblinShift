@@ -1,7 +1,8 @@
 import { defineConfig, devices } from "@playwright/test";
 
-import { E2E, LOCAL_PORT, NOTICE_KIND, type NoticeKind } from "./support/env";
+import { E2E, INCIDENT_BUILD, LOCAL_PORT, NOTICE_KIND } from "./support/env";
 import { firefoxLaunchOptions } from "./support/firefox";
+import { isPhase, PHASE_NOTICE } from "./support/phases";
 import {
   ACCOUNT_TAG,
   FAKE_API_TAG,
@@ -27,15 +28,9 @@ function excluding(patterns: readonly RegExp[]): { grepInvert?: RegExp } {
     : { grepInvert: new RegExp(patterns.map((pattern) => pattern.source).join("|")) };
 }
 // CI separa a renderização pesada; sem fase explícita, a seleção local segue completa.
-// Cada fase exige o aviso do build que ela mede: nenhum, o de mudança nos termos ou o incidente.
-const PHASE_NOTICE: Readonly<Record<string, NoticeKind | null>> = {
-  ui: null,
-  gpu: null,
-  notice: "terms-change",
-  "notice-incident": "incident",
-};
+// Cada fase exige o aviso do build que ela mede (support/phases.ts).
 const RUN_PHASE = process.env["E2E_PHASE"];
-if (RUN_PHASE !== undefined && !Object.hasOwn(PHASE_NOTICE, RUN_PHASE)) {
+if (RUN_PHASE !== undefined && !isPhase(RUN_PHASE)) {
   throw new Error("E2E_PHASE inválida");
 }
 if (RUN_PHASE !== undefined && (E2E.remote || PHASE_NOTICE[RUN_PHASE] !== NOTICE_KIND)) {
@@ -111,7 +106,7 @@ function specSelection() {
   if (E2E.vps) {
     return { testMatch: VPS_SPEC };
   }
-  if (NOTICE_KIND === "incident") {
+  if (INCIDENT_BUILD) {
     return { testMatch: NOTICE_INCIDENT_SPECS };
   }
   return NOTICE_KIND === "terms-change" ? { testMatch: NOTICE_SPECS } : { testIgnore: NOTICE_SPEC };
