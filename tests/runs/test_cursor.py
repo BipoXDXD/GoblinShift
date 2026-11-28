@@ -70,7 +70,7 @@ def test_cursor_assinado_com_outro_segredo_e_recusado() -> None:
 def test_cursor_com_payload_adulterado_e_recusado() -> None:
     token = encode_cursor(POSITION, SCOPE, owner_id=OWNER, secret=SECRET, now=NOW)
     payload_b64, signature = token.split(".")
-    payload = json.loads(base64.urlsafe_b64decode(payload_b64 + "=" * (-len(payload_b64) % 4)))
+    payload = json.loads(unb64url(payload_b64))
     payload["i"] = "01900000-0000-7000-8000-000000000099"
     forged = base64.urlsafe_b64encode(json.dumps(payload).encode()).decode().rstrip("=")
 
@@ -89,8 +89,7 @@ def test_cursor_malformado_e_recusado(token: str) -> None:
 
 def test_payload_do_cursor_nao_traz_o_id_da_conta() -> None:
     token = encode_cursor(POSITION, {}, owner_id=OWNER, secret=SECRET, now=NOW)
-    body_b64 = token.split(".")[0]
-    body = base64.urlsafe_b64decode(body_b64 + "=" * (-len(body_b64) % 4))
+    body = unb64url(token.split(".")[0])
 
     assert str(OWNER).encode() not in body
     assert OWNER.hex.encode() not in body
@@ -140,6 +139,10 @@ VALID_PAYLOAD = {
 
 def b64url(raw: bytes) -> str:
     return base64.urlsafe_b64encode(raw).decode().rstrip("=")
+
+
+def unb64url(text: str) -> bytes:
+    return base64.urlsafe_b64decode(text + "=" * (-len(text) % 4))
 
 
 def signed(raw: bytes) -> str:
