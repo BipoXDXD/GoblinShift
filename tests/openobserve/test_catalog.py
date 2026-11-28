@@ -35,6 +35,7 @@ LOG_EVENT_ALERTS = {
     "executor_image_probe_failed": "gs-causa-sonda-imagem-falhou",
     "executor_start_failed": "gs-causa-executor-nao-iniciou",
     "input_tampered": "gs-causa-entrada-adulterada",
+    "login_failure_audit_cap": "gs-causa-login-anonimo-no-teto",
     "login_state_cap": "gs-causa-login-anonimo-no-teto",
     "missing_governor": "gs-causa-limitador-de-ausentes",
     "missing_sweep_failed": "gs-causa-varredura-falhou",

@@ -8,6 +8,7 @@ STRIDE: enumeração de contas (Information Disclosure). Toda recusa tem o mesmo
 código aleatório muda; ele não carrega dado pessoal nem o motivo.
 """
 
+import logging
 import re
 from dataclasses import replace
 from typing import Any
@@ -18,12 +19,14 @@ from fastapi import FastAPI
 from sqlalchemy import select
 from sqlalchemy.orm import Session, sessionmaker
 
+from goblinshift.entrypoints.api import auth_login
 from goblinshift.identity.tables import app_user, audit_event
 from goblinshift.platform.db import unit_of_work
 from tests.api.auth.support import (
     accounts,
     assert_login_failed,
     audit_by_ref,
+    audit_events,
     browser,
     login,
     mask_ref,
@@ -127,3 +130,31 @@ def test_login_aceito_grava_o_request_id_na_auditoria(
         stored = session.execute(select(audit_event.c.request_id)).scalar_one()
     assert str(stored) == response.headers["x-request-id"]
     assert re.fullmatch(r"[0-9a-f-]{36}", response.headers["x-request-id"])
+
+
+def test_login_failed_de_conta_conhecida_sempre_auditado(
+    login_app: FastAPI,
+    fake: FakeProviders,
+    factory: sessionmaker[Session],
+    monkeypatch: pytest.MonkeyPatch,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    # Review Focus 5: o teto por minuto vale só para a falha sem conta. Com ele cheio, o callback
+    # forjado fica só no log, e a recusa da conta bloqueada continua com o evento e o código.
+    blocked_after_a_session(login_app, fake, factory)
+    monkeypatch.setattr(auth_login, "MAX_ANONYMOUS_LOGIN_FAILURES_PER_MINUTE", 1)
+    with browser(login_app) as client:
+        first = assert_login_failed(client.get("/auth/callback/google?code=x&state=y"))
+        with caplog.at_level(logging.WARNING, logger=auth_login.__name__):
+            dropped = assert_login_failed(client.get("/auth/callback/google?code=x&state=y"))
+
+    blocked = assert_login_failed(login_as(login_app, fake, BLOCKED_SUBJECT))
+
+    assert audit_by_ref(factory, first) == [("LOGIN_FAILED", None)]
+    assert audit_by_ref(factory, dropped) == []
+    assert audit_by_ref(factory, blocked) == [
+        ("LOGIN_FAILED", account_id(factory, BLOCKED_SUBJECT))
+    ]
+    assert [event for event, _, user in audit_events(factory) if user is None] == ["LOGIN_FAILED"]
+    alerts = [getattr(record, "fields", {}).get("alert") for record in caplog.records]
+    assert "login_failure_audit_cap" in alerts

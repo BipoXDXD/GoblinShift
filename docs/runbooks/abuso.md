@@ -72,6 +72,8 @@ FROM audit_event WHERE request_id = :'ref'::uuid;
 SQL
 ```
 
+A consulta pode voltar vazia: o código existe, mas nenhum evento foi gravado. Há dois casos. O provedor estava desligado na configuração, um erro de configuração que não é auditado. Ou a recusa veio sem conta (callback forjado ou falha no provedor) durante uma rajada, acima do teto de 30 eventos sem conta por minuto (`MAX_ANONYMOUS_LOGIN_FAILURES_PER_MINUTE`, log `alert = login_failure_audit_cap`). A recusa de uma conta conhecida é sempre gravada; então, sem evento, a recusa não veio da conta. Procure o `request_id` no log da API ou no evento amplo do OpenObserve (30 dias).
+
 Guarde o id numa variável para os passos seguintes:
 
 ```bash

@@ -19,6 +19,9 @@ do pool, em transação curta, e nunca durante uma chamada ao provedor.
 O início sem autenticação grava um estado em `login_state`. Com `MAX_LIVE_LOGIN_STATES` vivos, o
 início novo recebe a mesma recusa genérica, sem gravar estado nem auditoria, e o log avisa no
 máximo uma vez por minuto (`alert=login_state_cap`); o estado de quem já está no provedor fica.
+A recusa sem conta grava `LOGIN_FAILED` até `MAX_ANONYMOUS_LOGIN_FAILURES_PER_MINUTE` por minuto;
+acima disso fica só no log (`alert=login_failure_audit_cap`, também uma vez por minuto). Provedor
+desligado é erro de configuração e não grava nada.
 """
 
 import logging
@@ -47,12 +50,14 @@ from goblinshift.entrypoints.api.cookies import SESSION_COOKIE, set_session_cook
 from goblinshift.entrypoints.api.dependencies import Now
 from goblinshift.entrypoints.api.problems import ApiProblem, ProblemCode, request_id_of
 from goblinshift.identity import (
+    MAX_ANONYMOUS_LOGIN_FAILURES_PER_MINUTE,
     AuditEventType,
     AuditOutcome,
     ExternalIdentity,
     IssuedSession,
     LoginRefusal,
     authenticate_session,
+    record_anonymous_login_failure,
     record_audit_event,
     resolve_login,
     revoke_session,
@@ -142,6 +147,7 @@ def install(app: FastAPI, web: WebIdentityConfig) -> None:
     cache = PostgresLoginStateCache(app.state.session_factory)
     app.state.login_providers = build_login_providers(web, cache)
     app.state.login_cap_warnings = WarningThrottle(CAP_WARNING_INTERVAL_S)
+    app.state.login_failure_cap_warnings = WarningThrottle(CAP_WARNING_INTERVAL_S)
 
 
 def build_login_providers(
@@ -250,9 +256,8 @@ async def start_login(
     factory: sessionmaker[Session] = request.app.state.session_factory
     login_provider = _providers(request).get(name)
     if login_provider is None:
-        attempt = _attempt(request, now)
-        await run_in_threadpool(_record_login_failure, factory, attempt)
-        return _login_failed(attempt)
+        logger.info("login %s: provedor desligado", name)
+        return _login_failed(_attempt(request, now))
     if await run_in_threadpool(_login_states_full, factory, now):
         _warn_login_state_cap(request)
         return _login_failed(_attempt(request, now))
@@ -273,13 +278,14 @@ async def finish_login(request: Request, provider: str, now: Now) -> Response:
     return_to = _safe_return_to(request.session.pop(_return_to_key(name), None))
     login_provider = _providers(request).get(name)
     if login_provider is None:
-        await run_in_threadpool(_record_login_failure, factory, attempt)
+        logger.info("login %s: provedor desligado", name)
         return _login_failed(attempt)
     try:
         identity = await login_provider.fetch_identity(request)
     except LOGIN_ERRORS as exc:
         logger.warning("login %s recusado: %s", name, _failure_kind(exc))
-        await run_in_threadpool(_record_login_failure, factory, attempt)
+        if not await run_in_threadpool(_record_login_failure, factory, attempt):
+            _warn_login_failure_audit_cap(request)
         return _login_failed(attempt)
 
     web: WebIdentityConfig = request.app.state.web_identity
@@ -350,9 +356,17 @@ def _login_states_full(factory: sessionmaker[Session], now: datetime) -> bool:
         return login_states_full(session, now, MAX_LIVE_LOGIN_STATES)
 
 
-def _record_login_failure(factory: sessionmaker[Session], attempt: LoginAttempt) -> None:
+def _record_login_failure(factory: sessionmaker[Session], attempt: LoginAttempt) -> bool:
+    """`LOGIN_FAILED` sem conta, dentro do teto por minuto; devolve se gravou."""
     with unit_of_work(factory) as session:
-        _record(session, AuditEventType.LOGIN_FAILED, None, attempt)
+        return record_anonymous_login_failure(
+            session,
+            ip=attempt.ip,
+            request_id=attempt.request_id,
+            now=attempt.now,
+            # Lido aqui, e não no import, para o teste trocá-lo com `monkeypatch`.
+            limit=MAX_ANONYMOUS_LOGIN_FAILURES_PER_MINUTE,
+        )
 
 
 def _record(
@@ -426,7 +440,17 @@ def _warn_login_state_cap(request: Request) -> None:
     if throttle.ready(time.monotonic()):
         logger.warning(
             "login: teto de estados vivos, início recusado",
-            extra={"fields": {"alert": "login_state_cap", "limit": MAX_LIVE_LOGIN_STATES}},
+            extra={"fields": {"alert": "login_state_cap"}},
+        )
+
+
+def _warn_login_failure_audit_cap(request: Request) -> None:
+    # O código de referência desta recusa não leva a evento nenhum: o `request_id` fica no log.
+    throttle: WarningThrottle = request.app.state.login_failure_cap_warnings
+    if throttle.ready(time.monotonic()):
+        logger.warning(
+            "login: teto da auditoria de falha sem conta, evento só no log",
+            extra={"fields": {"alert": "login_failure_audit_cap"}},
         )
 
 

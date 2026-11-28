@@ -126,6 +126,20 @@ def test_provedor_desligado_responde_o_erro_generico(
         assert_login_failed(client.get("/auth/callback/github?code=x&state=y"))
 
 
+def test_provedor_desligado_nao_grava_auditoria(
+    db_settings: Settings, tmp_path: Path, fake: FakeProviders
+) -> None:
+    # Erro de configuração, não tentativa de login: cada pedido gravaria uma linha por 90 dias.
+    app = build_login_app(login_settings(db_settings, tmp_path, github=False), fake)
+
+    with browser(app) as client:
+        assert_login_failed(client.get("/auth/login/github"))
+        assert_login_failed(client.get("/auth/callback/github?code=x&state=y"))
+
+    assert audit_events(app.state.session_factory) == []
+    app.state.engine.dispose()
+
+
 def test_cookie_de_login_tem_os_atributos_do_adr_024(client: TestClient) -> None:
     header = cookie_header(start_login(client, "google"), "__Secure-gs_login").lower()
 

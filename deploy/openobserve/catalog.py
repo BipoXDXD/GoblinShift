@@ -151,6 +151,7 @@ CAUSE_COLUMNS: tuple[str, ...] = (
     "alert_executor_start_failed",
     "alert_input_tampered",
     "alert_login_state_cap",
+    "alert_login_failure_audit_cap",
     "api_saturation_rejected",
 )
 
@@ -294,9 +295,10 @@ SPAN_CAUSES: tuple[_SpanCause, ...] = (
     ),
     _SpanCause(
         "causa-login-anonimo-no-teto",
-        "Login sem autenticação no teto da aplicação: o teto global de estados de login vivos "
-        "recusou inícios novos (login_state_cap). Enquanto durar, ninguém consegue começar um "
-        "login; quem já estava no provedor termina. Veja o runbook em "
+        "Login sem autenticação no teto da aplicação. O teto global de estados de login vivos "
+        "recusou inícios novos (login_state_cap): enquanto durar, ninguém consegue começar um "
+        "login, e quem já estava no provedor termina. Ou o teto de LOGIN_FAILED sem conta por "
+        "minuto deixou recusas só no log (login_failure_audit_cap). Veja o runbook em "
         "deploy/openobserve/README.md.",
         period_minutes=10,
         silence_minutes=180,
