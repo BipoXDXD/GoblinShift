@@ -1,4 +1,6 @@
-"""Aceite dos termos na API: bloqueio até o aceite e `POST /api/v1/me/terms:accept` (1.8; ADR 029).
+"""Aceite dos termos na API: bloqueio até o aceite e `POST /api/v1/me/terms/accept` (1.8; ADR 029).
+
+`POST /api/v1/me/terms:accept` segue como alias `deprecated` até a `/api/v2` (ADR 074).
 
 Conta do login sem o aceite da versão vigente recebe 403 `TERMS_NOT_ACCEPTED` em toda rota
 autenticada, salvo as que leem a própria conta, aceitam os termos ou reduzem o acesso (sair,
@@ -30,7 +32,8 @@ from tests.security.authz_matrix import Policy, entries
 pytestmark = pytest.mark.integration
 
 ME = "/api/v1/me"
-ACCEPT = "/api/v1/me/terms:accept"
+ACCEPT = "/api/v1/me/terms/accept"
+ACCEPT_LEGACY = "/api/v1/me/terms:accept"
 CATALOG = "/api/v1/catalog"
 NEXT_VERSION = "versao-seguinte-de-teste"
 ACCOUNT_NAME = "Conta Google de teste"
@@ -39,6 +42,7 @@ ACCOUNT_NAME = "Conta Google de teste"
 EXEMPT_ROUTES = {
     ("GET", ME),
     ("POST", ACCEPT),
+    ("POST", ACCEPT_LEGACY),
     ("DELETE", ME),
     ("POST", "/auth/logout-all"),
     ("GET", "/api/v1/api-keys"),
@@ -347,3 +351,32 @@ def test_aceite_sem_csrf_403_e_nada_gravado(
 
     assert_problem(response, 403, "CSRF_FAILED")
     assert stored_terms(factory, owner) == (None, None)
+
+
+@pytest.mark.parametrize("path", [ACCEPT, ACCEPT_LEGACY], ids=["barra", "alias-dois-pontos"])
+def test_aceite_pelas_duas_rotas_grava_o_mesmo_aceite(
+    app: FastAPI, client: TestClient, factory: sessionmaker[Session], path: str
+) -> None:
+    owner = external_account(factory)
+
+    response = client.post(
+        path, json={"version": CURRENT_TERMS_VERSION}, headers=signed_in(app, owner)
+    )
+
+    assert response.status_code == 200, response.text
+    assert response.json()["version"] == CURRENT_TERMS_VERSION
+    assert stored_terms(factory, owner)[0] == CURRENT_TERMS_VERSION
+    assert terms_events(factory, owner) == [("TERMS_ACCEPTED", "success")]
+
+
+def test_alias_antigo_aceita_sem_o_aceite_vigente(
+    app: FastAPI, client: TestClient, factory: sessionmaker[Session]
+) -> None:
+    owner = external_account(factory)
+    auth = signed_in(app, owner)
+    assert_problem(client.get(CATALOG, headers=auth), 403, "TERMS_NOT_ACCEPTED")
+
+    response = client.post(ACCEPT_LEGACY, json={"version": CURRENT_TERMS_VERSION}, headers=auth)
+
+    assert response.status_code == 200, response.text
+    assert client.get(CATALOG, headers=auth).status_code == 200

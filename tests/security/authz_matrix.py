@@ -108,6 +108,7 @@ MATRIX: dict[tuple[str, str], Rule] = {
     ("GET", f"{API}/me"): Rule(Policy.ANY_CREDENTIAL),
     ("DELETE", f"{API}/me"): Rule(Policy.RECENT_SESSION),
     # O aceite dos termos é um ato da pessoa no navegador (ADR 029).
+    ("POST", f"{API}/me/terms/accept"): Rule(Policy.SESSION),
     ("POST", f"{API}/me/terms:accept"): Rule(Policy.SESSION),
     # Chaves pela sessão.
     ("GET", f"{API}/api-keys"): Rule(Policy.SESSION),

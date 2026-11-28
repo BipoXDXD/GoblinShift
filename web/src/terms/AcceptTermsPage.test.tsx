@@ -30,7 +30,7 @@ function setup(handlers: Readonly<Record<string, Handler>> = {}, path = "/termos
 
 function acceptCalls(requests: readonly Request[]): Request[] {
   return screenRequests(requests).filter(
-    (request) => new URL(request.url).pathname === "/api/v1/me/terms:accept",
+    (request) => new URL(request.url).pathname === "/api/v1/me/terms/accept",
   );
 }
 
@@ -71,7 +71,7 @@ describe("Aceite dos termos", () => {
     const { api, user, router } = setup(
       {
         "GET /api/v1/me": () => jsonResponse(meBody(accepted ? {} : { terms: TERMS_PENDING })),
-        "POST /api/v1/me/terms:accept": () => {
+        "POST /api/v1/me/terms/accept": () => {
           accepted = true;
           return jsonResponse({ version: "v1", accepted_at: "2026-10-14T12:00:00Z" });
         },
@@ -95,7 +95,7 @@ describe("Aceite dos termos", () => {
     const { user, router } = setup(
       {
         "GET /api/v1/me": () => jsonResponse(meBody(accepted ? {} : { terms: TERMS_PENDING })),
-        "POST /api/v1/me/terms:accept": () => {
+        "POST /api/v1/me/terms/accept": () => {
           accepted = true;
           return jsonResponse({ version: "v1", accepted_at: "2026-10-14T12:00:00Z" });
         },
@@ -115,7 +115,7 @@ describe("Aceite dos termos", () => {
     const { api, user } = setup({
       "GET /api/v1/me": () =>
         jsonResponse(meBody({ terms: { ...TERMS_PENDING, current_version: version } })),
-      "POST /api/v1/me/terms:accept": () => {
+      "POST /api/v1/me/terms/accept": () => {
         version = "v2";
         return problemResponse(409, "STATE_CONFLICT");
       },
@@ -132,7 +132,7 @@ describe("Aceite dos termos", () => {
 
   it("CSRF recusado pede para recarregar", async () => {
     const { user } = setup({
-      "POST /api/v1/me/terms:accept": () => problemResponse(403, "CSRF_FAILED"),
+      "POST /api/v1/me/terms/accept": () => problemResponse(403, "CSRF_FAILED"),
     });
 
     await user.click(await screen.findByRole("button", { name: "Aceitar e continuar" }));

@@ -67,7 +67,7 @@ describe("getMe", () => {
 describe("mutações da conta", () => {
   it("aceita os termos mandando só a versão lida", async () => {
     const api = fakeApi({
-      "POST /api/v1/me/terms:accept": () =>
+      "POST /api/v1/me/terms/accept": () =>
         jsonResponse({ version: "v1", accepted_at: "2026-10-14T12:00:00Z" }),
     });
 

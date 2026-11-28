@@ -31,7 +31,7 @@ const LOGIN_FAILED_LOCATION = "/?login_error=failed";
 // As rotas que a conta sem o aceite continua usando (_TERMS_EXEMPT_ROUTES).
 const TERMS_EXEMPT = new Set([
   "GET /me",
-  "POST /me/terms:accept",
+  "POST /me/terms/accept",
   "DELETE /me",
   "GET /api-keys",
   "DELETE /api-keys/{id}",
@@ -174,7 +174,7 @@ export class FakeAccount {
       case "GET /me":
         await fulfillJson(route, this.#me(principal), 200);
         return true;
-      case "POST /me/terms:accept":
+      case "POST /me/terms/accept":
         await this.#acceptTerms(route, principal, request);
         return true;
       case "DELETE /me":

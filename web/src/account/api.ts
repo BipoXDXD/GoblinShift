@@ -102,11 +102,11 @@ export async function getMe(client: ApiClient, signal?: AbortSignal): Promise<Me
   return response.data;
 }
 
-/** POST /me/terms:accept com a versão que a pessoa leu; outra versão vigente → 409. */
+/** POST /me/terms/accept com a versão que a pessoa leu; outra versão vigente → 409. */
 export async function acceptTerms(client: ApiClient, version: string): Promise<AcceptedTerms> {
   const response = await client.request({
     method: "POST",
-    path: "/api/v1/me/terms:accept",
+    path: "/api/v1/me/terms/accept",
     body: { version },
     schema: acceptedTermsSchema,
   });

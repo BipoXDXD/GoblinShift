@@ -80,6 +80,7 @@ _LIMITED_CLASSES: dict[RateLimitClass, RequestClass | None] = {
 _TERMS_EXEMPT_ROUTES = frozenset(
     {
         ("GET", "/api/v1/me"),
+        ("POST", "/api/v1/me/terms/accept"),
         ("POST", "/api/v1/me/terms:accept"),
         ("DELETE", "/api/v1/me"),
         ("POST", "/auth/logout-all"),
@@ -307,7 +308,7 @@ def _require_current_terms(session: Session, principal: Principal, current_versi
         raise ApiProblem(
             ProblemCode.TERMS_NOT_ACCEPTED,
             f"Aceite a versão {current_version} dos Termos de Uso e do Aviso de Privacidade "
-            "(POST /api/v1/me/terms:accept) para continuar.",
+            "(POST /api/v1/me/terms/accept) para continuar.",
         )
 
 

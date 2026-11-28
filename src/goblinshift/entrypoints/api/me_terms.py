@@ -1,4 +1,6 @@
-"""`POST /api/v1/me/terms:accept`: aceite dos termos vigentes pela própria conta (1.8; ADR 029).
+"""`POST /api/v1/me/terms/accept`: aceite dos termos vigentes pela própria conta (1.8; ADR 029).
+
+`POST /api/v1/me/terms:accept` é alias `deprecated` da mesma função até a `/api/v2` (ADR 074).
 
 Só sessão web, com CSRF: o aceite é um ato da pessoa no navegador, não de um script com chave.
 O corpo traz só a versão que a pessoa leu, para confirmar que é a vigente (senão 409); o valor
@@ -48,11 +50,25 @@ class AcceptedTermsResponse(BaseModel):
     accepted_at: datetime
 
 
+ACCEPT_PATH = "/me/terms/accept"
+# Forma antiga, com `:`; fica como alias até a `/api/v2`, sem `Sunset` (ADR 074).
+LEGACY_ACCEPT_PATH = "/me/terms:accept"
+_ACCEPT_OPENAPI = command_openapi(AcceptTerms)
+_ACCEPT_RESPONSES = problem_responses(400, 409, 413, 415)
+
+
 @router.post(
-    "/me/terms:accept",
+    ACCEPT_PATH,
+    operation_id="acceptCurrentTerms",
+    openapi_extra=_ACCEPT_OPENAPI,
+    responses=_ACCEPT_RESPONSES,
+)
+@router.post(
+    LEGACY_ACCEPT_PATH,
     operation_id="acceptTerms",
-    openapi_extra=command_openapi(AcceptTerms),
-    responses=problem_responses(400, 409, 413, 415),
+    deprecated=True,
+    openapi_extra=_ACCEPT_OPENAPI,
+    responses=_ACCEPT_RESPONSES,
 )
 def accept_current_terms(
     principal: SessionPrincipal,

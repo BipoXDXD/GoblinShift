@@ -107,3 +107,24 @@ def test_todo_503_documentado_traz_retry_after_obrigatorio() -> None:
     assert with_503
     for response in with_503.values():
         _assert_retry_after_header(response)
+
+
+def test_rotas_nao_deprecated_nao_usam_dois_pontos() -> None:
+    spec = json.loads(render_openapi())
+
+    assert [
+        (method, path)
+        for path, item in spec["paths"].items()
+        for method, operation in item.items()
+        if ":" in path and not operation.get("deprecated", False)
+    ] == []
+
+
+def test_aceite_dos_termos_tem_a_rota_nova_e_o_alias_deprecated() -> None:
+    paths = json.loads(render_openapi())["paths"]
+
+    assert paths["/api/v1/me/terms/accept"]["post"]["operationId"] == "acceptCurrentTerms"
+    assert "deprecated" not in paths["/api/v1/me/terms/accept"]["post"]
+    legacy = paths["/api/v1/me/terms:accept"]["post"]
+    assert legacy["operationId"] == "acceptTerms"
+    assert legacy["deprecated"] is True
