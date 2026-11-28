@@ -18,6 +18,15 @@ import {
 
 const file = (name: string, content = "x") => new File([content], name);
 
+/** Leitura sem cancelamento: o resultado nunca é `null`. */
+async function collect(roots: Parameters<typeof collectEntries>[0], maxFiles: number) {
+  const pick = await collectEntries(roots, maxFiles, new AbortController().signal);
+  if (pick === null) {
+    throw new Error("leitura cancelada sem abort");
+  }
+  return pick;
+}
+
 describe("folderEntries", () => {
   it("sem nenhuma pasta entre os itens, devolve null e o caminho dos arquivos soltos segue", () => {
     expect(folderEntries([fakeItem(fakeFile("a.png"))])).toBeNull();
@@ -36,17 +45,17 @@ describe("collectEntries", () => {
   it("soltar uma pasta não envia o item da pasta", async () => {
     const dir = fakeDir("fotos", [[fakeFile("a.png"), fakeFile("b.png")]]);
 
-    const pick = await collectEntries([dir], 10);
+    const pick = await collect([dir], 10);
 
     expect(pick.files.map((f) => f.name)).toEqual(["a.png", "b.png"]);
-    expect(pick.overflow).toBe(false);
+    expect(pick.overflow).toBeNull();
   });
 
   it("pasta com mais de 100 entradas lê todos os lotes do readEntries", async () => {
     const all = numbered(150);
     const dir = fakeDir("lote", [all.slice(0, 100), all.slice(100)]);
 
-    const pick = await collectEntries([dir], 200);
+    const pick = await collect([dir], 200);
 
     expect(pick.files).toHaveLength(150);
   });
@@ -54,16 +63,44 @@ describe("collectEntries", () => {
   it("pasta acima do limite não envia nada e explica", async () => {
     const dir = fakeDir("grande", [numbered(101)]);
 
-    const pick = await collectEntries([dir], 100);
+    const pick = await collect([dir], 100);
 
-    expect(pick).toMatchObject({ files: [], overflow: true });
+    expect(pick).toMatchObject({ files: [], overflow: "files" });
   });
 
   it("para de ler assim que passa do limite: soltar a pasta pessoal não enumera o disco", async () => {
     const dir = fakeDir("casa", [numbered(100), numbered(100), numbered(100)]);
 
-    await collectEntries([dir], 50);
+    await collect([dir], 50);
 
+    expect(dir.batchesRead()).toBe(1);
+  });
+
+  it("árvore com entradas demais para ler estoura pelas entradas, não pelos arquivos", async () => {
+    const empties = Array.from({ length: 10_001 }, (_, i) => fakeDir(`d${String(i)}`, []));
+    const dir = fakeDir("casa", [empties.slice(0, 5_000), empties.slice(5_000)]);
+
+    const pick = await collect([dir], 50);
+
+    expect(pick).toMatchObject({ files: [], overflow: "entries" });
+  });
+
+  it("leitura cancelada antes de começar não lê nada e devolve null", async () => {
+    const dir = fakeDir("fotos", [numbered(3)]);
+    const controller = new AbortController();
+    controller.abort();
+
+    expect(await collectEntries([dir], 10, controller.signal)).toBeNull();
+    expect(dir.batchesRead()).toBe(0);
+  });
+
+  it("cancelar no meio para de pedir lotes ao readEntries", async () => {
+    const controller = new AbortController();
+    const dir = fakeDir("lote", [numbered(10), numbered(10, "g"), numbered(10, "h")], () => {
+      controller.abort();
+    });
+
+    expect(await collectEntries([dir], 100, controller.signal)).toBeNull();
     expect(dir.batchesRead()).toBe(1);
   });
 
@@ -76,7 +113,7 @@ describe("collectEntries", () => {
       ],
     ]);
 
-    const pick = await collectEntries([dir], 10);
+    const pick = await collect([dir], 10);
 
     expect(pick.files.map((f) => f.name)).toEqual(["f.txt", "b2.txt", "b10.txt", "z.txt"]);
   });
@@ -86,14 +123,14 @@ describe("collectEntries", () => {
       [fakeDir("a", [numbered(3, "a")]), fakeDir("b", [numbered(3, "b")])],
     ]);
 
-    expect((await collectEntries([dir], 5)).overflow).toBe(true);
-    expect((await collectEntries([dir], 6)).files).toHaveLength(6);
+    expect((await collect([dir], 5)).overflow).toBe("files");
+    expect((await collect([dir], 6)).files).toHaveLength(6);
   });
 
   it("arquivo vazio dentro da pasta vai junto, como qualquer arquivo", async () => {
     const dir = fakeDir("docs", [[fakeFile("vazio.txt", ""), fakeFile("cheio.txt")]]);
 
-    const pick = await collectEntries([dir], 10);
+    const pick = await collect([dir], 10);
 
     expect(pick.files.map((f) => [f.name, f.size])).toEqual([
       ["cheio.txt", 1],
@@ -106,7 +143,7 @@ describe("collectEntries", () => {
       [fakeFile("ok.txt"), fakeSpecial("fifo"), fakeUnreadable("travado.bin")],
     ]);
 
-    const pick = await collectEntries([dir], 10);
+    const pick = await collect([dir], 10);
 
     expect(pick.files.map((f) => f.name)).toEqual(["ok.txt"]);
     expect(pick.skippedUnreadable).toBe(2);
@@ -125,7 +162,7 @@ describe("collectEntries", () => {
       ],
     ]);
 
-    const pick = await collectEntries([dir], 10);
+    const pick = await collect([dir], 10);
 
     expect(pick.files.map((f) => f.name)).toEqual(["x.png"]);
     expect(pick.skippedHidden).toBe(5);
@@ -133,7 +170,7 @@ describe("collectEntries", () => {
   });
 
   it("a própria pasta solta, mesmo com nome oculto, é lida", async () => {
-    const pick = await collectEntries([fakeDir(".fotos", [[fakeFile("a.png")]])], 10);
+    const pick = await collect([fakeDir(".fotos", [[fakeFile("a.png")]])], 10);
 
     expect(pick.files.map((f) => f.name)).toEqual(["a.png"]);
   });
@@ -141,13 +178,13 @@ describe("collectEntries", () => {
   it("ocultos não contam para o teto", async () => {
     const dir = fakeDir("fotos", [[fakeFile(".DS_Store"), ...numbered(3)]]);
 
-    expect((await collectEntries([dir], 3)).overflow).toBe(false);
+    expect((await collect([dir], 3)).overflow).toBeNull();
   });
 
   it("pasta que não abre fica de fora e é contada", async () => {
     const dir = fakeDir("raiz", [[fakeDir("trancada", "erro"), fakeFile("a.txt")]]);
 
-    const pick = await collectEntries([dir], 10);
+    const pick = await collect([dir], 10);
 
     expect(pick.files.map((f) => f.name)).toEqual(["a.txt"]);
     expect(pick.skippedUnreadable).toBe(1);
@@ -180,7 +217,7 @@ describe("pickFromFolderInput", () => {
   it("acima do limite não envia nada", () => {
     const files = Array.from({ length: 6 }, (_, i) => inFolder(`fotos/sub/${String(i)}.png`));
 
-    expect(pickFromFolderInput(files, 5)).toMatchObject({ files: [], overflow: true });
+    expect(pickFromFolderInput(files, 5)).toMatchObject({ files: [], overflow: "files" });
   });
 
   it("segue a ordem do caminho, com números na ordem natural", () => {

@@ -45,7 +45,7 @@ import { orderEntries, runInputs, uploadAnnouncement, type RunInputs } from "./i
 import { DeletionFailures } from "./DeletionFailures";
 import { SavePreset } from "./SavePreset";
 import { UpdatePreset } from "./UpdatePreset";
-import type { FolderPick } from "./folderFiles";
+import type { FolderPick } from "../upload/folderFiles";
 import { UploadEntryView } from "./UploadEntryView";
 import { usePasteFiles } from "./usePasteFiles";
 
@@ -174,13 +174,16 @@ export function Workbench({
     batch.add(files);
   };
 
-  const receiveFolder = (pick: FolderPick, pasted: boolean): void => {
-    const max = form.inputLimits.maxInputs;
-    if (pick.overflow) {
-      setPickNotice({ tone: "error", message: TEXT.workbench.folderTooBig(max) });
+  // `added` diz quantos arquivos entraram: "colados" ou "da pasta adicionados".
+  const receiveFolder = (pick: FolderPick, added: (count: number) => string): void => {
+    if (pick.overflow !== null) {
+      const message =
+        pick.overflow === "files"
+          ? TEXT.workbench.folderTooBig(form.inputLimits.maxInputs)
+          : TEXT.workbench.folderTooManyEntries;
+      setPickNotice({ tone: "error", message });
       return;
     }
-    const added = pasted ? TEXT.workbench.pasted : TEXT.workbench.folderAdded;
     const message = [
       pick.files.length === 0 ? TEXT.workbench.folderEmpty : added(pick.files.length),
       ...(pick.skippedHidden > 0 ? [TEXT.workbench.folderSkipped(pick.skippedHidden)] : []),
@@ -200,7 +203,10 @@ export function Workbench({
     maxFiles: form.inputLimits.maxInputs,
     onFiles: pasteFiles,
     onFolder: (pick) => {
-      receiveFolder(pick, true);
+      receiveFolder(pick, TEXT.workbench.pasted);
+    },
+    onCanceled: () => {
+      setPickNotice({ tone: "info", message: TEXT.workbench.pasteCanceled });
     },
   });
   const pickError = pickNotice?.tone === "error" ? pickNotice.message : null;
@@ -252,7 +258,7 @@ export function Workbench({
               folder={{
                 maxFiles: form.inputLimits.maxInputs,
                 onPick: (pick) => {
-                  receiveFolder(pick, false);
+                  receiveFolder(pick, TEXT.workbench.folderAdded);
                 },
               }}
               notice={pickNotice?.tone === "info" ? pickNotice.message : null}

@@ -1,6 +1,7 @@
 import { useEffect, useRef } from "react";
 
-import { collectEntries, folderEntries, type FolderPick } from "./folderFiles";
+import type { FolderPick } from "../upload/folderFiles";
+import { useFolderRead } from "../upload/useFolderRead";
 import { filesFromClipboard } from "./pastedFiles";
 
 interface PasteTargets {
@@ -9,6 +10,8 @@ interface PasteTargets {
   readonly onFiles: (files: readonly File[]) => void;
   /** Pasta colada, lida em profundidade e conferida contra `maxFiles`. */
   readonly onFolder: (pick: FolderPick) => void;
+  /** A Bancada ficou ocupada enquanto a pasta colada era lida: a colagem foi descartada. */
+  readonly onCanceled: () => void;
 }
 
 /**
@@ -17,21 +20,37 @@ interface PasteTargets {
  * Também fica de fora a colagem dentro de um diálogo aberto (a Bancada atrás dele está inerte) e a
  * colagem num campo de texto quando a área de transferência traz texto junto: quem cola ali quer o
  * texto. Uma pasta copiada no gerenciador de arquivos chega como pasta, nunca como o `File` de 0 B
- * que o navegador também põe na colagem. O listener sai junto com a Bancada, e a pasta que termina
- * de ser lida depois disso não entrega nada.
+ * que o navegador também põe na colagem. O listener sai junto com a Bancada, e a leitura da pasta
+ * é cancelada junto. Se a Bancada fica ocupada (`enabled` cai) no meio da leitura, a colagem é
+ * descartada e `onCanceled` avisa, em vez de silêncio.
  */
 export function usePasteFiles(enabled: boolean, targets: PasteTargets): void {
   const pastedCount = useRef(0);
   const latest = useRef(targets);
+  const latestEnabled = useRef(enabled);
   useEffect(() => {
     latest.current = targets;
+    latestEnabled.current = enabled;
   });
+  const folderRead = useFolderRead((pick) => {
+    // A leitura pode terminar antes de o efeito abaixo cancelá-la.
+    if (latestEnabled.current) {
+      latest.current.onFolder(pick);
+    } else {
+      latest.current.onCanceled();
+    }
+  });
+
+  useEffect(() => {
+    if (!enabled && folderRead.cancel()) {
+      latest.current.onCanceled();
+    }
+  }, [enabled, folderRead]);
 
   useEffect(() => {
     if (!enabled) {
       return;
     }
-    let active = true;
     const onPaste = (event: ClipboardEvent): void => {
       const data = event.clipboardData;
       if (data === null || !Array.from(data.types).includes("Files")) {
@@ -40,15 +59,8 @@ export function usePasteFiles(enabled: boolean, targets: PasteTargets): void {
       if (insideOpenDialog(event.target) || (editable(event.target) && carriesText(data))) {
         return;
       }
-      // Os itens só valem durante o evento: as entradas saem daqui antes de qualquer espera.
-      const roots = folderEntries(data.items);
-      if (roots !== null) {
+      if (folderRead.start(data.items, latest.current.maxFiles)) {
         event.preventDefault();
-        void collectEntries(roots, latest.current.maxFiles).then((pick) => {
-          if (active) {
-            latest.current.onFolder(pick);
-          }
-        });
         return;
       }
       const files = filesFromClipboard(data, () => ++pastedCount.current);
@@ -60,10 +72,9 @@ export function usePasteFiles(enabled: boolean, targets: PasteTargets): void {
     };
     document.addEventListener("paste", onPaste);
     return () => {
-      active = false;
       document.removeEventListener("paste", onPaste);
     };
-  }, [enabled]);
+  }, [enabled, folderRead]);
 }
 
 function insideOpenDialog(target: EventTarget | null): boolean {

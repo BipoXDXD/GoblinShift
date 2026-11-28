@@ -4,7 +4,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { axeViolations } from "../../test/axe";
 import { fakeDir, fakeFile, fakeItem } from "../../test/fakeEntries";
-import type { FolderPick } from "../../workbench/folderFiles";
+import type { FolderPick } from "../../upload/folderFiles";
 import { FileDropzone } from "./FileDropzone";
 
 const csv = (name: string) => new File(["a,b\n1,2\n"], name, { type: "text/csv" });
@@ -221,32 +221,11 @@ describe("FileDropzone", () => {
 
       const pick = onPick.mock.calls[0]?.[0];
       expect(pick?.files.map((file) => file.name)).toEqual(["a.csv"]);
-      expect(pick).toMatchObject({ skippedHidden: 1, skippedUnreadable: 0, overflow: false });
-    });
-
-    it("soltar uma pasta não envia o item da pasta", async () => {
-      const { container, onPick, onFiles } = renderWithFolder();
-      const dir = fakeDir("fotos", [[fakeFile("a.png"), fakeFile("b.png")]]);
-
-      fireEvent.drop(dropArea(container), {
-        dataTransfer: {
-          files: [new File([], "fotos")],
-          items: [fakeItem(dir)],
-          types: ["Files"],
-        },
-      });
-
-      await vi.waitFor(() => {
-        expect(onPick).toHaveBeenCalledOnce();
-      });
-      const pick = onPick.mock.calls[0]?.[0];
-      expect(pick?.files.map((file) => file.name)).toEqual(["a.png", "b.png"]);
-      expect(pick?.overflow).toBe(false);
-      expect(onFiles).not.toHaveBeenCalled();
+      expect(pick).toMatchObject({ skippedHidden: 1, skippedUnreadable: 0, overflow: null });
     });
 
     it("soltar uma pasta acima do teto entrega o estouro, sem arquivos", async () => {
-      const { container, onPick } = renderWithFolder();
+      const { container, onPick, onFiles } = renderWithFolder();
       const many = Array.from({ length: 6 }, (_, i) => fakeFile(`${String(i)}.csv`));
 
       fireEvent.drop(dropArea(container), {
@@ -254,8 +233,11 @@ describe("FileDropzone", () => {
       });
 
       await vi.waitFor(() => {
-        expect(onPick).toHaveBeenCalledWith(expect.objectContaining({ files: [], overflow: true }));
+        expect(onPick).toHaveBeenCalledWith(
+          expect.objectContaining({ files: [], overflow: "files" }),
+        );
       });
+      expect(onFiles).not.toHaveBeenCalled();
     });
 
     it("pasta que termina de ser lida depois de o poço sair não entrega nada", async () => {
@@ -272,6 +254,21 @@ describe("FileDropzone", () => {
       await new Promise((resolve) => setTimeout(resolve, 0));
 
       expect(onPick).not.toHaveBeenCalled();
+    });
+
+    it("com erro no campo, o input de pasta também fica inválido", () => {
+      render(
+        <FileDropzone
+          id="arquivos"
+          label="Arquivos"
+          chosenCount={0}
+          error="Escolha um arquivo."
+          onFiles={vi.fn()}
+          folder={{ maxFiles: 5, onPick: vi.fn() }}
+        />,
+      );
+
+      expect(screen.getByLabelText("Escolher pasta")).toHaveAttribute("aria-invalid", "true");
     });
 
     it("não tem violações do axe com os dois botões", async () => {

@@ -15,7 +15,14 @@ import {
   uploadIdFor,
   uploadIntentsHandler,
 } from "../test/fakeApi";
-import { fakeDir, fakeFile, fakeItem, fakeSpecial, type FakeEntry } from "../test/fakeEntries";
+import {
+  fakeDir,
+  fakeFile,
+  fakeHeldDir,
+  fakeItem,
+  fakeSpecial,
+  type FakeEntry,
+} from "../test/fakeEntries";
 import { fakeUploader } from "../test/fakeUploader";
 import { expectHeadingFocused } from "../test/focus";
 import { renderRoutes } from "../test/renderRoutes";
@@ -1143,7 +1150,7 @@ describe("Bancada: pasta inteira", () => {
     Reflect.deleteProperty(HTMLInputElement.prototype, "webkitdirectory");
   });
 
-  it("colarPastaComMaisArquivosQueOTetoAvisaSemEnviar", async () => {
+  it("colar uma pasta com mais arquivos que o teto avisa sem enviar nenhum", async () => {
     const { api } = await setup();
     const six = ["1", "2", "3", "4", "5", "6"].map((n) => fakeFile(`${n}.csv`));
 
@@ -1153,7 +1160,7 @@ describe("Bancada: pasta inteira", () => {
 
     expect(notPrevented).toBe(false);
     const message =
-      "A pasta tem mais de 5 arquivos; esta receita aceita até 5 por execução. Nada foi enviado: escolha uma pasta menor ou os arquivos um a um.";
+      "A pasta tem mais de 5 arquivos; esta receita aceita até 5 por execução. Escolha uma pasta menor ou os arquivos um a um.";
     await waitFor(() => {
       expect(statusWith(message)).toBe(true);
     });
@@ -1200,7 +1207,7 @@ describe("Bancada: pasta inteira", () => {
     expect(screen.getByRole("list", { name: "Ordem de processamento" })).toHaveTextContent(
       /a\.csv.*b\.csv.*vazio\.csv/,
     );
-    const notice = "3 arquivos colados. 1 item oculto ou de sistema ficou de fora.";
+    const notice = "3 arquivos colados. 1 arquivo(s) oculto(s) ou de sistema ficaram de fora.";
     expect(statusWith(notice)).toBe(true);
     expect(screen.getByText(notice)).toBeVisible();
   });
@@ -1225,7 +1232,7 @@ describe("Bancada: pasta inteira", () => {
     await waitFor(() => {
       expect(screen.getByLabelText("Escolher arquivos")).toHaveAccessibleDescription(
         expect.stringContaining(
-          "A pasta não tem arquivos para enviar. 1 item oculto ou de sistema ficou de fora.",
+          "A pasta não tem arquivos para enviar. 1 arquivo(s) oculto(s) ou de sistema ficaram de fora.",
         ),
       );
     });
@@ -1241,6 +1248,44 @@ describe("Bancada: pasta inteira", () => {
     unmount();
     await new Promise((resolve) => setTimeout(resolve, 50));
 
+    expect(uploadIntents(api.requests)).toHaveLength(0);
+  });
+
+  it("pasta colada com a Bancada ficando ocupada no meio da leitura é descartada com aviso", async () => {
+    const { user, api } = await setup();
+    await chooseFiles(user, ["a.csv"]);
+    await waitUntilSent(1);
+    const held = fakeHeldDir("raiz", [fakeFile("b.csv")]);
+
+    fireEvent.paste(document, { clipboardData: clipboardWithFolder(held.entry) });
+    await user.click(screen.getByRole("button", { name: "Remover a.csv" }));
+    await act(async () => {
+      held.release();
+      await new Promise((resolve) => setTimeout(resolve, 0));
+    });
+
+    await waitFor(() => {
+      expect(statusWith("Colagem cancelada: a Bancada está ocupada.")).toBe(true);
+    });
+    expect(uploadIntents(api.requests)).toHaveLength(1);
+    expect(screen.queryByText("b.csv")).not.toBeInTheDocument();
+  });
+
+  it("pasta com entradas demais para ler diz isso, sem falar em arquivos", async () => {
+    const { api } = await setup();
+    const empties = Array.from({ length: 10_001 }, (_, i) => fakeDir(`d${String(i)}`, []));
+
+    fireEvent.paste(document, {
+      clipboardData: clipboardWithFolder(fakeDir("casa", [empties])),
+    });
+
+    await waitFor(() => {
+      expect(screen.getByLabelText("Escolher arquivos")).toHaveAccessibleDescription(
+        expect.stringContaining(
+          "A pasta tem pastas e itens demais para ler de uma vez. Escolha uma pasta menor ou os arquivos um a um.",
+        ),
+      );
+    });
     expect(uploadIntents(api.requests)).toHaveLength(0);
   });
 

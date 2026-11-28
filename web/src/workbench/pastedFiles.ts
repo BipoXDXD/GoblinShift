@@ -12,10 +12,7 @@ interface ClipboardFiles {
  * para duas colagens não aparecerem na lista com o mesmo nome. `nextIndex` dá o `n` e não volta
  * a 1 dentro da sessão da Bancada.
  */
-export function filesFromClipboard(data: ClipboardFiles | null, nextIndex: () => number): File[] {
-  if (data === null) {
-    return [];
-  }
+export function filesFromClipboard(data: ClipboardFiles, nextIndex: () => number): File[] {
   return Array.from(data.files, (file) => {
     const generic = GENERIC_IMAGE_NAME.exec(file.name);
     if (generic === null) {

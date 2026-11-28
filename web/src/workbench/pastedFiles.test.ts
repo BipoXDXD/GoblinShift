@@ -37,8 +37,10 @@ describe("filesFromClipboard", () => {
     ]);
   });
 
-  it("área de transferência ausente ou sem arquivos devolve nada", () => {
-    expect(filesFromClipboard(null, () => 1)).toEqual([]);
-    expect(filesFromClipboard(clipboardWith(), () => 1)).toEqual([]);
+  it.each([
+    ["lista vazia", clipboardWith()],
+    ["FileList vazio", { files: { length: 0 } }],
+  ])("área de transferência sem arquivos (%s) devolve nada", (_case, data) => {
+    expect(filesFromClipboard(data, () => 1)).toEqual([]);
   });
 });

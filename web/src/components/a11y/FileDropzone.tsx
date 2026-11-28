@@ -10,12 +10,11 @@ import {
 
 import { TEXT } from "../../text";
 import {
-  collectEntries,
-  folderEntries,
   pickFromFolderInput,
   supportsFolderPicker,
   type FolderPick,
-} from "../../workbench/folderFiles";
+} from "../../upload/folderFiles";
+import { useFolderRead } from "../../upload/useFolderRead";
 import { buttonClassName } from "../ui/Button";
 import { FieldError } from "./Field";
 import { LiveRegion } from "./LiveRegion";
@@ -63,24 +62,17 @@ export function FileDropzone({
 }: FileDropzoneProps): ReactElement {
   const [dragging, setDragging] = useState(false);
   const [folderPicker] = useState(supportsFolderPicker);
+  const showFolderPicker = folder !== undefined && folderPicker;
   const folderInput = useRef<HTMLInputElement>(null);
-  const mounted = useRef(true);
-  const latestFolder = useRef(folder);
-  useEffect(() => {
-    latestFolder.current = folder;
+  const folderRead = useFolderRead((pick) => {
+    folder?.onPick(pick);
   });
-  useEffect(() => {
-    mounted.current = true;
-    return () => {
-      mounted.current = false;
-    };
-  }, []);
   // O React não conhece o atributo `webkitdirectory`; a propriedade do DOM é a mesma coisa.
   useEffect(() => {
-    if (folderInput.current !== null) {
+    if (showFolderPicker && folderInput.current !== null) {
       folderInput.current.webkitdirectory = true;
     }
-  });
+  }, [showFolderPicker]);
   const descriptionId = description === undefined ? null : `${id}-descricao`;
   const errorId = error === undefined || error === null || error === "" ? null : `${id}-erro`;
   const statusId = `${id}-estado`;
@@ -115,15 +107,7 @@ export function FileDropzone({
   const onDrop = (event: DragEvent<HTMLDivElement>): void => {
     event.preventDefault();
     setDragging(false);
-    // Os itens só valem durante o evento: as entradas saem daqui antes de qualquer espera.
-    const roots = folder === undefined ? null : folderEntries(event.dataTransfer.items);
-    if (folder !== undefined && roots !== null) {
-      void collectEntries(roots, folder.maxFiles).then((pick) => {
-        // O poço pode ter saído enquanto a pasta era lida: nada de envio de uma tela que já fechou.
-        if (mounted.current) {
-          latestFolder.current?.onPick(pick);
-        }
-      });
+    if (folder !== undefined && folderRead.start(event.dataTransfer.items, folder.maxFiles)) {
       return;
     }
     const files = Array.from(event.dataTransfer.files);
@@ -166,7 +150,7 @@ export function FileDropzone({
             onChange={onChange}
           />
         </label>
-        {folder !== undefined && folderPicker && (
+        {showFolderPicker && (
           <label className={`file-picker relative ${buttonClassName({ variant: "secondary" })}`}>
             <FolderOpen aria-hidden="true" className="size-4" />
             {TEXT.workbench.chooseFolder}
@@ -177,6 +161,7 @@ export function FileDropzone({
               multiple
               className="sr-only"
               aria-describedby={describedBy.join(" ")}
+              {...(errorId === null ? {} : { "aria-invalid": true })}
               onChange={onFolderChange}
             />
           </label>

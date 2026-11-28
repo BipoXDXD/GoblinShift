@@ -200,12 +200,13 @@ export const TEXT = {
         ? "1 arquivo da pasta adicionado."
         : `${String(count)} arquivos da pasta adicionados.`,
     folderTooBig: (max: number) =>
-      `A pasta tem mais de ${String(max)} arquivos; esta receita aceita até ${String(max)} por execução. Nada foi enviado: escolha uma pasta menor ou os arquivos um a um.`,
+      `A pasta tem mais de ${String(max)} arquivos; esta receita aceita até ${String(max)} por execução. Escolha uma pasta menor ou os arquivos um a um.`,
+    folderTooManyEntries:
+      "A pasta tem pastas e itens demais para ler de uma vez. Escolha uma pasta menor ou os arquivos um a um.",
+    pasteCanceled: "Colagem cancelada: a Bancada está ocupada.",
     folderEmpty: "A pasta não tem arquivos para enviar.",
     folderSkipped: (count: number) =>
-      count === 1
-        ? "1 item oculto ou de sistema ficou de fora."
-        : `${String(count)} itens ocultos ou de sistema ficaram de fora.`,
+      `${String(count)} arquivo(s) oculto(s) ou de sistema ficaram de fora.`,
     folderUnreadable: (count: number) =>
       count === 1
         ? "1 item não pôde ser lido e ficou de fora."

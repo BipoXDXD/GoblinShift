@@ -55,10 +55,14 @@ export function fakeSpecial(name: string): FakeEntryBase {
   return { name, isFile: false, isDirectory: false };
 }
 
-/** Pasta com os lotes do `readEntries`; `"erro"` faz a leitura falhar. */
+/**
+ * Pasta com os lotes do `readEntries`; `"erro"` faz a leitura falhar. `onBatch` roda depois de cada
+ * lote com entradas, antes de entregá-lo (para cancelar no meio).
+ */
 export function fakeDir(
   name: string,
   batches: readonly FakeEntry[][] | "erro",
+  onBatch?: () => void,
 ): FakeDirectoryEntry {
   let read = 0;
   return {
@@ -78,12 +82,45 @@ export function fakeDir(
           next += 1;
           if (batch.length > 0) {
             read += 1;
+            onBatch?.();
           }
           success(batch);
         },
       };
     },
   };
+}
+
+/**
+ * Pasta cujo primeiro `readEntries` só responde em `release()`: a leitura fica em curso enquanto o
+ * teste muda a tela.
+ */
+export function fakeHeldDir(
+  name: string,
+  files: readonly FakeEntry[],
+): { readonly entry: FakeDirectoryEntry; readonly release: () => void } {
+  let pending: ((entries: FakeEntry[]) => void) | null = null;
+  let delivered = false;
+  const entry: FakeDirectoryEntry = {
+    name,
+    isFile: false,
+    isDirectory: true,
+    batchesRead: () => (delivered ? 1 : 0),
+    createReader: () => ({
+      readEntries: (success) => {
+        if (delivered) {
+          success([]);
+          return;
+        }
+        pending = success;
+      },
+    }),
+  };
+  const release = (): void => {
+    delivered = true;
+    pending?.([...files]);
+  };
+  return { entry, release };
 }
 
 /** `count` arquivos `<prefixo><n>.txt`. */
