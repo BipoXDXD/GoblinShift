@@ -32,8 +32,12 @@ describe("parsePageRanges", () => {
   it.each([
     ["", T.empty],
     ["   ", T.empty],
-    ["1,,3", T.invalidPart("")],
-    ["1,", T.invalidPart("")],
+    ["1,,3", T.emptyPart],
+    ["1,", T.emptyPart],
+    ["1-3,", T.emptyPart],
+    // Mais de 6 dígitos não é página: a mensagem repete o texto, nunca 1e+20.
+    ["1234567", T.invalidPart("1234567")],
+    ["1-100000000000000000000", T.invalidPart("1-100000000000000000000")],
     ["-3", T.invalidPart("-3")],
     ["a", T.invalidPart("a")],
     ["n", T.invalidPart("n")],

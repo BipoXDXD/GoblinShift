@@ -297,7 +297,7 @@ describe("pageMapPreview", () => {
 
   it("merge girado diz o ângulo", () => {
     expect(pageMapPreview(values({ rotation: 90 }), [A], 200)).toEqual([
-      { name: "merged.pdf", entries: ["a.pdf, todas as páginas, girada 90°"] },
+      { name: "merged.pdf", entries: ["a.pdf, todas as páginas, giradas 90°"] },
     ]);
   });
 
@@ -330,9 +330,20 @@ describe("pageMapPreview", () => {
         name: "selection.pdf",
         entries: [
           "b.pdf, página 3",
-          "a.pdf, páginas 1 a 3, girada 270°",
-          "a.pdf, da página 10 até o fim, girada 270°",
+          "a.pdf, páginas 1 a 3, giradas 270°",
+          "a.pdf, da página 10 até o fim, giradas 270°",
         ],
+      },
+    ]);
+  });
+
+  it("página avulsa girada fica no singular; intervalo, no plural", () => {
+    const cards = [card(A, "7, 7-8", 90)];
+
+    expect(pageMapPreview(values({ operation: "select", cards }), [A], 200)).toEqual([
+      {
+        name: "selection.pdf",
+        entries: ["a.pdf, página 7, girada 90°", "a.pdf, páginas 7 a 8, giradas 90°"],
       },
     ]);
   });

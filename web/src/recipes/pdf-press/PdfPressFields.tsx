@@ -1,7 +1,7 @@
 import { useEffect, useId, useRef, useState, type ReactElement } from "react";
 
 import { Field, type FieldControlProps } from "../../components/a11y/Field";
-import { FieldGroup } from "../../components/a11y/FieldGroup";
+import { FieldGroup, fieldGroupDescriptionId } from "../../components/a11y/FieldGroup";
 import { moveItem, ReorderableList } from "../../components/a11y/ReorderableList";
 import { Button } from "../../components/ui/Button";
 import { TEXT } from "../../text";
@@ -22,6 +22,7 @@ import {
 } from "./schema";
 
 const T = TEXT.pdfPress;
+const SELECT_GROUP_ID = "pdf-press-select";
 
 /**
  * Formulário do PDF Press v2, escrito à mão (2.2; ADR 070). A seleção é uma lista de cartões
@@ -228,7 +229,7 @@ function PageCards({
 
   return (
     <FieldGroup
-      id="pdf-press-select"
+      id={SELECT_GROUP_ID}
       legend={T.select}
       description={T.selectHint(maxOutputPages)}
       error={errorOf(addCardButtonId())}
@@ -268,6 +269,8 @@ function PageCards({
           type="button"
           variant="secondary"
           aria-disabled={full}
+          // Cheio, a dica do grupo diz por que o botão não adiciona mais (o teto de páginas).
+          {...(full ? { "aria-describedby": fieldGroupDescriptionId(SELECT_GROUP_ID) } : {})}
           onClick={() => {
             if (!full) {
               const card: PageCard = {

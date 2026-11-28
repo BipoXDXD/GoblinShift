@@ -186,9 +186,9 @@ describe("PdfPressFields", () => {
       "180°",
     );
 
-    expect(within(preview()).getByText("a.pdf, páginas 1 a 3, girada 180°")).toBeInTheDocument();
+    expect(within(preview()).getByText("a.pdf, páginas 1 a 3, giradas 180°")).toBeInTheDocument();
     expect(
-      within(preview()).getByText("a.pdf, da página 10 até o fim, girada 180°"),
+      within(preview()).getByText("a.pdf, da página 10 até o fim, giradas 180°"),
     ).toBeInTheDocument();
   });
 
@@ -241,6 +241,17 @@ describe("PdfPressFields", () => {
 
     expect(addCard()).toHaveAttribute("aria-disabled", "true");
     expect(screen.getAllByRole("textbox")).toHaveLength(2);
+  });
+
+  it("cheio, o botão de adicionar é descrito pela dica do grupo, que diz o motivo", async () => {
+    const { user } = setup();
+    await user.selectOptions(operation(), "select");
+    expect(addCard()).not.toHaveAttribute("aria-describedby");
+    await user.click(addCard());
+    await user.click(addCard());
+
+    expect(addCard()).toHaveAttribute("aria-disabled", "true");
+    expect(addCard()).toHaveAccessibleDescription(/^Cada cartão escolhe páginas de um PDF/);
   });
 
   it("um PDF que sai da lista invalida o cartão que o citava", async () => {

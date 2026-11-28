@@ -100,35 +100,33 @@ function parametersSchema(
     pages: pagesUpTo(maxPages),
     rotation,
   });
-  const common = { compression: z.enum(COMPRESSIONS), strip_metadata: z.boolean() };
+  const commonShape = { compression: z.enum(COMPRESSIONS), strip_metadata: z.boolean() };
   // Só o split leva pages_per_document, só merge e split levam a rotação global e só o select
   // leva a lista: a API recusa o resto (ADR 035 e 070).
   return z.discriminatedUnion("operation", [
-    z.object({ operation: z.literal("merge"), rotation, ...common }).transform((parsed) => ({
+    z.object({ operation: z.literal("merge"), rotation, ...commonShape }).transform((parsed) => ({
       operation: "merge" as const,
       rotation: parsed.rotation,
-      compression: parsed.compression,
-      strip_metadata: parsed.strip_metadata,
+      ...common(parsed),
     })),
     z
       .object({
         operation: z.literal("split"),
         pages_per_document: integerUpTo(maxPages),
         rotation,
-        ...common,
+        ...commonShape,
       })
       .transform((parsed) => ({
         operation: "split" as const,
         pages_per_document: parsed.pages_per_document,
         rotation: parsed.rotation,
-        compression: parsed.compression,
-        strip_metadata: parsed.strip_metadata,
+        ...common(parsed),
       })),
     z
       .object({
         operation: z.literal("select"),
         cards: z.array(card).min(1, { error: ERRORS.noPages }),
-        ...common,
+        ...commonShape,
       })
       .transform((parsed) => ({
         operation: "select" as const,
@@ -141,8 +139,7 @@ function parametersSchema(
             rotation: chosen.rotation,
           })),
         ),
-        compression: parsed.compression,
-        strip_metadata: parsed.strip_metadata,
+        ...common(parsed),
       }))
       .superRefine(({ select }, context) => {
         if (select.length > maxRanges) {
@@ -271,7 +268,7 @@ export function pageMapPreview(
   inputs: readonly RecipeInput[],
   maxPage: number,
 ): readonly PreviewDocument[] {
-  const turned = PREVIEW.rotated(values.rotation);
+  const turned = PREVIEW.rotatedMany(values.rotation);
   switch (values.operation) {
     case "merge":
       return inputs.length === 0
@@ -302,12 +299,17 @@ export function pageMapPreview(
 
 // A prévia roda antes da validação: intervalos que ainda não leem aparecem como foram digitados.
 function cardEntries(name: string, card: PageCard, maxPage: number): readonly string[] {
-  const turned = PREVIEW.rotated(card.rotation);
   const parsed = parsePageRanges(card.pages, maxPage);
   if (!parsed.ok) {
-    return [PREVIEW.page(name, card.pages.trim()) + turned];
+    return [PREVIEW.page(name, card.pages.trim()) + PREVIEW.rotated(card.rotation)];
   }
-  return parsed.ranges.map((range) => rangeEntry(name, range) + turned);
+  return parsed.ranges.map(
+    (range) =>
+      rangeEntry(name, range) +
+      (range.first === range.last
+        ? PREVIEW.rotated(card.rotation)
+        : PREVIEW.rotatedMany(card.rotation)),
+  );
 }
 
 function rangeEntry(name: string, { first, last }: PageRangeText): string {
@@ -320,4 +322,14 @@ function rangeEntry(name: string, { first, last }: PageRangeText): string {
 // Só os dígitos viram número; o resto aparece como foi digitado.
 function withoutLeadingZeros(size: string): string {
   return /^\d+$/.test(size) ? String(Number(size)) : size;
+}
+
+interface CommonParameters {
+  readonly compression: Compression;
+  readonly strip_metadata: boolean;
+}
+
+/** As opções que as três operações enviam igual. */
+function common(parsed: CommonParameters): CommonParameters {
+  return { compression: parsed.compression, strip_metadata: parsed.strip_metadata };
 }

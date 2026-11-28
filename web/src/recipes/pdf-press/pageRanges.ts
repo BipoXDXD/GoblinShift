@@ -14,8 +14,9 @@ export type PageRangesResult =
   | { readonly ok: false; readonly message: string };
 
 const T = TEXT.pdfPress.ranges;
-// `N`, `N-M` ou `N-`; a meia-risca vira hífen antes, porque teclados e corretores a trocam.
-const PART = /^(\d+)(?:\s*(-)\s*(\d+)?)?$/;
+// `N`, `N-M` ou `N-`; a meia-risca vira hífen antes, porque teclados e corretores a trocam. Até
+// 6 dígitos: o que passa disso não é página, e a mensagem nunca mostra um número como 1e+20.
+const PART = /^(\d{1,6})(?:\s*(-)\s*(\d{1,6})?)?$/;
 
 /** Lê o texto do campo, na ordem e com repetições, ou devolve a mensagem da primeira parte ruim. */
 export function parsePageRanges(text: string, maxPage: number): PageRangesResult {
@@ -35,6 +36,9 @@ export function parsePageRanges(text: string, maxPage: number): PageRangesResult
 }
 
 function parsePart(part: string, maxPage: number): PageRangeText | string {
+  if (part === "") {
+    return T.emptyPart;
+  }
   const match = PART.exec(part.replaceAll("–", "-"));
   if (match === null) {
     return T.invalidPart(part);

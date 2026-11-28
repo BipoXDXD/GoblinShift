@@ -424,7 +424,7 @@ describe("Execução: detalhe por arquivo", () => {
 
       expect(definitions(group)).toEqual([
         ["Páginas", "3 → para 3"],
-        ["Tamanho: sem compressão → com compressão", "5 MiB → para 819,2 KiB"],
+        ["Tamanho, sem e com compressão", "5 MiB → para 819,2 KiB"],
       ]);
     });
 

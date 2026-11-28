@@ -23,7 +23,7 @@ export function FieldGroup({
   error,
   children,
 }: FieldGroupProps): ReactElement {
-  const descriptionId = description === undefined ? null : `${id}-descricao`;
+  const descriptionId = description === undefined ? null : fieldGroupDescriptionId(id);
   const errorId = error === undefined || error === null || error === "" ? null : `${id}-erro`;
   const describedBy = [descriptionId, errorId].filter((value) => value !== null).join(" ");
   return (
@@ -41,4 +41,9 @@ export function FieldGroup({
       {children}
     </fieldset>
   );
+}
+
+/** Id do parágrafo de descrição do grupo `id`, para um controle de dentro citar o motivo dele. */
+export function fieldGroupDescriptionId(id: string): string {
+  return `${id}-descricao`;
 }

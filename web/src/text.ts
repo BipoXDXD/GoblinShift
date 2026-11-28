@@ -373,7 +373,7 @@ export const TEXT = {
         dimensions: "Dimensões",
         format: "Formato",
         size: "Tamanho",
-        pdfSize: "Tamanho: sem compressão → com compressão",
+        pdfSize: "Tamanho, sem e com compressão",
         records: "Registros",
         pages: "Páginas",
         audio: "Áudio",
@@ -684,7 +684,9 @@ export const TEXT = {
       range: (name: string, first: number, last: number) =>
         `${name}, páginas ${String(first)} a ${String(last)}`,
       toEnd: (name: string, first: number) => `${name}, da página ${String(first)} até o fim`,
+      // Uma página (prévia do resultado ou página avulsa) e várias ou todas (intervalos, merge, split).
       rotated: (angle: number) => (angle === 0 ? "" : `, girada ${String(angle)}°`),
+      rotatedMany: (angle: number) => (angle === 0 ? "" : `, giradas ${String(angle)}°`),
       noFile: "PDF não escolhido",
     },
     errors: {
@@ -699,6 +701,7 @@ export const TEXT = {
       empty: "Informe as páginas, como 1-3, 7, 10-.",
       invalidPart: (part: string) =>
         `“${part}” não é uma página nem um intervalo. Use 7, 1-3 ou 10-.`,
+      emptyPart: "Há uma vírgula sem página depois dela.",
       startsAtOne: "As páginas começam em 1.",
       beyondLimit: (page: number, max: number) =>
         `A página ${String(page)} passa do limite de ${String(max)}.`,
