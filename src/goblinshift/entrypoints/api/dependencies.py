@@ -36,6 +36,7 @@ from goblinshift.files.storage import FileStorage
 from goblinshift.identity import (
     RECENT_AUTH_WINDOW,
     REQUESTS_PER_MINUTE,
+    AuditActor,
     AuditEventType,
     AuditOutcome,
     Principal,
@@ -370,6 +371,7 @@ def _audit_failure(
             ip=client_ip(request),
             outcome=AuditOutcome.FAILURE,
             now=now,
+            actor=AuditActor.USER,
         )
 
 

@@ -42,6 +42,7 @@ from goblinshift.entrypoints.api.cookies import SESSION_COOKIE, set_session_cook
 from goblinshift.entrypoints.api.dependencies import Now
 from goblinshift.entrypoints.api.problems import ApiProblem, ProblemCode, request_id_of
 from goblinshift.identity import (
+    AuditActor,
     AuditEventType,
     AuditOutcome,
     ExternalIdentity,
@@ -328,6 +329,7 @@ def _record(
         ip=attempt.ip,
         outcome=outcome,
         now=attempt.now,
+        actor=AuditActor.USER,
         request_id=attempt.request_id,
     )
 

@@ -9,7 +9,7 @@ import pytest
 from sqlalchemy import Table, func, insert, select, update
 from sqlalchemy.orm import Session, sessionmaker
 
-from goblinshift.identity import AuditEventType, AuditOutcome, record_audit_event
+from goblinshift.identity import AuditActor, AuditEventType, AuditOutcome, record_audit_event
 from goblinshift.identity.accounts import KEY_RETENTION, request_account_deletion
 from goblinshift.identity.purge import (
     AUDIT_RETENTION,
@@ -95,6 +95,7 @@ def test_auditoria_sobrevive_a_purga_sem_identificar(factory: sessionmaker[Sessi
             ip="203.0.113.77",
             outcome=AuditOutcome.SUCCESS,
             now=NOW,
+            actor=AuditActor.USER,
         )
     request_deletion(factory, user_id)
 
@@ -107,7 +108,8 @@ def test_auditoria_sobrevive_a_purga_sem_identificar(factory: sessionmaker[Sessi
     assert str(event.ip_prefix) == "203.0.113.0/24"
     # O evento não guarda nome nem identidade externa: sem `app_user`, o UUID não leva a ninguém.
     # O `request_id` é aleatório por requisição e também não identifica ninguém; `details` só
-    # guarda números de limites (migração 0016).
+    # guarda números de limites (migração 0016); `actor` só diz titular, administrador ou sistema
+    # (migração 0032).
     assert set(event._mapping) == {
         "id",
         "user_id",
@@ -117,6 +119,7 @@ def test_auditoria_sobrevive_a_purga_sem_identificar(factory: sessionmaker[Sessi
         "occurred_at",
         "request_id",
         "details",
+        "actor",
     }
 
 
@@ -351,6 +354,7 @@ def test_auditoria_sai_depois_de_90_dias(factory: sessionmaker[Session]) -> None
                 ip=None,
                 outcome=AuditOutcome.SUCCESS,
                 now=occurred_at,
+                actor=AuditActor.USER,
             )
 
     with unit_of_work(factory) as session:

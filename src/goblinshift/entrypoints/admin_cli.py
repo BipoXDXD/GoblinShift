@@ -76,6 +76,7 @@ from goblinshift.files.storage import FileStorage
 from goblinshift.identity import (
     DEFAULT_KEY_DAYS,
     MAX_KEY_DAYS,
+    AuditActor,
     AuditEventType,
     AuditOutcome,
     InvalidDisplayNameError,
@@ -552,7 +553,13 @@ def _listing_line(account: AccountListing) -> str:
 def _audit(session: Session, event: AuditEventType, user_id: UUID, now: datetime) -> None:
     # Ação do administrador no servidor: não há IP de cliente a registrar.
     record_audit_event(
-        session, event=event, user_id=user_id, ip=None, outcome=AuditOutcome.SUCCESS, now=now
+        session,
+        event=event,
+        user_id=user_id,
+        ip=None,
+        outcome=AuditOutcome.SUCCESS,
+        now=now,
+        actor=AuditActor.ADMIN,
     )
 
 

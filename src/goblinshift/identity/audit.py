@@ -2,8 +2,13 @@
 
 Registra login e falha de login, logout e `logout-all`, emissão e revogação de chave,
 `REAUTH_REQUIRED`, `CSRF_FAILED`, negações de autorização, exclusão e bloqueio de conta, aceite
-dos termos e mudança de limites pelo administrador (`gs-admin set-limits`). Nunca nomes de
-arquivo, conteúdo, tokens ou o IP inteiro: o IP é truncado (/24 em IPv4, /48 em IPv6).
+dos termos e, pelo administrador (`gs-admin`), criação, busca pelo `user.hash`, liberação da conta
+pendente e mudança de limites. Nunca nomes de arquivo, conteúdo, tokens ou o IP inteiro: o IP é
+truncado (/24 em IPv4, /48 em IPv6).
+
+Todo evento diz quem agiu (`AuditActor`): o titular, pela API ou pelo login; o administrador,
+pelo `gs-admin`, sem IP; ou o sistema. Os eventos anteriores à migração 0032 ficam com `actor`
+nulo.
 
 Só eventos de quem tem credencial válida (mais o login, já limitado por IP no Nginx) são
 auditados: um atacante sem credencial cai no 401, e não consegue inundar a tabela.
@@ -26,7 +31,7 @@ IPV6_PREFIX = 48
 
 
 class AuditEventType(StrEnum):
-    """Tipos aceitos pelo CHECK `audit_event_event_type_check` (migrações 0006, 0008 e 0016)."""
+    """Tipos aceitos pelo CHECK `audit_event_event_type_check` (0006, 0008, 0016 e 0032)."""
 
     LOGIN_SUCCEEDED = "LOGIN_SUCCEEDED"
     LOGIN_FAILED = "LOGIN_FAILED"
@@ -43,6 +48,22 @@ class AuditEventType(StrEnum):
     TERMS_ACCEPTED = "TERMS_ACCEPTED"
     # O único com `details` (CHECK `audit_event_details_check`): ver `LimitChange`.
     ACCOUNT_LIMITS_CHANGED = "ACCOUNT_LIMITS_CHANGED"
+    # Do `gs-admin` (0032): `create-user`, `find-user` (reidentifica o `user.hash`) e `approve`.
+    ACCOUNT_CREATED = "ACCOUNT_CREATED"
+    ACCOUNT_LOOKED_UP = "ACCOUNT_LOOKED_UP"
+    ACCOUNT_APPROVED = "ACCOUNT_APPROVED"
+
+
+class AuditActor(StrEnum):
+    """Quem agiu, aceito pelo CHECK `audit_event_actor_check` (migração 0032).
+
+    Sem ele, o pedido de exclusão do `gs-admin` e o do titular só se distinguiam pelo IP nulo, que
+    a API também grava quando falta `request.client`.
+    """
+
+    USER = "user"
+    ADMIN = "admin"
+    SYSTEM = "system"
 
 
 class AuditOutcome(StrEnum):
@@ -79,10 +100,13 @@ def record(
     ip: str | None,
     outcome: AuditOutcome,
     now: datetime,
+    actor: AuditActor,
     request_id: UUID | None = None,
     details: Mapping[str, object] | None = None,
 ) -> None:
     """Grava o evento na transação de quem chama.
+
+    `actor` é obrigatório: quem chama sabe se age pelo titular ou pelo administrador.
 
     `details` só no tipo que o exige (`ACCOUNT_LIMITS_CHANGED`); o CHECK do banco recusa o resto.
 
@@ -99,6 +123,7 @@ def record(
             outcome=outcome.value,
             ip_prefix=truncate_ip(ip),
             occurred_at=now,
+            actor=actor.value,
             request_id=request_id,
             # `null()` e não `None`: no JSONB, `None` grava o JSON `null`, que não é NULL de SQL.
             details=null() if details is None else details,

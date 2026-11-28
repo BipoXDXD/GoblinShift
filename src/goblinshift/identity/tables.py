@@ -140,15 +140,18 @@ audit_event = Table(
     # Só no `ACCOUNT_LIMITS_CHANGED` (migração 0016): `{"changes": {<item>: {"old", "new"}}}`.
     # Números e nomes fixos, sem dado pessoal: sai com a linha aos 90 dias (1.7).
     Column("details", JSONB),
+    # Quem agiu (migração 0032): `user`, `admin` (`gs-admin`) ou `system`; nulo é evento anterior.
+    Column("actor", Text),
     Index(None, "occurred_at"),
     Index(None, "user_id", "occurred_at"),
     CheckConstraint(
         "event_type IN ('LOGIN_SUCCEEDED', 'LOGIN_FAILED', 'LOGOUT', 'LOGOUT_ALL', 'KEY_ISSUED', "
         "'KEY_REVOKED', 'REAUTH_REQUIRED', 'CSRF_FAILED', 'ACCESS_DENIED', "
         "'ACCOUNT_DELETION_REQUESTED', 'ACCOUNT_BLOCKED', 'ACCOUNT_UNBLOCKED', 'TERMS_ACCEPTED', "
-        "'ACCOUNT_LIMITS_CHANGED')",
+        "'ACCOUNT_LIMITS_CHANGED', 'ACCOUNT_CREATED', 'ACCOUNT_LOOKED_UP', 'ACCOUNT_APPROVED')",
         name="event_type",
     ),
+    CheckConstraint("actor IN ('user', 'admin', 'system')", name="actor"),
     CheckConstraint(
         "CASE WHEN event_type = 'ACCOUNT_LIMITS_CHANGED' "
         "THEN coalesce(jsonb_typeof(details) = 'object', false) "

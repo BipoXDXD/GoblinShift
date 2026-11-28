@@ -399,6 +399,30 @@ def test_request_deletion_marca_revoga_cancela_e_audita(
     assert audited(factory, user_id) == ["ACCOUNT_DELETION_REQUESTED"]
 
 
+def actors(factory: sessionmaker[Session], user_id: str) -> list[tuple[str, str | None]]:
+    """Tipo e quem agiu de cada evento da conta, na ordem de gravação."""
+    with factory() as session:
+        rows = session.execute(
+            select(audit_event.c.event_type, audit_event.c.actor, audit_event.c.ip_prefix)
+            .where(audit_event.c.user_id == UUID(user_id))
+            .order_by(audit_event.c.id)
+        ).all()
+    # A ação do administrador roda no servidor: nunca há IP de cliente.
+    assert all(row.ip_prefix is None for row in rows if row.actor == "admin")
+    return [(row.event_type, row.actor) for row in rows]
+
+
+def test_request_deletion_do_gs_admin_grava_actor_admin(
+    capsys: pytest.CaptureFixture[str], factory: sessionmaker[Session], storage: FileStorage
+) -> None:
+    user_id = create_user(capsys)
+
+    exit_code, _, _ = run(capsys, "request-deletion", "--user", user_id)
+
+    assert exit_code == EXIT_OK
+    assert ("ACCOUNT_DELETION_REQUESTED", "admin") in actors(factory, user_id)
+
+
 def test_request_deletion_repetido_mantem_o_primeiro_pedido_e_completa_o_que_faltou(
     capsys: pytest.CaptureFixture[str], factory: sessionmaker[Session], storage: FileStorage
 ) -> None:

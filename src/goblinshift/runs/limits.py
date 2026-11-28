@@ -20,6 +20,7 @@ from sqlalchemy.orm import Session
 
 from goblinshift import capacity
 from goblinshift.identity import (
+    AuditActor,
     AuditEventType,
     AuditOutcome,
     LimitChange,
@@ -72,5 +73,6 @@ def change_account_limits(
         ip=None,
         outcome=AuditOutcome.SUCCESS,
         now=now,
+        actor=AuditActor.ADMIN,
         details=limits_changed_details(changes),
     )

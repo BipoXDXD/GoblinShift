@@ -32,6 +32,7 @@ from goblinshift.identity.accounts import (
     unblock_account,
 )
 from goblinshift.identity.audit import (
+    AuditActor,
     AuditEventType,
     AuditOutcome,
     LimitChange,
@@ -98,6 +99,7 @@ __all__ = [
     "AcceptedTerms",
     "Account",
     "ActiveKeyLimitError",
+    "AuditActor",
     "AuditEventType",
     "AuditOutcome",
     "ExternalIdentity",

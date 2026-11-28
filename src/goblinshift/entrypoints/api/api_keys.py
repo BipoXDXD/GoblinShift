@@ -33,6 +33,7 @@ from goblinshift.identity import (
     MAX_KEY_DAYS,
     MAX_STORED_KEYS,
     ActiveKeyLimitError,
+    AuditActor,
     AuditEventType,
     AuditOutcome,
     KeySummary,
@@ -175,4 +176,5 @@ def _audit(
         ip=request.client.host if request.client else None,
         outcome=AuditOutcome.SUCCESS,
         now=now,
+        actor=AuditActor.USER,
     )

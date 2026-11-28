@@ -5,10 +5,17 @@ from ipaddress import ip_network
 from uuid import UUID
 
 import pytest
-from sqlalchemy import select
+from sqlalchemy import select, text
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session, sessionmaker
 
-from goblinshift.identity.audit import AuditEventType, AuditOutcome, record, truncate_ip
+from goblinshift.identity.audit import (
+    AuditActor,
+    AuditEventType,
+    AuditOutcome,
+    record,
+    truncate_ip,
+)
 from goblinshift.identity.tables import audit_event
 from goblinshift.platform.db import unit_of_work
 
@@ -59,7 +66,14 @@ def test_tipos_de_evento_do_plano() -> None:
         "ACCOUNT_UNBLOCKED",
         "TERMS_ACCEPTED",
         "ACCOUNT_LIMITS_CHANGED",
+        "ACCOUNT_CREATED",
+        "ACCOUNT_LOOKED_UP",
+        "ACCOUNT_APPROVED",
     }
+
+
+def test_quem_agiu_e_titular_administrador_ou_sistema() -> None:
+    assert {actor.value for actor in AuditActor} == {"user", "admin", "system"}
 
 
 # --- record (integração) ----------------------------------------------------------------------
@@ -75,6 +89,7 @@ def test_record_grava_o_evento_com_o_ip_truncado(factory: sessionmaker[Session])
             ip="203.0.113.7",
             outcome=AuditOutcome.FAILURE,
             now=AGORA,
+            actor=AuditActor.USER,
         )
 
     with unit_of_work(factory) as session:
@@ -84,6 +99,7 @@ def test_record_grava_o_evento_com_o_ip_truncado(factory: sessionmaker[Session])
     assert row.outcome == "failure"
     assert row.ip_prefix == ip_network("203.0.113.0/24")
     assert row.occurred_at == AGORA
+    assert row.actor == "user"
 
 
 @pytest.mark.integration
@@ -96,6 +112,7 @@ def test_record_aceita_evento_sem_conta_e_sem_ip(factory: sessionmaker[Session])
             ip=None,
             outcome=AuditOutcome.FAILURE,
             now=AGORA,
+            actor=AuditActor.USER,
         )
 
     with unit_of_work(factory) as session:
@@ -106,3 +123,17 @@ def test_record_aceita_evento_sem_conta_e_sem_ip(factory: sessionmaker[Session])
         ).all()
 
     assert [(row.user_id, row.ip_prefix) for row in rows] == [(None, None)]
+
+
+@pytest.mark.integration
+def test_actor_fora_da_lista_e_recusado_pelo_banco(factory: sessionmaker[Session]) -> None:
+    with (
+        pytest.raises(IntegrityError, match="audit_event_actor_check"),
+        unit_of_work(factory) as session,
+    ):
+        session.execute(
+            text(
+                "INSERT INTO audit_event (event_type, outcome, actor) "
+                "VALUES ('LOGOUT', 'success', 'root')"
+            )
+        )
