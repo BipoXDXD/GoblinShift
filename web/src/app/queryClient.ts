@@ -14,6 +14,9 @@ export function createAppQueryClient(): QueryClient {
   const client: QueryClient = new QueryClient({
     queryCache: new QueryCache({
       onError: (error, query) => {
+        // Roda depois do dispatch do erro, mas antes do render: a limpeza do cache chega à tela
+        // junto com o erro só porque o scheduler do notifyManager entrega as notificações depois
+        // (setTimeout(0)). Com um scheduler síncrono, a tela pintaria o erro com os dados antigos.
         refreshAccountOn(client)(error, query.queryKey);
       },
     }),

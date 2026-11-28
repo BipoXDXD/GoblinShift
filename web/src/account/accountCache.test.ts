@@ -1,5 +1,5 @@
 import { QueryClient, QueryObserver } from "@tanstack/react-query";
-import { describe, expect, it, onTestFinished } from "vitest";
+import { describe, expect, it, onTestFinished, vi } from "vitest";
 
 import { meBody } from "../test/account";
 import { ME_QUERY_KEY, type Me } from "./api";
@@ -112,6 +112,60 @@ describe("watchAccountChange", () => {
     client.setQueryData(ME_QUERY_KEY, accountOf(OTHER_ID));
 
     expect(client.getQueryData(RUNS_KEY)).toEqual({ data: ["run-de-A"] });
+  });
+
+  it("o /me relido com a mesma conta busca de novo as telas esquecidas", async () => {
+    const client = watchedClient();
+    let calls = 0;
+    const observer = new QueryObserver(client, {
+      queryKey: ["presets"],
+      queryFn: () => {
+        calls += 1;
+        return Promise.resolve({ data: ["preset-de-A"] });
+      },
+    });
+    onTestFinished(observer.subscribe(() => undefined));
+    await expect.poll(() => observer.getCurrentResult().data).toBeDefined();
+    // O 401 de outra leitura esquece tudo; o /me relido diz que a conta continua a mesma.
+    forgetAccountData(client);
+
+    client.setQueryData(ME_QUERY_KEY, meBody());
+
+    await expect.poll(() => observer.getCurrentResult().data).toEqual({ data: ["preset-de-A"] });
+    expect(calls).toBe(2);
+  });
+
+  it("a query que falhou não é buscada de novo com o /me relido", () => {
+    const client = watchedClient();
+    const refetch = vi.spyOn(client, "refetchQueries");
+    const query = client.getQueryCache().find({ queryKey: RUNS_KEY });
+    query?.setState({ ...query.state, status: "error", error: new Error("401") });
+    forgetAccountData(client);
+
+    client.setQueryData(ME_QUERY_KEY, meBody());
+
+    const [filters] = refetch.mock.calls[0] ?? [];
+    expect(query !== undefined && filters?.predicate?.(query)).toBe(false);
+  });
+
+  it("depois do clear() do logout, o primeiro /me só é anotado", async () => {
+    const client = watchedClient();
+    client.clear();
+    let calls = 0;
+    const observer = new QueryObserver(client, {
+      queryKey: RUNS_KEY,
+      queryFn: () => {
+        calls += 1;
+        return new Promise<never>(() => undefined);
+      },
+    });
+    onTestFinished(observer.subscribe(() => undefined));
+
+    client.setQueryData(ME_QUERY_KEY, null);
+
+    await Promise.resolve();
+    expect(calls).toBe(1);
+    expect(observer.getCurrentResult().fetchStatus).toBe("fetching");
   });
 
   it("depois da troca, a tela aberta pede os dados da conta nova", async () => {

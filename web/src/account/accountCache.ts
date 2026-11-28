@@ -30,18 +30,34 @@ export function forgetAccountData(queryClient: QueryClient): void {
   queryClient.removeQueries({ predicate: isAccountData, type: "inactive" });
 }
 
+/** Tela aberta que o `forgetAccountData` deixou no início, sem dado e sem pedido em voo. */
+function isForgottenOnScreen(query: Query): boolean {
+  return (
+    isAccountData(query) && query.state.status === "pending" && query.state.fetchStatus === "idle"
+  );
+}
+
 /**
- * Observa o /me: quando a conta muda (login de outra conta noutra aba, ou a sessão que acabou e
- * deixou o /me sem conta), os dados da anterior saem do cache e as telas abertas pedem os da nova.
- * O primeiro /me só é anotado. Devolve o `unsubscribe`.
+ * Observa o /me. Quando a conta muda (login de outra conta noutra aba, ou a sessão que acabou e
+ * deixou o /me sem conta), os dados da anterior saem do cache. A cada /me lido, as telas abertas
+ * que ficaram no início sem pedido (pelo esquecimento, aqui ou no 401 do `refreshAccountOn`) são
+ * buscadas de novo: nenhuma tela fica carregando sem pedido em voo. A query que falhou guarda o
+ * erro e não entra nessa busca, o que corta o laço do 401 (o /me relido não a pede de novo). O
+ * primeiro /me só é anotado, e o `clear()` do logout (que tira o /me do cache) zera o anotado.
+ * Devolve o `unsubscribe`.
  */
 export function watchAccountChange(queryClient: QueryClient): () => void {
   let seen: { readonly id: string | null } | null = null;
-  return queryClient.getQueryCache().subscribe((event) => {
+  const cache = queryClient.getQueryCache();
+  return cache.subscribe((event) => {
+    const me = cache.find<Me | null>({ queryKey: ME_QUERY_KEY, exact: true });
+    if (event.type === "removed" && me === undefined) {
+      seen = null;
+      return;
+    }
     if (event.type !== "updated" || event.action.type !== "success") {
       return;
     }
-    const me = queryClient.getQueryCache().find<Me | null>({ queryKey: ME_QUERY_KEY, exact: true });
     // type-coverage:ignore-next-line -- o evento do TanStack declara `query: Query<any, …>`
     if (me === undefined || event.query !== me) {
       return;
@@ -49,11 +65,12 @@ export function watchAccountChange(queryClient: QueryClient): () => void {
     const id = me.state.data?.id ?? null;
     const previous = seen;
     seen = { id };
-    if (previous === null || previous.id === id) {
+    if (previous === null) {
       return;
     }
-    forgetAccountData(queryClient);
-    // Sem sessão, o pedido dá 401 e o refreshAccountOn só limpa (não pede de novo): sem laço.
-    void queryClient.refetchQueries({ predicate: isAccountData, type: "active" });
+    if (previous.id !== id) {
+      forgetAccountData(queryClient);
+    }
+    void queryClient.refetchQueries({ predicate: isForgottenOnScreen, type: "active" });
   });
 }
