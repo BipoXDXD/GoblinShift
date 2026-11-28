@@ -313,12 +313,16 @@ def test_sigterm_entre_comandos_nao_comeca_a_aceitacao(fakes: Path, tmp_path: Pa
     # sai, e o FIFO só é escrito depois do sinal. A ordem não depende de tempo.
     fifo = tmp_path / "stop.fifo"
     os.mkfifo(fifo)
+
+    def release_stop() -> None:
+        fifo.write_text("\n")
+
     code, calls = interrupted(
         fakes,
         reached="docker stop",
         group=False,
         FAKE_STOP_FIFO=str(fifo),
-        after_signal=lambda: fifo.write_text("\n"),
+        after_signal=release_stop,
     )
 
     assert code == SIGTERM_EXIT
