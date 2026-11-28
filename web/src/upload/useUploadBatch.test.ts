@@ -155,6 +155,8 @@ function setup() {
       client: api.client,
       uploader,
       rateLimit: { maxAttempts: 1, fallbackDelayMs: 0, random: () => 0 },
+      // O lote não baixa amostras; quem usa é o "Testar com arquivo de exemplo" da Bancada.
+      fetchSample: () => Promise.reject(new Error("sem amostra neste teste")),
     }),
   );
   return { api, pending, hook };

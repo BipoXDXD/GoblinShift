@@ -13,21 +13,30 @@ interface AppRoutesOptions {
   readonly uploader?: ContentUploader;
   /** O aviso global; por padrão, nenhum. */
   readonly notice?: SiteNotice | null;
+  /** Quem baixa as amostras da Bancada; por padrão, devolve um corpo curto para qualquer URL. */
+  readonly fetchSample?: typeof fetch;
 }
 
+const sampleFromMemory: typeof fetch = () => Promise.resolve(new Response("exemplo\n"));
+
 /**
- * As rotas do app com dublês: o cliente da API do teste, um uploader, uma tentativa só no 429, o
- * relógio fixo e o aviso global.
+ * As rotas do app com dublês: o cliente da API do teste, um uploader, uma tentativa só no 429, as
+ * amostras da Bancada, o relógio fixo e o aviso global.
  */
 export function appRoutes(
   client: ApiClient,
-  { uploader = fakeUploader({ autoResolve: true }).uploader, notice = null }: AppRoutesOptions = {},
+  {
+    uploader = fakeUploader({ autoResolve: true }).uploader,
+    notice = null,
+    fetchSample = sampleFromMemory,
+  }: AppRoutesOptions = {},
 ): RouteObject[] {
   return createRoutes({
     uploadServices: {
       client,
       uploader,
       rateLimit: { maxAttempts: 1, fallbackDelayMs: 0, random: () => 0 },
+      fetchSample,
     },
     now: testNow,
     notice,

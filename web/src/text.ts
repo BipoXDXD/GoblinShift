@@ -189,6 +189,10 @@ export const TEXT = {
     chooseFiles: "Escolher arquivos",
     chooseFilesHint: "Pode escolher vários de uma vez, ou soltar os arquivos aqui.",
     dropHere: "Solte para adicionar.",
+    trySample: "Testar com arquivo de exemplo",
+    sampleLoading: "Baixando o exemplo…",
+    sampleFailed:
+      "Não deu para baixar o arquivo de exemplo. Tente de novo ou escolha os seus arquivos.",
     filesChosen: (count: number) =>
       count === 0
         ? "Nenhum arquivo escolhido"

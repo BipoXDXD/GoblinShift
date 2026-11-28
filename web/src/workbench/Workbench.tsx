@@ -1,5 +1,6 @@
 import { useMutation } from "@tanstack/react-query";
 import {
+  useCallback,
   useEffect,
   useId,
   useMemo,
@@ -43,6 +44,7 @@ import { TEXT } from "../text";
 import { useUploadBatch, type UploadEntry, type UploadServices } from "../upload/useUploadBatch";
 import { orderEntries, runInputs, uploadAnnouncement, type RunInputs } from "./inputs";
 import { DeletionFailures } from "./DeletionFailures";
+import { loadSample } from "./samples";
 import { SavePreset } from "./SavePreset";
 import { UpdatePreset } from "./UpdatePreset";
 import { UploadEntryView } from "./UploadEntryView";
@@ -64,6 +66,12 @@ interface WorkbenchProps {
   readonly notice?: ReactNode;
   /** O preset cujos parâmetros abriram o formulário, que "Atualizar preset" substitui. */
   readonly sourcePreset?: Preset | null;
+  /**
+   * A URL pediu a amostra (`?exemplo=1`, vindo da abertura): a Bancada a carrega uma vez e chama
+   * `onSampleRequested`, que tira o parâmetro; recarregar a página não a carrega de novo.
+   */
+  readonly sampleRequested?: boolean;
+  readonly onSampleRequested?: () => void;
 }
 
 interface Submission {
@@ -82,6 +90,8 @@ export function Workbench({
   uploadServices,
   notice = null,
   sourcePreset = null,
+  sampleRequested = false,
+  onSampleRequested,
 }: WorkbenchProps): ReactElement {
   const client = useApiClient();
   const navigate = useNavigate();
@@ -101,6 +111,8 @@ export function Workbench({
   const intent = command === null ? "" : JSON.stringify(command);
   const idempotency = useIdempotencyKey(intent);
   const announcement = useUploadAnnouncement(batch.entries);
+  const sample = useSample(recipe.id, uploadServices.fetchSample, batch.add);
+  useSampleRequest(sampleRequested, sample.load, onSampleRequested);
 
   const mutation = useMutation({
     mutationFn: (submission: Submission) => createRun(client, submission),
@@ -193,7 +205,29 @@ export function Workbench({
               error={fieldErrors.get(FILES_FIELD_ID) ?? null}
               chosenCount={entries.length}
               onFiles={batch.add}
+              extraAction={
+                entries.length === 0 && (
+                  <Button
+                    type="button"
+                    variant="secondary"
+                    aria-disabled={sample.status === "loading"}
+                    onClick={sample.load}
+                  >
+                    {sample.status === "loading"
+                      ? TEXT.workbench.sampleLoading
+                      : TEXT.workbench.trySample}
+                  </Button>
+                )
+              }
             />
+            {sample.status === "failed" && entries.length === 0 && (
+              <p
+                role="alert"
+                className="rounded-lg border-l-4 border-danger-accent bg-danger-bg p-4 font-semibold text-danger-fg"
+              >
+                {TEXT.workbench.sampleFailed}
+              </p>
+            )}
             {entries.length === 0 ? (
               <EmptyState
                 title={TEXT.workbench.noFilesYet}
@@ -407,6 +441,71 @@ function useStableInputs(entries: readonly UploadEntry[]): readonly RecipeInput[
   const key = JSON.stringify(ready);
   // eslint-disable-next-line react-hooks/exhaustive-deps -- a chave é o conteúdo da lista.
   return useMemo(() => ready, [key]);
+}
+
+type SampleStatus = "idle" | "loading" | "failed";
+
+/**
+ * O "Testar com arquivo de exemplo": baixa a amostra da receita e a põe no mesmo caminho do
+ * upload. Clique repetido durante o download não baixa de novo; a resposta que chega depois de a
+ * Bancada sair de cena não entra em lote nenhum.
+ */
+function useSample(
+  recipeId: RecipeId,
+  fetcher: typeof fetch,
+  add: (files: readonly File[]) => void,
+): { readonly status: SampleStatus; readonly load: () => void } {
+  const [status, setStatus] = useState<SampleStatus>("idle");
+  const loading = useRef(false);
+  const mounted = useRef(true);
+  useEffect(() => {
+    mounted.current = true;
+    return () => {
+      mounted.current = false;
+    };
+  }, []);
+  const load = useCallback(() => {
+    if (loading.current) {
+      return;
+    }
+    loading.current = true;
+    setStatus("loading");
+    loadSample(recipeId, fetcher).then(
+      (files) => {
+        loading.current = false;
+        if (mounted.current) {
+          setStatus("idle");
+          add(files);
+        }
+      },
+      () => {
+        loading.current = false;
+        setStatus("failed");
+      },
+    );
+  }, [recipeId, fetcher, add]);
+  return { status, load };
+}
+
+/** Carrega a amostra pedida pela URL uma vez por pedido (o modo estrito roda o efeito duas). */
+function useSampleRequest(
+  requested: boolean,
+  load: () => void,
+  onRequested: (() => void) | undefined,
+): void {
+  const handled = useRef(false);
+  useEffect(() => {
+    if (!requested) {
+      handled.current = false;
+      return;
+    }
+    if (handled.current) {
+      return;
+    }
+    handled.current = true;
+    load();
+    onRequested?.();
+  }, [requested, load, onRequested]);
 }
 
 function localIdOf(entry: UploadEntry): string {

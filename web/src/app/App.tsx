@@ -47,6 +47,7 @@ export function App(): ReactElement {
             fallbackDelayMs: UPLOAD_RATE_LIMIT_FALLBACK_MS,
             random: Math.random,
           },
+          fetchSample: (input, init) => window.fetch(input, init),
         },
         now: clock.now,
         notice: SITE_NOTICE,

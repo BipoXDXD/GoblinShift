@@ -40,6 +40,8 @@ export interface UploadServices {
   readonly client: ApiClient;
   readonly uploader: ContentUploader;
   readonly rateLimit: Omit<RateLimitPolicy, "signal">;
+  /** Baixa as amostras do "Testar com arquivo de exemplo" (assets do próprio site). */
+  readonly fetchSample: typeof fetch;
 }
 
 interface UploadBatch {
