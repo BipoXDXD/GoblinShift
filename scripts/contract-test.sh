@@ -82,14 +82,20 @@ uv run python -m scripts.contract_spec "$WORK/openapi.json" "$WORK/openapi.contr
 # Confere que o Schemathesis rejeita um corpo inválido antes de executar os casos gerados.
 uv run --locked --group contract pytest --fail-on-skip -q tests/contract_response_schema.py
 
+# A chave vai por arquivo, não por --header: fica fora da lista de processos do runner, como no
+# scripts/e2e-lib.sh. O printf é builtin (sem processo novo, então sem argv) e o umask deixa o
+# arquivo em 600; o cleanup apaga $WORK. O formato conferido mantém o valor um string TOML literal
+# e sem `${`, que o Schemathesis expandiria do ambiente.
+[[ "$key" =~ ^[A-Za-z0-9_-]+$ ]] || { echo "contract-test: chave em formato inesperado" >&2; exit 1; }
+(umask 077 && printf 'headers = { Authorization = "Bearer %s" }\n' "$key" >"$WORK/schemathesis.toml")
+
 status=0
 # Recusas que o domínio impõe e o JSON Schema não expressa: scripts/contract_rules.py.
 # Fases explícitas, sem `examples`: nenhuma operação da spec declara example(s), e a fase só
 # terminaria com tudo pulado (tests/test_ci_testes_pulados.py confere as duas coisas).
 SCHEMATHESIS_HOOKS=scripts.contract_hooks uv run --group contract \
-  schemathesis run "$WORK/openapi.contract.json" \
+  schemathesis --config-file "$WORK/schemathesis.toml" run "$WORK/openapi.contract.json" \
   --url "$BASE_URL" \
-  --header "Authorization: Bearer $key" \
   --checks all \
   --phases=coverage,fuzzing,stateful \
   --max-examples "$MAX_EXAMPLES" \

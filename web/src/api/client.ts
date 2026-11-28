@@ -56,6 +56,11 @@ export interface ApiClientOptions {
   readonly csrfToken: CsrfTokenSource;
   readonly now: () => number;
   readonly timeoutMs?: number;
+  /**
+   * Recebe o header `Date` de toda resposta da API, de sucesso ou falha, assim que ela chega e
+   * antes do corpo (serverClock.ts).
+   */
+  readonly observeServerDate?: (dateHeader: string | null) => void;
 }
 
 /**
@@ -137,6 +142,8 @@ async function sendWithTimeout<B>(
       credentials: "same-origin",
       signal: controller.signal,
     });
+    // Antes do corpo: o relógio se acerta mesmo que a leitura pare no meio.
+    options.observeServerDate?.(response.headers.get("Date"));
     // O prazo cobre também a leitura do corpo, que pode parar no meio.
     return { response, body: await read(response) };
   } catch {

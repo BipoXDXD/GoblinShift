@@ -1,14 +1,17 @@
 // Contraste e WCAG 2.2 A/AA nas telas reais, nos dois temas (P9). Complementa o contrast.test.ts,
 // que mede os pares de tokens: aqui entram a composição, os estados e o texto sobre cada fundo.
-import AxeBuilder from "@axe-core/playwright";
-
-import { SCREENS } from "../support/screens";
+// No build com o incidente (fase notice-incident), só as telas em que a faixa vermelha cobre os
+// casos distintos: tela comum, lista, formulário com erro e tabela.
+import { expectNoWcagViolations } from "../support/axe";
+import { INCIDENT_BUILD } from "../support/env";
+import { NOTICE_INCIDENT_SCREENS, SCREENS } from "../support/screens";
 import { expect, test, THEMES, useTheme } from "../support/test";
 
-const WCAG_22_AA = ["wcag2a", "wcag2aa", "wcag21a", "wcag21aa", "wcag22aa"];
+const MEASURED_SCREENS = INCIDENT_BUILD ? NOTICE_INCIDENT_SCREENS : SCREENS;
+const INCIDENT_BAND = "Aviso: incidente de segurança";
 
 for (const theme of THEMES) {
-  for (const screen of SCREENS) {
+  for (const screen of MEASURED_SCREENS) {
     test(`${screen.name}, tema ${theme}: zero violações do axe, contraste incluído @fake-api`, async ({
       page,
       fakeApi,
@@ -16,21 +19,12 @@ for (const theme of THEMES) {
       await useTheme(page, theme);
       await screen.open(page, fakeApi);
       await expect(page.locator("html")).toHaveAttribute("data-theme", theme);
+      // Sem a faixa na tela, o axe mediria só a tela e a fase passaria sem medir o incidente.
+      if (INCIDENT_BUILD) {
+        await expect(page.getByRole("region", { name: INCIDENT_BAND })).toBeVisible();
+      }
 
-      const results = await new AxeBuilder({ page }).withTags(WCAG_22_AA).analyze();
-
-      // Sem isso, um axe que deixou de avaliar o contraste passaria em silêncio.
-      const ranContrast = [...results.passes, ...results.violations].some(
-        (rule) => rule.id === "color-contrast",
-      );
-      expect(ranContrast, "a regra color-contrast avaliou algum elemento").toBe(true);
-      expect(
-        results.violations
-          .filter((violation) => violation.id === "color-contrast")
-          .map(describeViolation),
-        `[sabotage:contrast-${theme}]`,
-      ).toEqual([]);
-      expect(results.violations.map(describeViolation)).toEqual([]);
+      await expectNoWcagViolations(page, `contrast-${theme}`);
     });
   }
 }
@@ -46,28 +40,6 @@ for (const theme of THEMES) {
     await page.getByText("Tema", { exact: true }).click();
     await expect(page.getByRole("radio", { name: "Sistema", exact: true })).toBeVisible();
 
-    const results = await new AxeBuilder({ page }).withTags(WCAG_22_AA).analyze();
-
-    const ranContrast = [...results.passes, ...results.violations].some(
-      (rule) => rule.id === "color-contrast",
-    );
-    expect(ranContrast, "a regra color-contrast avaliou algum elemento").toBe(true);
-    expect(
-      results.violations
-        .filter((violation) => violation.id === "color-contrast")
-        .map(describeViolation),
-      `[sabotage:contrast-${theme}]`,
-    ).toEqual([]);
-    expect(results.violations.map(describeViolation)).toEqual([]);
+    await expectNoWcagViolations(page, `contrast-${theme}`);
   });
-}
-
-function describeViolation(violation: {
-  id: string;
-  nodes: { target: unknown; failureSummary?: string | undefined }[];
-}): string {
-  const nodes = violation.nodes.map(
-    (node) => `${JSON.stringify(node.target)}: ${node.failureSummary ?? ""}`,
-  );
-  return `${violation.id}\n${nodes.join("\n")}`;
 }

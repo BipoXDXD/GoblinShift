@@ -13,6 +13,7 @@ from goblinshift.identity import (
     issue_key,
     purge_owner,
     request_account_deletion,
+    start_session,
 )
 from goblinshift.identity.tables import app_user
 from goblinshift.platform.db import unit_of_work
@@ -23,6 +24,7 @@ from tests.conftest import restore_capacity_seed, run_migrations
 ALL_SCOPES = frozenset(Scope)
 # O `user.hash` dos logs de `authenticate_api_key`; a chave só precisa ser fixa no teste.
 HASHER = UserHasher(b"t" * 32)
+CSRF_KEY = b"k" * 32
 
 
 def prepare_database(settings: Settings, engine: Engine) -> None:
@@ -68,3 +70,12 @@ def new_key(
             now=now or datetime.now(UTC),
             days=days,
         )
+
+
+def new_web_session(factory: sessionmaker[Session], user_id: UUID, *, now: datetime) -> UUID:
+    """Sessão web aberta agora, com login no provedor agora: a que emite chave (3.6)."""
+    with unit_of_work(factory) as session:
+        issued = start_session(
+            session, user_id=user_id, authenticated_at=now, now=now, csrf_key=CSRF_KEY
+        )
+    return issued.session_id

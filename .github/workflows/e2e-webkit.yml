@@ -104,10 +104,12 @@ jobs:
             ../scripts/ci-apt-instalar.sh "$DEBS" "${pacotes[@]}"
           fi
           npx playwright install --only-shell chromium
-      # O sabotage.ts copia os dois builds; sem eles, ele falha pedindo o build.
+      # O sabotage.ts copia os três builds; sem eles, ele falha pedindo o build.
       - name: Build
         run: npm run build
       - name: Build com o aviso global
         run: npm run build:notice-e2e
+      - name: Build com o aviso de incidente
+        run: npm run build:notice-incident-e2e
       - name: Cada defeito plantado derruba a spec que o vigia
         run: npm run e2e:sabotage
