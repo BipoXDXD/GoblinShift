@@ -1,15 +1,11 @@
 import { act, renderHook } from "@testing-library/react";
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { beforeEach, describe, expect, it } from "vitest";
 
+import { setDocumentVisibility as setVisibility } from "../test/fakeNotification";
 import type { RunStatus } from "./api";
 import { signaledStatus, useCompletionTitle } from "./completionSignal";
 
 const ROUTE_TITLE = "Execução · GoblinShift";
-
-function setVisibility(state: DocumentVisibilityState): void {
-  Object.defineProperty(document, "visibilityState", { configurable: true, value: state });
-  document.dispatchEvent(new Event("visibilitychange"));
-}
 
 describe("signaledStatus", () => {
   it.each<[RunStatus | null, RunStatus, ReturnType<typeof signaledStatus>]>([
@@ -28,11 +24,6 @@ describe("signaledStatus", () => {
 describe("useCompletionTitle", () => {
   beforeEach(() => {
     document.title = ROUTE_TITLE;
-  });
-
-  afterEach(() => {
-    // Volta ao padrão do jsdom: o getter do protótipo, que diz "visible".
-    Reflect.deleteProperty(document, "visibilityState");
   });
 
   it("com a aba escondida o título ganha ✓ Concluída e volta ao ficar visível", () => {
@@ -71,5 +62,24 @@ describe("useCompletionTitle", () => {
 
     expect(result.current).toBeNull();
     expect(document.title).toBe(ROUTE_TITLE);
+  });
+
+  it("ao desmontar, o título fica com a rota nova do Layout", () => {
+    setVisibility("hidden");
+    const { rerender, unmount } = renderHook(
+      ({ status }: { status: RunStatus | undefined }) => useCompletionTitle(status),
+      { initialProps: { status: "running" as RunStatus | undefined } },
+    );
+    rerender({ status: "succeeded" });
+    expect(document.title).toBe("✓ Concluída · Execução · GoblinShift");
+
+    // A navegação: o Layout grava o título da rota nova e a Execução sai.
+    document.title = "Histórico · GoblinShift";
+    unmount();
+    act(() => {
+      setVisibility("visible");
+    });
+
+    expect(document.title).toBe("Histórico · GoblinShift");
   });
 });

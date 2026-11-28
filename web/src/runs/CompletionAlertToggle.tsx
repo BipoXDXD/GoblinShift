@@ -1,5 +1,5 @@
 import { Bell, BellRing } from "lucide-react";
-import { useState, type ReactElement } from "react";
+import { useEffect, useRef, useState, type ReactElement } from "react";
 
 import { LiveRegion } from "../components/a11y/LiveRegion";
 import { Button } from "../components/ui/Button";
@@ -10,14 +10,32 @@ const T = TEXT.run.completion;
 
 type ToggleState = "off" | "on" | "blocked";
 
+interface CompletionAlertToggleProps {
+  /** A execução terminou: o aviso não serve mais e o botão some. */
+  readonly finished: boolean;
+  /** Recebe o foco quando o botão some com o foco nele, que iria para o `<body>` (WCAG 2.4.3). */
+  readonly onLeave: () => void;
+}
+
 /**
  * "Avisar quando terminar" (D3): botão terciário que liga a notificação do navegador. A permissão
  * só é pedida no clique; negada, o motivo aparece e o título da aba continua avisando. Sem
- * `Notification` no navegador, não aparece.
+ * `Notification` no navegador, não aparece. O rótulo muda com o estado ("Aviso ligado"), então não
+ * leva `aria-pressed`: o leitor de tela diria o estado duas vezes (APG, Button pattern).
  */
-export function CompletionAlertToggle(): ReactElement | null {
+export function CompletionAlertToggle({
+  finished,
+  onLeave,
+}: CompletionAlertToggleProps): ReactElement | null {
   const [state, setState] = useState<ToggleState>(() => (alertsEnabled() ? "on" : "off"));
-  if (!alertsSupported()) {
+  const focused = useRef(false);
+  useEffect(() => {
+    if (finished && focused.current) {
+      focused.current = false;
+      onLeave();
+    }
+  }, [finished, onLeave]);
+  if (finished || !alertsSupported()) {
     return null;
   }
   const on = state === "on";
@@ -35,7 +53,12 @@ export function CompletionAlertToggle(): ReactElement | null {
         <Button
           type="button"
           variant="tertiary"
-          aria-pressed={on}
+          onFocus={() => {
+            focused.current = true;
+          }}
+          onBlur={() => {
+            focused.current = false;
+          }}
           onClick={() => {
             void toggle();
           }}

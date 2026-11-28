@@ -15,16 +15,19 @@ export interface FakeNotifications {
 
 /**
  * `window.Notification` falso (o jsdom não tem um). `permission` começa em `initial` e passa a
- * `answer` quando `requestPermission` responde, como no navegador. O `unstubGlobals` do
+ * `answer` quando `requestPermission` responde, como no navegador; com `"rejects"`, o pedido rejeita. O `unstubGlobals` do
  * vite.config.ts o remove ao fim do teste.
  */
 export function installFakeNotification(
   initial: NotificationPermission,
-  answer: NotificationPermission = initial,
+  answer: NotificationPermission | "rejects" = initial,
 ): FakeNotifications {
   const constructed: ShownNotification[] = [];
   let permission = initial;
   const requestPermission = vi.fn<() => Promise<NotificationPermission>>(() => {
+    if (answer === "rejects") {
+      return Promise.reject(new TypeError("pedido recusado"));
+    }
     permission = answer;
     return Promise.resolve(answer);
   });
@@ -43,13 +46,17 @@ export function installFakeNotification(
   return { requestPermission, constructed };
 }
 
+/** Registro do service worker: com `showNotification`, nenhum, ou `getRegistration` que rejeita. */
+export type FakeRegistration = "registered" | "absent" | "broken";
+
 /**
- * `navigator.serviceWorker` falso: `getRegistration` devolve um registro com `showNotification`, ou
- * nenhum. Sai do `navigator` ao fim do teste.
+ * `navigator.serviceWorker` falso, conforme `registration`. Sai do `navigator` ao fim do teste.
  */
-export function installFakeServiceWorker(registered: boolean): readonly ShownNotification[] {
+export function installFakeServiceWorker(
+  registration: FakeRegistration,
+): readonly ShownNotification[] {
   const shown: ShownNotification[] = [];
-  const registration = {
+  const fakeRegistration = {
     showNotification: (title: string, options?: NotificationOptions): Promise<void> => {
       shown.push({ title, options });
       return Promise.resolve();
@@ -57,7 +64,12 @@ export function installFakeServiceWorker(registered: boolean): readonly ShownNot
   };
   Object.defineProperty(navigator, "serviceWorker", {
     configurable: true,
-    value: { getRegistration: () => Promise.resolve(registered ? registration : undefined) },
+    value: {
+      getRegistration: () =>
+        registration === "broken"
+          ? Promise.reject(new DOMException("Documento inválido", "InvalidStateError"))
+          : Promise.resolve(registration === "registered" ? fakeRegistration : undefined),
+    },
   });
   onTestFinished(() => {
     Reflect.deleteProperty(navigator, "serviceWorker");

@@ -513,6 +513,22 @@ describe("Execução: falha do polling sem anúncio repetido", () => {
     expect(screen.queryByRole("button", { name: "Avisar quando terminar" })).toBeNull();
   });
 
+  it("o Avisar quando terminar que some com o foco devolve o foco ao título", async () => {
+    installFakeNotification("default");
+    const { queryClient } = setup(
+      inSequence(running, () => jsonResponse(runBody({ status: "succeeded" }))),
+    );
+    const toggle = await screen.findByRole("button", { name: "Avisar quando terminar" });
+    act(() => {
+      toggle.focus();
+    });
+
+    await nextPoll(queryClient);
+
+    expect(await screen.findByText("Concluída")).toBeInTheDocument();
+    await expectHeadingFocused("Execução");
+  });
+
   it("com o convite na tela, o Cancelar some e os dados já carregados ficam", async () => {
     const { queryClient } = setup(
       inSequence(running, () => problemResponse(401, "AUTHENTICATION_REQUIRED")),

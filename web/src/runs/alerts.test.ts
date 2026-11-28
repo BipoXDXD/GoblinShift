@@ -1,4 +1,4 @@
-import { renderHook, waitFor } from "@testing-library/react";
+import { act, renderHook, waitFor } from "@testing-library/react";
 import { describe, expect, it } from "vitest";
 
 import {
@@ -6,7 +6,7 @@ import {
   installFakeServiceWorker,
   setDocumentVisibility,
 } from "../test/fakeNotification";
-import { ALERTS_KEY, notifyCompletion, useCompletionAlert } from "./alerts";
+import { ALERTS_KEY, notifyCompletion, requestAlerts, useCompletionAlert } from "./alerts";
 import type { RunDetail, RunItem, RunStatus } from "./api";
 
 const RUN_ID = "0e9a1c52-0000-4000-8000-000000000008";
@@ -55,7 +55,7 @@ const INPUT = {
 describe("notifyCompletion", () => {
   it("não avisa com a aba visível", async () => {
     const { constructed } = installFakeNotification("granted");
-    installFakeServiceWorker(false);
+    installFakeServiceWorker("absent");
     window.localStorage.setItem(ALERTS_KEY, "on");
 
     await notifyCompletion(INPUT);
@@ -65,7 +65,7 @@ describe("notifyCompletion", () => {
 
   it("não avisa sem o aviso ligado", async () => {
     const { constructed } = installFakeNotification("granted");
-    installFakeServiceWorker(false);
+    installFakeServiceWorker("absent");
     setDocumentVisibility("hidden");
 
     await notifyCompletion(INPUT);
@@ -75,7 +75,7 @@ describe("notifyCompletion", () => {
 
   it("avisa com a tag da execução e sem nome de arquivo", async () => {
     const { constructed } = installFakeNotification("granted");
-    installFakeServiceWorker(false);
+    installFakeServiceWorker("absent");
     window.localStorage.setItem(ALERTS_KEY, "on");
     setDocumentVisibility("hidden");
 
@@ -95,7 +95,7 @@ describe("notifyCompletion", () => {
 
   it("usa o service worker quando registrado", async () => {
     const { constructed } = installFakeNotification("granted");
-    const shown = installFakeServiceWorker(true);
+    const shown = installFakeServiceWorker("registered");
     window.localStorage.setItem(ALERTS_KEY, "on");
     setDocumentVisibility("hidden");
 
@@ -113,12 +113,33 @@ describe("notifyCompletion", () => {
       },
     ]);
   });
+
+  it("erro do service worker é engolido, sem console", async () => {
+    const { constructed } = installFakeNotification("granted");
+    installFakeServiceWorker("broken");
+    window.localStorage.setItem(ALERTS_KEY, "on");
+    setDocumentVisibility("hidden");
+
+    await expect(notifyCompletion(INPUT)).resolves.toBeUndefined();
+
+    expect(constructed).toHaveLength(0);
+  });
+});
+
+describe("requestAlerts", () => {
+  it("pedido rejeitado pelo navegador vira bloqueio", async () => {
+    installFakeNotification("default", "rejects");
+
+    await expect(requestAlerts()).resolves.toBe("blocked");
+
+    expect(window.localStorage.getItem(ALERTS_KEY)).toBeNull();
+  });
 });
 
 describe("useCompletionAlert", () => {
   it("avisa uma vez por execução, sem nome de arquivo", async () => {
     const { constructed } = installFakeNotification("granted");
-    installFakeServiceWorker(false);
+    installFakeServiceWorker("absent");
     window.localStorage.setItem(ALERTS_KEY, "on");
     setDocumentVisibility("hidden");
     const { rerender } = renderHook(
@@ -133,7 +154,13 @@ describe("useCompletionAlert", () => {
       expect(constructed).toHaveLength(1);
     });
     rerender({ current: run("succeeded") });
-    await Promise.resolve();
+    // Espera a cadeia inteira de um possível segundo aviso (getRegistration e o construtor), não só
+    // um microtask: a macrotarefa só roda depois de todas as promises pendentes.
+    await act(async () => {
+      await new Promise((resolve) => {
+        setTimeout(resolve, 0);
+      });
+    });
 
     expect(constructed).toHaveLength(1);
     const [notification] = constructed;

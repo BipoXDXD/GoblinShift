@@ -1,6 +1,6 @@
 import { useQuery } from "@tanstack/react-query";
 import { ChevronLeft, Download } from "lucide-react";
-import { useId, useRef, type ReactElement, type ReactNode } from "react";
+import { useCallback, useId, useRef, type ReactElement, type ReactNode } from "react";
 import { Link, useParams } from "react-router";
 import { z } from "zod";
 
@@ -70,12 +70,17 @@ function RunView({ runId }: { readonly runId: string }): ReactElement {
   const { query, announcement, acknowledge, failure } = useRunPolling(runId);
   const run = query.data;
   useCompletionAlert(run);
+  const header = useRef<HTMLDivElement>(null);
+  // O título é o alvo estável quando o Avisar quando terminar some com o foco nele.
+  const focusTitle = useCallback(() => {
+    header.current?.querySelector("h1")?.focus();
+  }, []);
   // O convite para entrar (ou aceitar os termos) não é alerta; anunciado aqui, uma vez só.
   const showsGuidance = failure !== null && isGuidance(failure);
   const guidanceText = failure === null ? null : guidanceAnnouncement(failure);
   return (
     <div className="mx-auto flex w-full max-w-3xl flex-col gap-8">
-      <div className="flex flex-col gap-2">
+      <div ref={header} className="flex flex-col gap-2">
         {run !== undefined && <BackToWorkbench recipeId={run.recipe_id} />}
         <FocusHeading>{T.title}</FocusHeading>
       </div>
@@ -97,8 +102,10 @@ function RunView({ runId }: { readonly runId: string }): ReactElement {
               showsGuidance ? null : (
                 <div className="flex flex-wrap items-start gap-3">
                   <CancelRun runId={run.id} status={run.status} onAnnounced={acknowledge} />
-                  {/* O aviso só serve enquanto a execução não terminou. */}
-                  {!isTerminalStatus(run.status) && <CompletionAlertToggle />}
+                  <CompletionAlertToggle
+                    finished={isTerminalStatus(run.status)}
+                    onLeave={focusTitle}
+                  />
                 </div>
               )
             }

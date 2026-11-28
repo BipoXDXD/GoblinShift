@@ -15,7 +15,8 @@ type AlertsChoice = "on" | "off";
 
 /** Se o navegador tem notificações; sem elas, o toggle some e só o título da aba avisa. */
 export function alertsSupported(): boolean {
-  return "Notification" in window;
+  // `typeof`, não `in`: o navegador sem suporte pode ter a propriedade indefinida.
+  return typeof window.Notification === "function";
 }
 
 function readAlerts(): AlertsChoice {
