@@ -8,6 +8,9 @@ from collections.abc import Callable
 from dataclasses import dataclass
 from multiprocessing.connection import Connection
 
+# Prazo para o alvo terminar no filho; os `heavy` levam segundos, então só um travamento chega lá.
+DEFAULT_TIMEOUT_S = 300.0
+
 
 @dataclass(frozen=True)
 class Measured[T]:
@@ -23,13 +26,19 @@ class Measured[T]:
         return self.peak_bytes - self.baseline_bytes
 
 
-def run_measuring_peak_rss[T](target: Callable[[], T]) -> Measured[T]:
+def run_measuring_peak_rss[T](
+    target: Callable[[], T], timeout_s: float = DEFAULT_TIMEOUT_S
+) -> Measured[T]:
     """Roda `target` num processo `spawn` e devolve o resultado com o pico de RSS do filho.
 
     O filho mede o próprio pico (`RUSAGE_SELF`) e o devolve pelo pipe: `RUSAGE_CHILDREN` no pai
     traria o maior filho que já terminou, inclusive o de outro teste. O alvo vai serializado para
     o filho, então é função de módulo ou `functools.partial` dela, nunca lambda; o resultado
     também volta serializado.
+
+    `RUSAGE_SELF` não conta os netos: um alvo que abre subprocesso (ffmpeg, por exemplo) tem a
+    memória dele fora da medida. Se o alvo não termina em `timeout_s`, o filho é morto e a
+    chamada falha.
     """
     context = multiprocessing.get_context("spawn")
     receiver, sender = context.Pipe(duplex=False)
@@ -37,10 +46,17 @@ def run_measuring_peak_rss[T](target: Callable[[], T]) -> Measured[T]:
     process.start()
     sender.close()
     try:
+        # `poll` também volta verdadeiro se o filho morreu: aí o `recv` levanta `EOFError`.
+        if not receiver.poll(timeout_s):
+            process.kill()
+            process.join()
+            raise AssertionError(f"o alvo não terminou em {timeout_s} s; o filho foi morto")
         outcome = receiver.recv()
     except EOFError:
         process.join()
         raise AssertionError(f"o filho terminou sem medir (código {process.exitcode})") from None
+    finally:
+        receiver.close()
     process.join()
     if isinstance(outcome, str):
         raise AssertionError(f"o alvo falhou no filho:\n{outcome}")
