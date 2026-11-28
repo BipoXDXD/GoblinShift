@@ -20,9 +20,12 @@ from goblinshift.processing.image_forge.header import (
 from goblinshift.processing.image_forge.limits import Limits
 from goblinshift.processing.image_forge.rejection import ImageRejected, RejectionCode
 
-# Limita os decodificadores que o Pillow tenta. O MPO não entra na lista: ele vem pela fábrica do
-# JPEG, que devolve um MpoImageFile quando o arquivo tem o índice de várias imagens.
-ACCEPTED_FORMATS = ("JPEG", "PNG")
+# Limitam os decodificadores que o Pillow tenta. O MPO não entra nas listas: ele vem pela fábrica
+# do JPEG, que devolve um MpoImageFile quando o arquivo tem o índice de várias imagens. A v1 fica
+# com JPEG e PNG para sempre (1.6); WebP e GIF estáticos entram só pela v2.
+V1_FORMATS = ("JPEG", "PNG")
+V2_FORMATS = ("JPEG", "PNG", "WEBP", "GIF")
+ACCEPTED_FORMATS = V1_FORMATS
 MPO = "MPO"
 EIGHT_BIT_MODES = frozenset({"1", "L", "LA", "P", "RGB", "RGBA"})
 # Modos que o Pillow usa para amostras de 16 ou 32 bits.
@@ -34,7 +37,7 @@ EIGHT_BITS = 8
 class Header:
     """O que o Pillow e o IHDR dizem antes de decodificar."""
 
-    image_format: str  # "JPEG", "PNG" ou "MPO"
+    image_format: str  # "JPEG", "PNG", "MPO", "WEBP" ou "GIF"
     mode: str
     width: int
     height: int
@@ -48,9 +51,9 @@ def configure_pillow(limits: Limits | None = None) -> None:
     warnings.simplefilter("error", Image.DecompressionBombWarning)
 
 
-def open_image(source: BinaryIO) -> Image.Image:
-    """Abre sem decodificar, só com os formatos aceitos."""
-    return Image.open(source, formats=ACCEPTED_FORMATS)
+def open_image(source: BinaryIO, formats: tuple[str, ...] = V1_FORMATS) -> Image.Image:
+    """Abre sem decodificar, só com os formatos aceitos pela versão."""
+    return Image.open(source, formats=formats)
 
 
 def read_header(image: Image.Image, prefix: bytes) -> Header:
@@ -97,8 +100,11 @@ def _check_size(header: Header, limits: Limits) -> None:
 
 
 def _check_frames(header: Header) -> None:
-    if header.image_format == "PNG" and header.frames > 1:
-        raise ImageRejected(RejectionCode.UNSUPPORTED_FORMAT, "PNG animado não é aceito")
+    """Animação é recusada em qualquer formato; o MPO é foto com quadros extras, não animação."""
+    if header.image_format != MPO and header.frames > 1:
+        raise ImageRejected(
+            RejectionCode.UNSUPPORTED_FORMAT, f"{header.image_format} animado não é aceito"
+        )
 
 
 def _check_depth(header: Header) -> None:
