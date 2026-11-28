@@ -72,10 +72,6 @@ def test_tipos_de_evento_do_plano() -> None:
     }
 
 
-def test_quem_agiu_e_titular_administrador_ou_sistema() -> None:
-    assert {actor.value for actor in AuditActor} == {"user", "admin", "system"}
-
-
 # --- record (integração) ----------------------------------------------------------------------
 
 

@@ -29,6 +29,7 @@ from goblinshift.entrypoints.admin_cli import (
 from goblinshift.entrypoints.maintenance import AccountJobs
 from goblinshift.files.storage import FileStorage
 from goblinshift.identity import (
+    MAX_ACTIVE_KEYS,
     MAX_STORED_KEYS,
     Scope,
     authenticate_api_key,
@@ -196,43 +197,46 @@ def put_in_state(factory: sessionmaker[Session], user_id: str, state: str) -> No
             request_account_deletion(session, owner_id, datetime.now(UTC))
 
 
-@pytest.mark.parametrize(
-    ("state", "expected"),
-    [
-        ("bloqueada", EXIT_NOT_FOUND),
-        ("pendente", EXIT_NOT_FOUND),
-        ("exclusao-pedida", EXIT_NOT_FOUND),
-        ("ativa", EXIT_OK),
-    ],
-)
+@pytest.mark.parametrize("state", ["bloqueada", "pendente", "exclusao-pedida"])
 def test_issue_key_recusa_conta_que_nao_esta_ativa(
-    capsys: pytest.CaptureFixture[str], factory: sessionmaker[Session], state: str, expected: int
+    capsys: pytest.CaptureFixture[str], factory: sessionmaker[Session], state: str
 ) -> None:
     user_id = create_user(capsys)
     put_in_state(factory, user_id, state)
 
     exit_code, out, _ = run(capsys, "issue-key", "--user", user_id, "--scopes", "files:read")
 
-    assert exit_code == expected
-    assert keys_of(factory, user_id) == (1 if expected == EXIT_OK else 0)
-    assert (out == "") is (expected != EXIT_OK)
+    assert exit_code == EXIT_NOT_FOUND
+    assert out == ""
+    assert keys_of(factory, user_id) == 0
 
 
-@pytest.mark.parametrize(("active", "expected"), [(4, EXIT_OK), (5, EXIT_USAGE)])
 def test_issue_key_acima_do_teto_sai_com_2(
-    capsys: pytest.CaptureFixture[str], factory: sessionmaker[Session], active: int, expected: int
+    capsys: pytest.CaptureFixture[str], factory: sessionmaker[Session]
 ) -> None:
     user_id = create_user(capsys)
-    for _ in range(active):
+    for _ in range(MAX_ACTIVE_KEYS):
         new_key(factory, UUID(user_id))
 
     exit_code, out, err = run(capsys, "issue-key", "--user", user_id, "--scopes", "files:read")
 
-    assert exit_code == expected
-    assert keys_of(factory, user_id) == active + (1 if expected == EXIT_OK else 0)
-    if expected == EXIT_USAGE:
-        assert out == ""
-        assert "a conta já tem 5 chaves ativas" in err
+    assert exit_code == EXIT_USAGE
+    assert out == ""
+    assert f"a conta já tem {MAX_ACTIVE_KEYS} chaves ativas" in err
+    assert keys_of(factory, user_id) == MAX_ACTIVE_KEYS
+
+
+def test_issue_key_abaixo_do_teto_emite_a_ultima_vaga(
+    capsys: pytest.CaptureFixture[str], factory: sessionmaker[Session]
+) -> None:
+    user_id = create_user(capsys)
+    for _ in range(MAX_ACTIVE_KEYS - 1):
+        new_key(factory, UUID(user_id))
+
+    exit_code, _, _ = run(capsys, "issue-key", "--user", user_id, "--scopes", "files:read")
+
+    assert exit_code == EXIT_OK
+    assert keys_of(factory, user_id) == MAX_ACTIVE_KEYS
 
 
 def test_issue_key_com_o_teto_de_guardadas_sai_com_2(
@@ -521,24 +525,36 @@ def open_keys(factory: sessionmaker[Session], user_id: str) -> int:
     return found
 
 
-def test_block_sem_yes_sai_com_2_e_nada_muda(
-    capsys: pytest.CaptureFixture[str], factory: sessionmaker[Session], storage: FileStorage
+@pytest.mark.parametrize("command", ["block", "request-deletion"])
+def test_sem_yes_sai_com_2_e_pede_a_confirmacao(
+    capsys: pytest.CaptureFixture[str], command: str
+) -> None:
+    user_id = create_user(capsys)
+
+    exit_code, out, err = run(capsys, command, "--user", user_id)
+
+    assert exit_code == EXIT_USAGE
+    assert out == ""
+    assert "confirme com --yes" in err
+
+
+@pytest.mark.parametrize("command", ["block", "request-deletion"])
+def test_sem_yes_mostra_o_resumo_do_impacto(
+    capsys: pytest.CaptureFixture[str],
+    factory: sessionmaker[Session],
+    storage: FileStorage,
+    command: str,
 ) -> None:
     user_id = create_user(capsys)
     run(capsys, "issue-key", "--user", user_id, "--scopes", "files:read")
     run_id = queue_run(factory, storage, UUID(user_id))
 
-    exit_code, out, err = run(capsys, "block", "--user", user_id)
+    _, _, err = run(capsys, command, "--user", user_id)
 
-    assert exit_code == EXIT_USAGE
-    assert out == ""
+    assert "Ana" in err
+    assert "ativa;" in err
     assert "1 chave(s) ativa(s)" in err
     assert str(run_id) in err
-    assert "--yes" in err
-    assert status_of(factory, user_id) == "active"
-    assert open_keys(factory, user_id) == 1
-    assert run_status(factory, run_id) == Status.QUEUED
-    assert audited(factory, user_id) == ["ACCOUNT_CREATED", "KEY_ISSUED"]
 
 
 def test_block_dry_run_mostra_o_impacto_e_nao_grava(
@@ -561,25 +577,29 @@ def test_block_dry_run_mostra_o_impacto_e_nao_grava(
     assert audited(factory, user_id) == ["ACCOUNT_CREATED", "KEY_ISSUED"]
 
 
-def test_block_dry_run_de_conta_inexistente_sai_como_nao_encontrada(
-    capsys: pytest.CaptureFixture[str],
+@pytest.mark.parametrize("command", ["block", "request-deletion"])
+def test_dry_run_de_conta_inexistente_sai_como_nao_encontrada(
+    capsys: pytest.CaptureFixture[str], command: str
 ) -> None:
-    exit_code, _, _ = run(capsys, "block", "--user", str(uuid7()), "--dry-run")
+    exit_code, _, _ = run(capsys, command, "--user", str(uuid7()), "--dry-run")
 
     assert exit_code == EXIT_NOT_FOUND
 
 
-def test_block_com_yes_e_dry_run_juntos_e_erro_de_uso(capsys: pytest.CaptureFixture[str]) -> None:
+@pytest.mark.parametrize("command", ["block", "request-deletion"])
+def test_yes_e_dry_run_juntos_e_erro_de_uso(
+    capsys: pytest.CaptureFixture[str], command: str
+) -> None:
     user_id = create_user(capsys)
 
     with pytest.raises(SystemExit) as usage_error:
-        main(["block", "--user", user_id, "--yes", "--dry-run"])
+        main([command, "--user", user_id, "--yes", "--dry-run"])
     capsys.readouterr()
 
     assert usage_error.value.code == EXIT_USAGE
 
 
-def test_block_com_yes_bloqueia_como_hoje(
+def test_block_com_yes_bloqueia_revoga_e_cancela(
     capsys: pytest.CaptureFixture[str], factory: sessionmaker[Session], storage: FileStorage
 ) -> None:
     user_id = create_user(capsys)
@@ -616,11 +636,13 @@ def row_snapshot(factory: sessionmaker[Session], user_id: str) -> dict[str, obje
     return {"account": account, "keys": keys, "runs": runs, "events": events}
 
 
+@pytest.mark.parametrize("command", ["block", "request-deletion"])
 @pytest.mark.parametrize("confirmation", [(), ("--dry-run",)], ids=["sem-yes", "dry-run"])
-def test_block_sem_confirmacao_nao_altera_linhas(
+def test_sem_confirmacao_nao_altera_linhas(
     capsys: pytest.CaptureFixture[str],
     factory: sessionmaker[Session],
     storage: FileStorage,
+    command: str,
     confirmation: tuple[str, ...],
 ) -> None:
     user_id = create_user(capsys)
@@ -628,7 +650,7 @@ def test_block_sem_confirmacao_nao_altera_linhas(
     queue_run(factory, storage, UUID(user_id))
     before = row_snapshot(factory, user_id)
 
-    run(capsys, "block", "--user", user_id, *confirmation)
+    run(capsys, command, "--user", user_id, *confirmation)
 
     assert row_snapshot(factory, user_id) == before
 
@@ -723,28 +745,6 @@ def test_request_deletion_marca_revoga_cancela_e_audita(
     ]
 
 
-def test_request_deletion_sem_yes_sai_com_2_e_nada_muda(
-    capsys: pytest.CaptureFixture[str], factory: sessionmaker[Session], storage: FileStorage
-) -> None:
-    user_id = create_user(capsys)
-    run(capsys, "issue-key", "--user", user_id, "--scopes", "files:read")
-    run_id = queue_run(factory, storage, UUID(user_id))
-
-    exit_code, out, err = run(capsys, "request-deletion", "--user", user_id)
-
-    assert exit_code == EXIT_USAGE
-    assert out == ""
-    assert "Ana" in err
-    assert "ativa;" in err
-    assert "1 chave(s) ativa(s)" in err
-    assert str(run_id) in err
-    assert "--yes" in err
-    assert deletion_requested_at(factory, user_id) is None
-    assert open_keys(factory, user_id) == 1
-    assert run_status(factory, run_id) == Status.QUEUED
-    assert audited(factory, user_id) == ["ACCOUNT_CREATED", "KEY_ISSUED"]
-
-
 def test_request_deletion_dry_run_mostra_o_impacto_e_nao_grava(
     capsys: pytest.CaptureFixture[str], factory: sessionmaker[Session], storage: FileStorage
 ) -> None:
@@ -765,7 +765,7 @@ def test_request_deletion_dry_run_mostra_o_impacto_e_nao_grava(
     assert "ACCOUNT_DELETION_REQUESTED" not in audited(factory, user_id)
 
 
-def test_request_deletion_com_yes_pede_como_hoje(
+def test_request_deletion_com_yes_pede_revoga_e_cancela(
     capsys: pytest.CaptureFixture[str], factory: sessionmaker[Session], storage: FileStorage
 ) -> None:
     user_id = create_user(capsys)
@@ -779,31 +779,6 @@ def test_request_deletion_com_yes_pede_como_hoje(
     assert open_keys(factory, user_id) == 0
     assert run_status(factory, run_id) == Status.CANCELED
     assert actors(factory, user_id)[-1] == ("ACCOUNT_DELETION_REQUESTED", "admin")
-
-
-@pytest.mark.parametrize("confirmation", [(), ("--dry-run",)], ids=["sem-yes", "dry-run"])
-def test_request_deletion_sem_confirmacao_nao_altera_linhas(
-    capsys: pytest.CaptureFixture[str],
-    factory: sessionmaker[Session],
-    storage: FileStorage,
-    confirmation: tuple[str, ...],
-) -> None:
-    user_id = create_user(capsys)
-    run(capsys, "issue-key", "--user", user_id, "--scopes", "files:read")
-    queue_run(factory, storage, UUID(user_id))
-    before = row_snapshot(factory, user_id)
-
-    run(capsys, "request-deletion", "--user", user_id, *confirmation)
-
-    assert row_snapshot(factory, user_id) == before
-
-
-def test_request_deletion_dry_run_de_conta_inexistente_sai_como_nao_encontrada(
-    capsys: pytest.CaptureFixture[str],
-) -> None:
-    exit_code, _, _ = run(capsys, "request-deletion", "--user", str(uuid7()), "--dry-run")
-
-    assert exit_code == EXIT_NOT_FOUND
 
 
 def actors(factory: sessionmaker[Session], user_id: str) -> list[tuple[str, str | None]]:
