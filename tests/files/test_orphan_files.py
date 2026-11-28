@@ -8,20 +8,23 @@ from pathlib import Path
 from typing import Any
 
 import pytest
-from sqlalchemy import Executable, Select, event, func, select, update
+from sqlalchemy import Executable, Select, event, func, insert, select, update
 from sqlalchemy.engine import Engine
 from sqlalchemy.exc import DBAPIError
 from sqlalchemy.orm import Session, sessionmaker
 
+from goblinshift.files import orphans
 from goblinshift.files.orphans import (
+    OrphanDeletion,
     OrphanFile,
     OrphanReason,
     OrphanReport,
     StorageNotMountedError,
+    delete_orphan_files,
     find_orphan_files,
 )
 from goblinshift.files.states import ObjectState
-from goblinshift.files.storage import FileStorage, StoredFile
+from goblinshift.files.storage import MOUNT_MARKER, FileStorage, StoredFile
 from goblinshift.files.tables import stored_object, upload
 from goblinshift.platform.db import unit_of_work
 from tests.files.support import create_intent, create_user, mark_mounted, ready_upload
@@ -328,3 +331,113 @@ def test_classify_roda_em_transacao_read_only(
 
     assert sqlstates == ["25006"]
     assert report.orphan_count == 1
+
+
+def deletion_of(
+    factory: sessionmaker[Session],
+    storage: FileStorage,
+    *,
+    modified_before: float,
+    limit: int = LIST_LIMIT,
+) -> OrphanDeletion:
+    with factory() as session:
+        return delete_orphan_files(session, storage, modified_before=modified_before, limit=limit)
+
+
+def test_delete_orphans_apaga_so_sem_linha_e_antigo(
+    factory: sessionmaker[Session], storage: FileStorage
+) -> None:
+    cutoff = time.time() - ONE_HOUR
+    put(storage, "uploads/velho", b"12345")
+    age(storage, "uploads/velho", cutoff - ONE_HOUR)
+    put(storage, "uploads/recente")
+    owner = create_user(factory, "ana")
+    removed = key_of(factory, ready_upload(factory, storage, owner).id)
+    set_state(factory, removed, ObjectState.DELETED)
+    age(storage, removed, cutoff - ONE_HOUR)
+    alive = key_of(factory, ready_upload(factory, storage, owner).id)
+    age(storage, alive, cutoff - ONE_HOUR)
+
+    result = deletion_of(factory, storage, modified_before=cutoff)
+
+    assert [(f.key, f.size_bytes, f.reason) for f in result.deleted] == [
+        ("uploads/velho", 5, OrphanReason.NO_ROW)
+    ]
+    assert result.skipped == 0
+    assert [f for f in _files(storage) if f != MOUNT_MARKER] == sorted(
+        ["uploads/recente", removed, alive]
+    )
+
+
+def test_linha_criada_entre_a_lista_e_a_remocao_salva_o_arquivo(
+    factory: sessionmaker[Session], storage: FileStorage, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    owner = create_user(factory, "ana")
+    put(storage, "uploads/restaurado")
+    put(storage, "uploads/solto")
+    real_classify = orphans._classify
+
+    def classify_then_insert_row(
+        session: Session, batch: Iterator[StoredFile]
+    ) -> Iterator[tuple[StoredFile, OrphanReason]]:
+        results = list(real_classify(session, batch))
+        with unit_of_work(factory) as other:
+            other.execute(
+                insert(stored_object).values(owner_id=owner, storage_key="uploads/restaurado")
+            )
+        yield from results
+
+    monkeypatch.setattr(orphans, "_classify", classify_then_insert_row)
+
+    result = deletion_of(factory, storage, modified_before=future_cutoff())
+
+    assert [f.key for f in result.deleted] == ["uploads/solto"]
+    assert result.skipped == 1
+    assert "uploads/restaurado" in _files(storage)
+
+
+def test_arquivo_tocado_entre_a_lista_e_a_remocao_fica(
+    factory: sessionmaker[Session], storage: FileStorage, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    cutoff = 2_000_000
+    put(storage, "uploads/regravado")
+    age(storage, "uploads/regravado", cutoff - 1)
+    real_classify = orphans._classify
+
+    def classify_then_touch(
+        session: Session, batch: Iterator[StoredFile]
+    ) -> Iterator[tuple[StoredFile, OrphanReason]]:
+        results = list(real_classify(session, batch))
+        age(storage, "uploads/regravado", cutoff + 1)
+        yield from results
+
+    monkeypatch.setattr(orphans, "_classify", classify_then_touch)
+
+    result = deletion_of(factory, storage, modified_before=cutoff)
+
+    assert (result.deleted, result.skipped) == ((), 1)
+    assert "uploads/regravado" in _files(storage)
+
+
+def test_delete_orphans_respeita_o_limit(
+    factory: sessionmaker[Session], storage: FileStorage
+) -> None:
+    for index in range(5):
+        put(storage, f"uploads/o{index}")
+
+    result = deletion_of(factory, storage, modified_before=future_cutoff(), limit=2)
+
+    assert len(result.deleted) == 2
+    assert len([f for f in _files(storage) if f.startswith("uploads/")]) == 3
+
+
+def test_delete_orphans_com_storage_desmontado_levanta(
+    factory: sessionmaker[Session], tmp_path: Path
+) -> None:
+    unmounted = FileStorage(tmp_path / "desmontado")
+    put(unmounted, "uploads/a")
+
+    with pytest.raises(StorageNotMountedError):
+        deletion_of(factory, unmounted, modified_before=future_cutoff())
+
+    assert (tmp_path / "desmontado" / "uploads" / "a").exists()

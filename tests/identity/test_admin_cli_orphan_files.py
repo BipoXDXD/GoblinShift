@@ -232,3 +232,78 @@ def test_somente_leitura(
     assert exit_code == EXIT_OK
     assert len(out.splitlines()) == 2
     assert (files_under(storage.root), row_summary(factory)) == before
+
+
+def test_delete_orphans_sem_yes_sai_com_2_e_nada_some(
+    capsys: pytest.CaptureFixture[str], storage: FileStorage
+) -> None:
+    put(storage, "uploads/solto", b"x", mtime=LONG_AGO)
+    before = files_under(storage.root)
+
+    exit_code, out, err = run(capsys, "--delete-orphans")
+
+    assert (exit_code, out) == (EXIT_USAGE, "")
+    assert err == "gs-admin: use --yes depois de conferir a lista\n"
+    assert files_under(storage.root) == before
+
+
+def test_yes_sem_delete_orphans_e_erro_de_uso(
+    capsys: pytest.CaptureFixture[str], storage: FileStorage
+) -> None:
+    put(storage, "uploads/solto", b"x", mtime=LONG_AGO)
+    before = files_under(storage.root)
+
+    exit_code, _, err = run(capsys, "--yes")
+
+    assert exit_code == EXIT_USAGE
+    assert err == "gs-admin: --yes só vale com --delete-orphans\n"
+    assert files_under(storage.root) == before
+
+
+def test_delete_orphans_com_yes_apaga_sem_linha_e_poupa_o_resto(
+    capsys: pytest.CaptureFixture[str], factory: sessionmaker[Session], storage: FileStorage
+) -> None:
+    ready_upload(factory, storage, create_user(factory, "ana"))
+    with unit_of_work(factory) as session:
+        session.execute(update(stored_object).values(state=ObjectState.DELETED))
+    for path in storage.root.joinpath("uploads").iterdir():
+        os.utime(path, (LONG_AGO, LONG_AGO))
+    [removed] = files_under(storage.root / "uploads")
+    put(storage, "uploads/solto", b"12345", mtime=LONG_AGO)
+    put(storage, "uploads/recente", b"x")
+
+    exit_code, out, err = run(capsys, "--delete-orphans", "--yes")
+
+    assert exit_code == EXIT_OK
+    assert out == "uploads/solto\t5\t1970-01-12T13:46:40+00:00\tapagado\n"
+    assert "gs-admin: 1 órfãos sem linha apagados, 5 bytes" in err
+    assert "gs-admin: 0 poupados porque mudaram depois da lista" in err
+    assert sorted(files_under(storage.root / "uploads")) == sorted([removed, "recente"])
+
+
+def test_delete_orphans_respeita_o_limit_na_cli(
+    capsys: pytest.CaptureFixture[str], storage: FileStorage
+) -> None:
+    for index in range(3):
+        put(storage, f"uploads/o{index}", b"xx", mtime=LONG_AGO)
+
+    exit_code, out, err = run(capsys, "--delete-orphans", "--yes", "--limit", "2")
+
+    assert exit_code == EXIT_OK
+    assert len(out.splitlines()) == 2
+    assert len(files_under(storage.root / "uploads")) == 1
+    assert "gs-admin: chegou ao limite de 2; pode haver mais, rode de novo" in err
+
+
+def test_delete_orphans_com_storage_desmontado_sai_com_4(
+    capsys: pytest.CaptureFixture[str], tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    root = tmp_path / "desmontado"
+    monkeypatch.setenv("GS_STORAGE_ROOT", str(root))
+    put(FileStorage(root), "uploads/a", b"x", mtime=LONG_AGO)
+
+    exit_code, out, err = run(capsys, "--delete-orphans", "--yes")
+
+    assert (exit_code, out) == (EXIT_FAILURE, "")
+    assert err == "gs-admin: storage não montado; nada foi verificado\n"
+    assert (root / "uploads" / "a").exists()

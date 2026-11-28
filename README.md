@@ -178,7 +178,7 @@ uv run gs-admin revoke-key --key <public_id>
 uv run gs-admin block --user <id>                          # roteiro: docs/runbooks/abuso.md
 uv run gs-admin request-deletion --user <id>               # como DELETE /me, também para conta bloqueada
 uv run gs-admin find-user --user-hash <hash>               # user.hash da telemetria → id da conta (- lê da entrada)
-uv run gs-admin orphan-files                               # arquivos do storage sem linha viva; só leitura
+uv run gs-admin orphan-files                               # arquivos do storage sem linha viva; só leitura por padrão
 curl -H "Authorization: Bearer $(cat chave.txt)" https://…/api/v1/me
 ```
 
@@ -188,7 +188,7 @@ A chave tem o formato `gsk_<public_id>_<segredo>`: 16 dígitos hexadecimais púb
 
 ### Arquivos órfãos no storage
 
-`gs-admin orphan-files` compara o disco do storage com `stored_object` e **só lê**: não apaga nem altera nada. Imprime uma linha por arquivo (chave, bytes, modificação em UTC e categoria, separados por tab) e os totais por categoria em stderr: `sem-linha` (nenhuma linha referencia o arquivo) e `marcado-removido-mas-presente` (linha `deleted` ou `missing` com o arquivo ainda no disco). Arquivo modificado há menos de `--min-age-hours` (padrão 6) fica de fora, por poder ser gravação em curso, e `--limit` (padrão 200) limita só as linhas listadas. Sem a sentinela de montagem o storage não é verificado (saída 4). Na VPS, direto no container em execução:
+`gs-admin orphan-files` compara o disco do storage com `stored_object` e **só lê por padrão**: sem `--delete-orphans --yes`, não apaga nem altera nada. Imprime uma linha por arquivo (chave, bytes, modificação em UTC e categoria, separados por tab) e os totais por categoria em stderr: `sem-linha` (nenhuma linha referencia o arquivo) e `marcado-removido-mas-presente` (linha `deleted` ou `missing` com o arquivo ainda no disco). Arquivo modificado há menos de `--min-age-hours` (padrão 6) fica de fora, por poder ser gravação em curso, e `--limit` (padrão 200) limita só as linhas listadas. Sem a sentinela de montagem o storage não é verificado (saída 4). Na VPS, direto no container em execução:
 
 ```bash
 sudo docker exec -i goblinshift-api-1 gs-admin orphan-files --min-age-hours 6 --limit 200 > orfaos.tsv
@@ -206,6 +206,12 @@ Limitações do relatório, para ler antes de agir sobre ele:
 - **É uma foto de um instante.** O expurgo roda em paralelo e confirma o estado no banco antes de apagar o arquivo, então uma chave pode aparecer no meio dessa transição. Repita a execução depois de pelo menos um ciclo da manutenção e só aja sobre as chaves que aparecem nas duas.
 - **Arquivo com modificação no futuro fica invisível.** O corte de idade compara o `mtime` com o relógio da máquina: um `mtime` à frente dele (relógio ajustado, arquivo tocado à mão) nunca passa do corte e nunca é listado.
 - **Só entram arquivos comuns com nome de chave válido.** Nomes fora do padrão de chave (espaço, acento, começo por ponto), symlinks e o diretório `.tmp` não aparecem; os temporários têm limpeza própria na manutenção. Um arquivo assim no storage não foi criado pela aplicação e pede inspeção à mão.
+
+Para apagar os `sem-linha` (por exemplo, uploads e candidatos criados depois do dump, após uma restauração), confira a lista e rode com `--delete-orphans --yes`. Só a categoria `sem-linha` é apagada, nunca `marcado-removido-mas-presente`; logo antes de cada remoção a linha (em qualquer estado) e o `mtime` são conferidos de novo, e o arquivo que ganhou linha ou foi modificado depois do corte fica e entra na contagem de poupados. Cada arquivo apagado sai numa linha com a categoria `apagado`, e `--limit` vira o máximo de remoções por execução. `--delete-orphans` sem `--yes` sai com 2 sem apagar nada.
+
+```bash
+sudo docker exec -i goblinshift-api-1 gs-admin orphan-files --min-age-hours 6 --limit 200 --delete-orphans --yes > apagados.tsv
+```
 
 ## Publicação em produção
 

@@ -15,7 +15,7 @@ variáveis GS_* da API para chegar ao banco e ao armazenamento.
     gs-admin set-limits --user <id> [--runs-per-24h N|default] [--input-bytes-per-24h N|default]
                         [--storage-bytes N|default]
     gs-admin usage --user <id>
-    gs-admin orphan-files [--min-age-hours H] [--limit N]
+    gs-admin orphan-files [--min-age-hours H] [--limit N] [--delete-orphans --yes]
 
 `issue-key` imprime o segredo uma única vez na saída padrão, e só ele, para que
 `> arquivo` o capture sem metadados; o identificador público e a expiração vão para stderr.
@@ -33,15 +33,19 @@ fica como está. Cada mudança grava `ACCOUNT_LIMITS_CHANGED` na auditoria, com 
 e novos dos itens citados. `usage` imprime, separados por tab, o consumo das últimas 24 h
 (execuções, bytes de entrada e tempo de executor), o armazenamento reservado e cada limite com a
 origem (`conta` ou `padrão`).
-`orphan-files` é um relatório só de leitura: nada é apagado nem alterado. Percorre o disco do
-storage e lista, uma linha por arquivo e separados por tab (chave, bytes, modificação em UTC e
-categoria), o que nenhuma linha viva de `stored_object` referencia: `sem-linha` (órfão puro) e
-`marcado-removido-mas-presente` (linha `deleted` ou `missing` cujo arquivo ainda existe; em
+`orphan-files` é, por padrão, um relatório só de leitura: nada é apagado nem alterado. Percorre o
+disco do storage e lista, uma linha por arquivo e separados por tab (chave, bytes, modificação em
+UTC e categoria), o que nenhuma linha viva de `stored_object` referencia: `sem-linha` (órfão puro)
+e `marcado-removido-mas-presente` (linha `deleted` ou `missing` cujo arquivo ainda existe; em
 `missing` talvez convenha restaurar a linha em vez de apagar o arquivo). Arquivo modificado há
 menos de `--min-age-hours` (padrão 6, aceita decimal) fica de fora, porque pode ser gravação em
 curso; a lista vai até `--limit` linhas (padrão 200) e os totais por categoria, em stderr, contam
 tudo. Sem a sentinela de montagem o storage não é verificado e a saída é 4. Sai com 0 mesmo com
-órfãos: decidir o que fazer com eles é do administrador.
+órfãos: decidir o que fazer com eles é do administrador. Com `--delete-orphans --yes` apaga até
+`--limit` arquivos `sem-linha` (nunca `marcado-removido-mas-presente`), conferindo de novo a linha
+e o `mtime` logo antes de cada remoção; imprime uma linha por arquivo apagado (categoria
+`apagado`) e os totais em stderr. `--delete-orphans` sem `--yes` (ou `--yes` sozinho) sai com 2
+sem apagar nada: rode antes sem a flag e confira a lista.
 Sai com 0 em sucesso, 1 se a conta ou a chave não existir, 2 em erro de uso e 3 se faltar um
 segredo obrigatório, com uma linha em stderr que nomeia a variável; Ctrl-C sai com 130 e a linha
 `gs-admin: interrompido`. Qualquer outra falha sai com 4
@@ -67,9 +71,11 @@ from sqlalchemy.orm import Session, sessionmaker
 from goblinshift import capacity
 from goblinshift.entrypoints.worker import run_finished_reporter
 from goblinshift.files.orphans import (
+    OrphanDeletion,
     OrphanFile,
     OrphanReport,
     StorageNotMountedError,
+    delete_orphan_files,
     find_orphan_files,
 )
 from goblinshift.files.storage import FileStorage
@@ -274,7 +280,8 @@ def _argument_parser() -> argparse.ArgumentParser:
     usage.set_defaults(command=_usage)
 
     orphans = commands.add_parser(
-        "orphan-files", help="lista arquivos do storage sem linha viva (só leitura)"
+        "orphan-files",
+        help="lista arquivos do storage sem linha viva (só leitura, salvo --delete-orphans --yes)",
     )
     orphans.add_argument(
         "--min-age-hours",
@@ -286,7 +293,15 @@ def _argument_parser() -> argparse.ArgumentParser:
         "--limit",
         type=_positive_int,
         default=DEFAULT_LIST_LIMIT,
-        help=f"máximo de linhas listadas; os totais contam tudo (padrão: {DEFAULT_LIST_LIMIT})",
+        help=f"máximo de linhas listadas (ou de arquivos apagados); padrão {DEFAULT_LIST_LIMIT}",
+    )
+    orphans.add_argument(
+        "--delete-orphans",
+        action="store_true",
+        help="apaga os órfãos sem linha (nunca os marcados como removidos); exige --yes",
+    )
+    orphans.add_argument(
+        "--yes", action="store_true", help="confirma --delete-orphans depois de conferir a lista"
     )
     orphans.set_defaults(command=_orphan_files)
     return parser
@@ -495,8 +510,14 @@ def _positive_hours(text: str) -> float:
 
 
 def _orphan_files(args: argparse.Namespace, context: _Context) -> int:
+    if args.delete_orphans and not args.yes:
+        return _fail(EXIT_USAGE, "use --yes depois de conferir a lista")
+    if args.yes and not args.delete_orphans:
+        return _fail(EXIT_USAGE, "--yes só vale com --delete-orphans")
     storage = FileStorage(context.settings.storage_root)
     modified_before = context.clock() - args.min_age_hours * _SECONDS_PER_HOUR
+    if args.delete_orphans:
+        return _delete_orphans(context, storage, modified_before, args.limit)
     try:
         with context.factory() as session:
             report = find_orphan_files(
@@ -510,11 +531,44 @@ def _orphan_files(args: argparse.Namespace, context: _Context) -> int:
     return EXIT_OK
 
 
-def _orphan_line(file: OrphanFile) -> str:
+def _delete_orphans(
+    context: _Context, storage: FileStorage, modified_before: float, limit: int
+) -> int:
+    try:
+        with context.factory() as session:
+            result = delete_orphan_files(
+                session, storage, modified_before=modified_before, limit=limit
+            )
+    except StorageNotMountedError as error:
+        return _fail(EXIT_FAILURE, str(error))
+    for file in result.deleted:
+        print(_orphan_line(file, category=_DELETED_CATEGORY))
+    _print_deletion_totals(result, limit)
+    return EXIT_OK
+
+
+_DELETED_CATEGORY = "apagado"
+
+
+def _orphan_line(file: OrphanFile, *, category: str | None = None) -> str:
     # `ascii()` sem as aspas: tab, quebra de linha e não-ASCII na chave nunca partem o TSV.
     key = ascii(file.key)[1:-1]
     modified = datetime.fromtimestamp(file.modified_at, UTC).isoformat()
-    return "\t".join([key, str(file.size_bytes), modified, file.reason])
+    return "\t".join([key, str(file.size_bytes), modified, category or file.reason])
+
+
+def _print_deletion_totals(result: OrphanDeletion, limit: int) -> None:
+    deleted_bytes = sum(file.size_bytes for file in result.deleted)
+    print(
+        f"gs-admin: {len(result.deleted)} órfãos sem linha apagados, {deleted_bytes} bytes",
+        file=sys.stderr,
+    )
+    print(f"gs-admin: {result.skipped} poupados porque mudaram depois da lista", file=sys.stderr)
+    if len(result.deleted) >= limit:
+        print(
+            f"gs-admin: chegou ao limite de {limit}; pode haver mais, rode de novo",
+            file=sys.stderr,
+        )
 
 
 def _print_orphan_totals(report: OrphanReport, limit: int) -> None:

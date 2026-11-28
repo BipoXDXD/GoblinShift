@@ -1,4 +1,4 @@
-"""Arquivos do storage que nenhuma linha viva de `stored_object` referencia (somente leitura).
+"""Arquivos do storage que nenhuma linha viva de `stored_object` referencia.
 
 O expurgo confirma o estado no banco antes de apagar o arquivo (`retention.py`); uma queda entre
 os dois, ou um defeito, deixa arquivo no disco sem dono. Este relatório lê o disco e confere as
@@ -11,13 +11,20 @@ administrador:
   arquivo; por isso a categoria é separada.
 
 Linha `pending`, `committed` ou `delete_requested` com arquivo não é órfã: o expurgo ainda a
-trata. Nada aqui apaga ou altera arquivo ou linha, e cada lote roda em transação `READ ONLY`.
+trata. O relatório (`find_orphan_files`) não apaga nem altera arquivo ou linha, e cada lote roda
+em transação `READ ONLY`.
 
 Duas travas contra falso alarme. Arquivo modificado depois de `modified_before` fica de fora: é
 gravação em curso (arquivo no disco antes de a linha ser confirmada). E o disco é lido antes do
 banco em cada lote, de modo que arquivo criado depois da leitura nunca aparece como órfão. Sem a
 sentinela de montagem a raiz pode ser só o disco do sistema, e "tudo órfão" seria falso:
 `StorageNotMountedError`, sem consultar o banco.
+
+`delete_orphan_files` apaga só `sem-linha` (o caso da restauração de backup: uploads e candidatos
+criados depois do dump ficam no disco sem linha). Entre a lista e a remoção o arquivo pode ganhar
+dono, por isso cada um é conferido de novo logo antes do `unlink`: qualquer linha com a chave, em
+qualquer estado, ou um `mtime` que passou do corte, poupa o arquivo. `marcado-removido-mas-presente`
+nunca é apagado aqui: a linha existe e a decisão é do administrador.
 """
 
 from collections.abc import Iterable
@@ -29,7 +36,12 @@ from sqlalchemy import select, text
 from sqlalchemy.orm import Session
 
 from goblinshift.files.states import ObjectState
-from goblinshift.files.storage import FileStorage, StoredFile
+from goblinshift.files.storage import (
+    FileStorage,
+    ObjectMissingError,
+    ObjectTamperedError,
+    StoredFile,
+)
 from goblinshift.files.tables import stored_object
 
 DEFAULT_BATCH_SIZE = 1000
@@ -64,6 +76,14 @@ class OrphanReport:
     marked_removed_bytes: int
     listed: tuple[OrphanFile, ...]
     truncated: bool
+
+
+@dataclass(frozen=True)
+class OrphanDeletion:
+    """Arquivos apagados e quantos `sem-linha` foram poupados por mudar depois da lista."""
+
+    deleted: tuple[OrphanFile, ...]
+    skipped: int
 
 
 def find_orphan_files(
@@ -120,3 +140,49 @@ def _classify(
             yield file, OrphanReason.NO_ROW
         elif state in _REMOVED_STATES:
             yield file, OrphanReason.MARKED_REMOVED
+
+
+def delete_orphan_files(
+    session: Session,
+    storage: FileStorage,
+    *,
+    modified_before: float,
+    limit: int,
+    batch_size: int = DEFAULT_BATCH_SIZE,
+) -> OrphanDeletion:
+    """Apaga até `limit` arquivos `sem-linha` mais velhos que `modified_before` (epoch, em s).
+
+    Percorre o disco como `find_orphan_files`; a releitura da linha e do `mtime` antes de cada
+    `unlink` é o que separa "órfão na hora da lista" de "órfão agora".
+    """
+    if not storage.is_mounted():
+        raise StorageNotMountedError
+    deleted: list[OrphanFile] = []
+    skipped = 0
+    candidates = (f for f in storage.walk_objects() if f.modified_at < modified_before)
+    for batch in batched(candidates, batch_size, strict=False):
+        for file, reason in _classify(session, batch):
+            if reason is not OrphanReason.NO_ROW:
+                continue
+            if len(deleted) >= limit:
+                return OrphanDeletion(deleted=tuple(deleted), skipped=skipped)
+            if _still_orphan(session, storage, file.key, modified_before):
+                storage.delete(file.key)
+                deleted.append(OrphanFile(file.key, file.size_bytes, file.modified_at, reason))
+            else:
+                skipped += 1
+    return OrphanDeletion(deleted=tuple(deleted), skipped=skipped)
+
+
+def _still_orphan(session: Session, storage: FileStorage, key: str, modified_before: float) -> bool:
+    with session.begin():
+        row = session.execute(
+            select(stored_object.c.id).where(stored_object.c.storage_key == key)
+        ).first()
+    if row is not None:
+        return False
+    try:
+        current = storage.stat(key)
+    except ObjectMissingError, ObjectTamperedError:
+        return False
+    return current.modified_at < modified_before
