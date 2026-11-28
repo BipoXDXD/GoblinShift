@@ -198,6 +198,27 @@ def test_limite_do_readyz_nao_gasta_a_cota_da_api(stack: NginxLogs) -> None:
     assert [hit.status for hit in hits] == [HTTP_NO_CONTENT] * API_ALLOWED_AT_ONCE
 
 
+# --- /api/v1/status ----------------------------------------------------------------------------
+
+
+def test_estado_deixa_passar_a_rajada_e_recusa_o_excesso(stack: NginxLogs) -> None:
+    hits = _burst(stack, "/api/v1/status", 40, "198.51.100.80")
+
+    passed = _count(hits, HTTP_NO_CONTENT)
+    assert _count(hits, HTTP_TOO_MANY_REQUESTS) == len(hits) - passed > 0
+    # Mesmo ritmo do /readyz: 5 por segundo, com rajada de 10.
+    assert READYZ_ALLOWED_AT_ONCE <= passed <= READYZ_ALLOWED_AT_ONCE + 2
+
+
+def test_limite_do_estado_nao_gasta_a_cota_do_readyz(stack: NginxLogs) -> None:
+    client = "198.51.100.81"
+    _burst(stack, "/api/v1/status", 40, client)
+
+    hits = _burst(stack, "/readyz", READYZ_ALLOWED_AT_ONCE, client)
+
+    assert [hit.status for hit in hits] == [HTTP_NO_CONTENT] * READYZ_ALLOWED_AT_ONCE
+
+
 # --- Recusa sem IP nem query no log de erro ----------------------------------------------------
 
 # O `limit_req` registra cada recusa no log de erro, em nível `error`, com `client:` (IP completo) e

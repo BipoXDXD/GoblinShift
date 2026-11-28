@@ -36,6 +36,11 @@ export function formatDateTime(isoInstant: string): string {
   );
 }
 
+/** Só a hora (HH:MM) de um instante ISO 8601, no fuso e no formato da pessoa. */
+export function formatTime(isoInstant: string): string {
+  return new Intl.DateTimeFormat(TEXT.locale, { timeStyle: "short" }).format(new Date(isoInstant));
+}
+
 /** Contagem com separador de milhar do idioma da interface ("1.200"). */
 export function formatCount(count: number): string {
   return new Intl.NumberFormat(TEXT.locale).format(count);

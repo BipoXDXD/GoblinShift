@@ -97,6 +97,8 @@ MATRIX: dict[tuple[str, str], Rule] = {
     ("GET", "/docs"): Rule(Policy.PUBLIC),
     ("GET", "/docs/assets/{name}"): Rule(Policy.PUBLIC),
     ("GET", "/openapi.json"): Rule(Policy.PUBLIC),
+    # Estado do serviço (D9 do plano de paridade): só níveis, para quando o login falha.
+    ("GET", f"{API}/status"): Rule(Policy.PUBLIC),
     # Login (Frente A): o estado do login protege o callback, não uma credencial.
     ("GET", "/auth/login/{provider}"): Rule(Policy.PUBLIC),
     ("GET", "/auth/callback/{provider}"): Rule(Policy.PUBLIC),

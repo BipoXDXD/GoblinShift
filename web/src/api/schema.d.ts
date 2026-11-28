@@ -4,6 +4,23 @@
  */
 
 export interface paths {
+    "/api/v1/status": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Get Service Status */
+        get: operations["getServiceStatus"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/catalog": {
         parameters: {
             query?: never;
@@ -828,6 +845,11 @@ export interface components {
             /** Errors Truncated */
             errors_truncated?: true | null;
         };
+        /**
+         * ProcessingLevel
+         * @enum {string}
+         */
+        ProcessingLevel: "normal" | "slow" | "stalled";
         /** Progress */
         Progress: {
             phase: components["schemas"]["Phase"] | null;
@@ -841,6 +863,11 @@ export interface components {
          * @enum {string}
          */
         ProviderName: "google" | "github";
+        /**
+         * QueueLevel
+         * @enum {string}
+         */
+        QueueLevel: "free" | "busy" | "full";
         /** ReceivedContent */
         ReceivedContent: {
             /**
@@ -1078,6 +1105,21 @@ export interface components {
          * @enum {string}
          */
         Scope: "files:read" | "files:write" | "runs:read" | "runs:write" | "presets:read" | "presets:write";
+        /** ServiceStatusResponse */
+        ServiceStatusResponse: {
+            /**
+             * Api
+             * @constant
+             */
+            api: "up";
+            processing: components["schemas"]["ProcessingLevel"];
+            queue: components["schemas"]["QueueLevel"];
+            /**
+             * Checked At
+             * Format: date-time
+             */
+            checked_at: string;
+        };
         /**
          * Status
          * @enum {string}
@@ -1196,6 +1238,66 @@ export interface components {
 }
 export type $defs = Record<string, never>;
 export interface operations {
+    getServiceStatus: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ServiceStatusResponse"];
+                };
+            };
+            /** @description Unprocessable Content */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description Too Many Requests */
+            429: {
+                headers: {
+                    /** @description Segundos até poder repetir a requisição. */
+                    "Retry-After": string;
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description Internal Server Error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description Service Unavailable */
+            503: {
+                headers: {
+                    /** @description Segundos até poder repetir a requisição. */
+                    "Retry-After": string;
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+        };
+    };
     getCatalog: {
         parameters: {
             query?: never;

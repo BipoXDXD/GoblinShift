@@ -1007,6 +1007,7 @@ Consumo de conta perto da cota não é alerta, é informação no painel.
 - *Retenção:* configurada explicitamente em 30 dias (por stream ou globalmente), sem depender do padrão da versão instalada, que as fontes não confirmam.
 - *Disco:* filesystem próprio ([3.8](#s3-8)). Com o volume cheio, o OpenObserve para de ingerir e continua respondendo, então "telemetria acima de 85%" entra nos alertas de causa.
 - *Ponto cego:* se a VPS cair, a telemetria cai junto. Um monitor de uptime externo e gratuito consulta `/readyz` e avisa por um canal independente.
+- *Página de estado interna:* `/estado` lê `GET /api/v1/status`, público e sem login, porque serve justamente quando o login falha. Mostra só níveis e a hora da leitura (API no ar ou fora; processamento normal, lento ou parado; fila livre, ocupada ou cheia), nunca contagens, para não expor o uso do serviço. Não cobre a VPS fora do ar: roda no mesmo servidor e cai junto, caso que fica com o monitor externo acima.
 - *Confirmado na fatia 0* ([ADR 013](adr/013-openobserve-telemetria.md)): com 20 000 requisições sintéticas na VPS, o OpenObserve foi de 210 a 246 MiB de RAM e guardou os 60 000 spans em cerca de 3,7 MiB; SQL e alertas agendados funcionam direto sobre o stream de traces, então os eventos `main` não precisam ser emitidos também como log. Destinos de alerta precisam ser URLs públicas ou e-mail, porque o OpenObserve recusa IPs privados (proteção contra SSRF).
 
 Como a aplicação só fala OTLP com o Collector, trocar de backend no futuro não muda o código.

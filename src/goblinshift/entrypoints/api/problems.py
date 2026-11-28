@@ -267,6 +267,8 @@ def normalize_problem_responses(schema: dict[str, Any]) -> None:
 
 # Respostas de erro comuns a toda rota autenticada.
 PROBLEM_RESPONSES = problem_responses(401, 403, 422, 429, 500, 503)
+# Rotas públicas de `/api` (`/status`): sem credencial, não há 401 nem 403.
+PUBLIC_PROBLEM_RESPONSES = problem_responses(422, 429, 500, 503)
 
 
 # O nome segue o termo "problem" da RFC 9457, que é o que a classe representa.

@@ -17,6 +17,8 @@ await preloadRoutes(
   "/termos",
   "/privacidade",
   "/creditos",
+  "/acessibilidade",
+  "/estado",
   "/historico",
   "/entrar",
   "/acesso",
@@ -349,7 +351,7 @@ describe("Layout: aviso global", () => {
 });
 
 describe("Layout: rodapé", () => {
-  it("leva aos Termos, à Privacidade e aos Créditos, com alvo de 44 px", async () => {
+  it("leva aos textos públicos e ao Estado, com alvo de 44 px", async () => {
     setup(() => jsonResponse(meBody()));
 
     const footer = await screen.findByRole("contentinfo");
@@ -357,7 +359,9 @@ describe("Layout: rodapé", () => {
     expect(links.map((link) => [link.textContent, link.getAttribute("href")])).toEqual([
       ["Termos de Uso", "/termos"],
       ["Aviso de Privacidade", "/privacidade"],
+      ["Acessibilidade", "/acessibilidade"],
       ["Créditos", "/creditos"],
+      ["Estado do serviço", "/estado"],
     ]);
     for (const link of links) {
       expect(link).toHaveClass("min-h-11");
@@ -365,10 +369,12 @@ describe("Layout: rodapé", () => {
   });
 
   it.each([
-    ["/termos", ["page", null, null]],
-    ["/termos/", ["page", null, null]],
-    ["/privacidade", [null, "page", null]],
-    ["/creditos", [null, null, "page"]],
+    ["/termos", ["page", null, null, null, null]],
+    ["/termos/", ["page", null, null, null, null]],
+    ["/privacidade", [null, "page", null, null, null]],
+    ["/acessibilidade", [null, null, "page", null, null]],
+    ["/creditos", [null, null, null, "page", null]],
+    ["/estado", [null, null, null, null, "page"]],
   ])("em %s, só o link da página atual tem aria-current", async (path, expected) => {
     setup(() => jsonResponse(meBody()), path);
 

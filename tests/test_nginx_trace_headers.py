@@ -62,6 +62,7 @@ def test_rotas_da_api_incluem_o_snippet() -> None:
         "= /openapi.json",
         "= /livez",
         "= /readyz",
+        "= /api/v1/status",
         r"~ ^/api/v1/uploads/[^/]+/content$",
         r"~ ^/api/v1/artifacts/[^/]+/download$",
     } <= including

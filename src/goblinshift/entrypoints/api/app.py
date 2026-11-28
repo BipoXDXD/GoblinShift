@@ -30,6 +30,7 @@ from goblinshift.entrypoints.api import (
     runs,
     runs_artifacts,
     runs_cancel,
+    status,
     uploads,
 )
 from goblinshift.entrypoints.api.concurrency import (
@@ -43,10 +44,14 @@ from goblinshift.entrypoints.api.cookies import (
 )
 from goblinshift.entrypoints.api.problems import (
     PROBLEM_RESPONSES,
+    PUBLIC_PROBLEM_RESPONSES,
     install_problem_handlers,
     normalize_problem_responses,
 )
-from goblinshift.entrypoints.api.query_guard import reject_unknown_query
+from goblinshift.entrypoints.api.query_guard import (
+    reject_unknown_public_query,
+    reject_unknown_query,
+)
 from goblinshift.entrypoints.api.saturation import saturation_reporting
 from goblinshift.entrypoints.api.security_headers import SecurityHeadersMiddleware
 from goblinshift.entrypoints.api.transfers import TransferTimeouts
@@ -188,6 +193,14 @@ def create_app(
     app.include_router(api_docs.router)
     app.include_router(auth_login.router)
     app.include_router(auth_session.router)
+    # Sem principal (D9): o estado do serviço serve justamente quando o login falha. Fica fora do
+    # roteador de `/api`, cuja guarda de query depende da autenticação.
+    app.include_router(
+        status.router,
+        prefix=API_PREFIX,
+        responses=PUBLIC_PROBLEM_RESPONSES,
+        dependencies=[Depends(reject_unknown_public_query)],
+    )
     api = APIRouter(
         prefix=API_PREFIX,
         responses=PROBLEM_RESPONSES,
