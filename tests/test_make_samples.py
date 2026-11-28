@@ -5,6 +5,7 @@ import hashlib
 import io
 import json
 import subprocess
+import zipfile
 from collections import Counter
 
 import pikepdf
@@ -62,6 +63,14 @@ def test_downloads_tem_seis_arquivos_e_so_um_repetido() -> None:
 
     assert len(files) == 6
     assert sorted(digests.values()) == [1, 1, 1, 1, 2]
+
+
+def test_zip_dos_downloads_declara_unix_em_qualquer_plataforma() -> None:
+    zip_path = SAMPLES_DIR / "exemplo-downloads" / "ferramentas.zip"
+    with zipfile.ZipFile(zip_path) as archive:
+        systems = {entry.create_system for entry in archive.infolist()}
+    # 3 é Unix: sem fixar, o Windows grava 0 e o byte muda conforme quem gerou.
+    assert systems == {3}
 
 
 def test_video_tem_3_s_em_webm_vp8_e_opus() -> None:

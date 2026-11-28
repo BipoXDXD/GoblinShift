@@ -116,6 +116,7 @@ def _zip_bytes() -> bytes:
         entry = zipfile.ZipInfo("ferramentas.txt", date_time=ZIP_DATE)
         entry.compress_type = zipfile.ZIP_DEFLATED
         entry.external_attr = 0o644 << 16
+        entry.create_system = 3
         archive.writestr(entry, "martelo\nengrenagem\nlanterna\n")
     return buffer.getvalue()
 
