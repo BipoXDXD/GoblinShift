@@ -45,7 +45,8 @@ class CappedTransport(httpx2.AsyncBaseTransport):
     """Embrulha o transport real e limita o corpo de cada resposta a `limit` bytes.
 
     O Authlib cria e fecha um cliente por chamada, todos com este mesmo transport: fechá-lo
-    derrubaria a conexão de outro login em andamento, então o pool vive o processo inteiro.
+    derrubaria a conexão de outro login em andamento, então o `aclose` daqui não fecha o pool:
+    quem fecha o transport de dentro é o lifespan da aplicação, na parada.
     """
 
     def __init__(self, inner: httpx2.AsyncBaseTransport, limit: int) -> None:
