@@ -8,6 +8,8 @@ No ar em [goblinshift.dev](https://goblinshift.dev): a Oficina, a Bancada, os te
 
 ## As cinco receitas
 
+Os parâmetros e os limites de cada uma estão em [Receitas](#receitas).
+
 | Receita | Id | O que faz | Captura |
 |---|---|---|---|
 | CSV Janitor | `csv-janitor` | Limpa tabelas CSV: delimitadores, espaços, duplicatas, filtros, caixa e colunas finais, com aviso ou neutralização das células que parecem fórmulas. | <a href="docs/img/vitrine/receita-csv-janitor.png"><img src="docs/img/vitrine/receita-csv-janitor.png" alt="Execução concluída do CSV Janitor" width="240"></a> |
@@ -63,14 +65,14 @@ Na borda, o Caddy termina o TLS ([ADR 014](docs/adr/014-proxy-de-borda-caddy.md)
 - Playwright em desktop (1280 px) e celular (400 px), com axe WCAG 2.2 A/AA nos dois temas.
 - Sabotagem que exige a falha: `npm run e2e:sabotage` planta um defeito por spec e reprova se a spec continuar verde.
 - Schemathesis com `--checks=all` contra a API local, e o contrato `/api/v1` só cresce.
-- Jornadas reais das receitas sob gVisor no CI.
+- Jornadas reais sob gVisor no CI para CSV Janitor, Image Forge, Downloads Detox e PDF Press; PDF Press e Media Mill também rodam em produção depois de cada release (`e2e-producao.yml`).
 - Restauração do backup testada todo mês.
 
 ## Créditos e licenças
 
 - Código sob Apache-2.0: [LICENSE](LICENSE) e [NOTICE](NOTICE).
 - Arte: "Arte do GoblinShift (https://goblinshift.dev), CC BY 4.0", com a marca reservada; as condições estão em [LICENSE-ART](docs/art/LICENSE-ART.md).
-- As imagens desta página saem de `cd web && npm run vitrine`, com o build local e a API falsa. O manifesto `docs/img/vitrine/vitrine.json` se repete byte a byte entre rodadas; os bytes dos PNGs variam entre sistemas, pela rasterização das fontes.
+- As imagens desta página saem de `cd web && npm run vitrine`, com o build local e a API falsa. No mesmo commit, o manifesto `docs/img/vitrine/vitrine.json` se repete byte a byte entre rodadas (ele grava o campo `commit`); os bytes dos PNGs variam entre sistemas, pela rasterização das fontes.
 
 ## Documentos
 

@@ -10,11 +10,11 @@ from pathlib import Path
 import pytest
 
 from goblinshift.catalog import CATALOG
+from tests.test_vitrine_imagens import RESTRICTED, vitrine_files
 
 ROOT = Path(__file__).resolve().parent.parent
 README = (ROOT / "README.md").read_text(encoding="utf-8")
 PLAN_TEXT = (ROOT / "docs" / "GoblinShiftPlan.md").read_text(encoding="utf-8")
-VITRINE = ROOT / "docs" / "img" / "vitrine"
 
 NAMES = {
     "csv-janitor": "CSV Janitor",
@@ -25,7 +25,6 @@ NAMES = {
 }
 LINK = re.compile(r"\]\(([^)\s]+)\)|<img [^>]*src=\"([^\"]+)\"")
 PLAN_ANCHOR = re.compile(r"docs/GoblinShiftPlan\.md#([\w-]+)")
-RESTRICTED = ("jade", "fagulha")  # D3 (a): fora da concessão CC BY 4.0
 
 
 def relative_targets(text: str) -> list[str]:
@@ -53,13 +52,21 @@ def test_abertura_nomeia_as_cinco_receitas() -> None:
     assert [n for n in NAMES.values() if n not in opening] == []
 
 
+def test_readme_tem_links_e_ancoras_do_plano() -> None:
+    """Guarda dos dois testes parametrizados: com a lista vazia, o pytest os pula sem rodar."""
+    assert relative_targets(README)
+    assert plan_anchors(README)
+
+
 @pytest.mark.parametrize("target", relative_targets(README))
 def test_links_relativos_do_readme_existem(target: str) -> None:
+    assert relative_targets(README)  # regex quebrado reprova em vez de pular o teste
     assert (ROOT / target.split("#", 1)[0]).exists(), target
 
 
 @pytest.mark.parametrize("anchor", plan_anchors(README))
 def test_ancoras_do_plano_existem(anchor: str) -> None:
+    assert plan_anchors(README)  # regex quebrado reprova em vez de pular o teste
     assert f'<a id="{anchor}"></a>' in PLAN_TEXT
 
 
@@ -72,7 +79,7 @@ def test_readme_cita_cada_receita_com_imagem() -> None:
 def test_toda_imagem_da_vitrine_aparece_no_readme() -> None:
     missing = [
         p.name
-        for p in VITRINE.iterdir()
+        for p in vitrine_files()
         if p.suffix in {".png", ".gif"} and f"docs/img/vitrine/{p.name}" not in README
     ]
     assert missing == []
@@ -89,4 +96,4 @@ def test_secoes_da_vitrine() -> None:
 
 def test_vitrine_sem_goblin_restrita() -> None:
     text = showcase().lower()
-    assert [name for name in RESTRICTED if name in text] == []
+    assert sorted(name for name in RESTRICTED if name in text) == []
