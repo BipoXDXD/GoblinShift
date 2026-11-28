@@ -10,6 +10,7 @@ import hashlib
 import io
 import json
 import os
+import re
 import shutil
 import subprocess
 import sys
@@ -450,6 +451,55 @@ def test_ffmpeg_so_tem_os_protocolos_file_e_pipe(image: str) -> None:
     assert result.returncode == 0, result.stderr
     names = [line.strip() for line in result.stdout.splitlines()[1:]]
     assert names == ["Input:", "file", "pipe", "Output:", "file", "pipe"]
+
+
+def _listed(result: subprocess.CompletedProcess[str], *prefixes: str) -> set[str]:
+    """Os nomes de `-encoders` ou `-muxers`: depois da linha de traços que fecha a legenda, uma
+    linha por item, que começa pelas flags (" A....." ou "  E ") seguidas do nome."""
+    assert result.returncode == 0, result.stderr
+    _, listing = re.split(r"^ -+$", result.stdout, maxsplit=1, flags=re.MULTILINE)
+    return {line.split()[1] for line in listing.splitlines() if line.startswith(prefixes)}
+
+
+def test_ffmpeg_so_tem_os_encoders_das_receitas(image: str) -> None:
+    result = run_tool(image, "ffmpeg", "-hide_banner", "-encoders")
+
+    assert _listed(result, " A", " V") == {
+        "aac",
+        "flac",
+        "libmp3lame",
+        "libopus",
+        "mjpeg",
+        "pcm_s16le",
+    }
+
+
+def test_ffmpeg_so_tem_os_muxers_das_receitas(image: str) -> None:
+    result = run_tool(image, "ffmpeg", "-hide_banner", "-muxers")
+
+    # `mov` e `ogg` entram por dependência do próprio configure (ipod_muxer_select="mov_muxer",
+    # opus_muxer_select="ogg_muxer"): o código é o mesmo. Só saída, e o -f de cada chamada é fixo.
+    assert _listed(result, "  E") == {"flac", "image2", "ipod", "mov", "mp3", "ogg", "opus", "wav"}
+
+
+def test_ffmpeg_continua_lgpl(image: str) -> None:
+    result = run_tool(image, "ffmpeg", "-hide_banner", "-L")
+
+    assert result.returncode == 0, result.stderr
+    assert "GNU Lesser General Public License" in result.stdout
+    conf = run_tool(image, "ffmpeg", "-hide_banner", "-buildconf").stdout
+    assert "--enable-libmp3lame" in conf
+    assert "--enable-gpl" not in conf
+    assert "--enable-nonfree" not in conf
+
+
+def test_ffmpeg_nao_depende_de_lame_nem_opus_dinamicos(image: str) -> None:
+    result = run_tool(image, "ldd", "/usr/local/bin/ffmpeg")
+
+    assert result.returncode == 0, result.stderr
+    assert "mp3lame" not in result.stdout
+    assert "opus" not in result.stdout
+    assert "not found" not in result.stdout
 
 
 @pytest.mark.parametrize("demuxer", ["hls", "concat", "image2", "lavfi"])
