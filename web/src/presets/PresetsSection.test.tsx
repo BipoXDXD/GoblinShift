@@ -19,6 +19,12 @@ const CSRF = "csrf-da-sessao";
 const DELETE_ROUTE = `DELETE /api/v1/presets/${PRESET_ID}`;
 const SECOND_PRESET_ID = "7a8b9c0d-1e2f-4a3b-8c4d-5e6f7a8b9c0d";
 
+// O jest-dom 8 compara a descrição acessível só por string exata ou RegExp; texto vindo de
+// variável precisa de escape para casar literalmente.
+function escapeRegExp(text: string): string {
+  return text.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
 function setup(handlers: Readonly<Record<string, Handler>> = {}) {
   const api = fakeApi(
     {
@@ -437,9 +443,7 @@ describe("Oficina: renomear preset", () => {
 
     const field = within(dialog).getByRole("textbox", { name: "Novo nome" });
     await waitFor(() => {
-      expect(field).toHaveAccessibleDescription(
-        expect.stringContaining("Já existe um preset com esse nome."),
-      );
+      expect(field).toHaveAccessibleDescription(/Já existe um preset com esse nome\./);
     });
     expect(field).toHaveFocus();
     expect(screen.getByRole("dialog", { name: "Renomear o preset Clientes do mês" })).toBeVisible();
@@ -456,7 +460,7 @@ describe("Oficina: renomear preset", () => {
     const field = await typeName(user, dialog, name);
     await user.click(within(dialog).getByRole("button", { name: "Renomear" }));
 
-    expect(field).toHaveAccessibleDescription(expect.stringContaining(error));
+    expect(field).toHaveAccessibleDescription(new RegExp(escapeRegExp(error)));
     expect(field).toHaveFocus();
     expect(sent(api.requests, PUT_ROUTE)).toEqual([]);
   });
@@ -476,7 +480,7 @@ describe("Oficina: renomear preset", () => {
     const field = within(dialog).getByRole("textbox", { name: "Novo nome" });
     await waitFor(() => {
       expect(field).toHaveAccessibleDescription(
-        expect.stringContaining("Tire do nome os caracteres invisíveis ou de controle."),
+        /Tire do nome os caracteres invisíveis ou de controle\./,
       );
     });
   });
