@@ -65,7 +65,7 @@ from uuid import UUID
 from sqlalchemy.orm import Session, sessionmaker
 
 from goblinshift import capacity
-from goblinshift.entrypoints.worker import run_finished_reporter
+from goblinshift.entrypoints.bootstrap import run_finished_reporter
 from goblinshift.files.orphans import (
     OrphanFile,
     OrphanReport,
