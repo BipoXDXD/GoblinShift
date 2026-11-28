@@ -15,7 +15,8 @@ export const SHARE_FIELD = "arquivos";
 const MIB = 1024 * 1024;
 
 /**
- * Tetos de um compartilhamento, os mesmos do servidor (ADR 036 e 062): o front não tem constante
+ * Tetos de um compartilhamento, os mesmos do servidor (files/limits.py, ADR 036 e 062; o teste
+ * tests/test_share_inbox_limits.py lê estas linhas e confere): o front não tem constante
  * deles, porque a Bancada lê os limites de cada receita no catálogo, e o service worker não tem o
  * catálogo. Aqui eles só impedem que um POST encha o armazenamento do aparelho; a Bancada ainda
  * confere os limites da receita escolhida.
