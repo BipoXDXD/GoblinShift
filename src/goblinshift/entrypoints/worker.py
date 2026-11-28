@@ -46,7 +46,7 @@ import goblinshift.entrypoints.shutdown as process_shutdown
 from goblinshift.entrypoints.bootstrap import build_runner, process_tracer
 from goblinshift.entrypoints.shutdown import SHUTDOWN_POLL_S, ShutdownFlag
 from goblinshift.files.storage import FileStorage
-from goblinshift.platform.db import make_engine, make_session_factory
+from goblinshift.platform.db import make_engine, make_session_factory, sqlstate_of
 from goblinshift.platform.settings import (
     EXIT_CONFIGURATION,
     ExecutorConfigError,
@@ -207,7 +207,7 @@ def _run_attempt(coordinator: Coordinator, claimed: ClaimedAttempt, pause: Claim
     except TRANSIENT_DATABASE_ERRORS as error:
         pause.begin()
         # Só o tipo e o SQLSTATE: a mensagem do banco traz host, porta e usuário.
-        sqlstate = getattr(getattr(error, "orig", None), "sqlstate", None)
+        sqlstate = sqlstate_of(error)
         fields = {
             "run_id": str(claimed.run_id),
             "attempt_id": str(claimed.attempt_id),

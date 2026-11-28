@@ -57,6 +57,8 @@ REDUCERS = frozenset(
         "_describe_failure",
         # `<campo>:<tipo>` do `ValidationError`, sem o valor (`test_describe_config_error_…`).
         "describe_config_error",
+        # Só o código cru do driver (`platform.db.sqlstate_of`), nunca a mensagem.
+        "sqlstate_of",
     }
 )
 # Atributos que guardam número, código ou posição, montados pelo próprio GoblinShift. O `code` não
@@ -247,6 +249,7 @@ def test_verificador_acusa_a_excecao_crua(source: str) -> None:
         _handler('fields = {"sqlstate": getattr(getattr(error, "orig", None), "sqlstate", None)}'),
         _handler('fields = {"errno": errno.errorcode.get(getattr(error, "errno", 0))}'),
         _handler('fields = {"sqlstate": getattr(error.orig, "sqlstate", None)}'),
+        _handler('fields = {"sqlstate": sqlstate_of(error)}'),
         _handler(
             'logger.error("x", extra={"fields": {"config_errors": describe_config_error(error)}})',
             caught="ValidationError",
@@ -263,6 +266,7 @@ def test_verificador_acusa_a_excecao_crua(source: str) -> None:
         "sqlstate-do-orig",
         "getattr-de-errno",
         "sqlstate-por-atributo",
+        "sqlstate-of",
         "campos-do-erro-de-configuracao",
         "erro-de-configuracao",
         "raise-sem-log",

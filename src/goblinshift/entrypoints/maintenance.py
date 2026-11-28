@@ -37,6 +37,7 @@ from goblinshift.platform.db import (
     is_lock_contention,
     make_engine,
     make_session_factory,
+    sqlstate_of,
     unit_of_work,
 )
 from goblinshift.platform.settings import (
@@ -462,11 +463,10 @@ def _log_purge_failure(
     owner_id: UUID, error: Exception, *, message: str = "purga da conta falhou"
 ) -> None:
     """Como `log_step_failure`: tipo e SQLSTATE nos campos, sem a mensagem do banco (3.7)."""
-    driver_error = getattr(error, "orig", error)
     fields = {
         "user_id": str(owner_id),
         "error_type": type(error).__name__,
-        "sqlstate": getattr(driver_error, "sqlstate", None),
+        "sqlstate": sqlstate_of(error),
     }
     logger.exception(message, extra={"fields": fields})
 

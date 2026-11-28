@@ -14,7 +14,7 @@ from sqlalchemy.exc import DBAPIError
 from sqlalchemy.exc import TimeoutError as PoolTimeoutError
 
 from goblinshift.entrypoints import maintenance as maintenance_entrypoint
-from goblinshift.platform.db import is_connection_lost, is_unavailable_for_request
+from goblinshift.platform.db import is_connection_lost, is_unavailable_for_request, sqlstate_of
 from goblinshift.runs import maintenance as runs_maintenance
 
 
@@ -86,3 +86,35 @@ def test_falha_de_purga_com_erro_cru_leva_o_sqlstate(caplog: pytest.LogCaptureFi
         except psycopg.Error as caught:
             maintenance_entrypoint._log_purge_failure(uuid.uuid4(), caught)
     assert caplog.records[-1].__dict__["fields"]["sqlstate"] == "55P03"
+
+
+class _DriverError(Exception):
+    """Erro de driver qualquer, com o `sqlstate` que o psycopg expõe."""
+
+    def __init__(self, sqlstate: str) -> None:
+        super().__init__("x")
+        self.sqlstate = sqlstate
+
+
+class _WithOrigError(Exception):
+    """Embrulho qualquer que guarda o erro do driver em `orig`, como o SQLAlchemy."""
+
+    def __init__(self, orig: BaseException) -> None:
+        super().__init__("x")
+        self.orig = orig
+
+
+@pytest.mark.parametrize(
+    ("error", "expected"),
+    [
+        (_server("57014"), "57014"),
+        (_wrapped(psycopg.OperationalError("x")), None),
+        (pg_errors.lookup("55P03")("x"), "55P03"),
+        (PoolTimeoutError(), None),
+        (ValueError("x"), None),
+        (_WithOrigError(_DriverError("malformado")), "malformado"),
+    ],
+    ids=["embrulhado", "sem-sqlstate", "cru", "pool", "nao-e-banco", "sem-filtro"],
+)
+def test_sqlstate_of_le_o_codigo_cru_do_driver(error: BaseException, expected: str | None) -> None:
+    assert sqlstate_of(error) == expected

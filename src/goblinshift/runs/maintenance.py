@@ -45,7 +45,7 @@ from goblinshift.files.objects import holders_with_open_uses, release_expired_do
 from goblinshift.files.retention import file_backlog, remove_file_after_commit
 from goblinshift.files.states import HolderKind
 from goblinshift.files.storage import FileStorage, ObjectTamperedError
-from goblinshift.platform.db import is_connection_lost
+from goblinshift.platform.db import is_connection_lost, sqlstate_of
 from goblinshift.platform.telemetry import exception_fields
 from goblinshift.runs import retention as run_retention
 from goblinshift.runs.lifecycle import (
@@ -426,7 +426,7 @@ class Maintenance:
                 "attempt_id": str(expired.attempt_id),
                 "run_id": str(expired.run_id),
                 "error_type": type(error).__name__,
-                "sqlstate": getattr(error.orig, "sqlstate", None),
+                "sqlstate": sqlstate_of(error),
             }
             logger.warning(
                 "releitura do lease falhou; executor não é parado neste ciclo",
@@ -970,11 +970,10 @@ def log_step_failure(step: str, error: Exception) -> None:
     e o filtro do processo (`omit_exception_detail`) tira o texto dela do traceback, seja ou não
     erro de banco.
     """
-    driver_error = getattr(error, "orig", error)
     fields = {
         "step": step,
         "error_type": type(error).__name__,
-        "sqlstate": getattr(driver_error, "sqlstate", None),
+        "sqlstate": sqlstate_of(error),
     }
     logger.exception("passo da manutenção falhou", extra={"fields": fields})
 

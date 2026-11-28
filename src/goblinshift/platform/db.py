@@ -56,6 +56,15 @@ def is_lock_contention(error: BaseException) -> bool:
     )
 
 
+def sqlstate_of(error: BaseException) -> str | None:
+    """O código cru do erro do driver, embrulhado pelo SQLAlchemy (em `orig`) ou não.
+
+    Não percorre a cadeia nem confere o formato: esse é o papel de `telemetry.database_sqlstate`
+    no filtro de log. Só o código sai, nunca a mensagem.
+    """
+    return getattr(getattr(error, "orig", error), "sqlstate", None)
+
+
 def is_connection_lost(error: Exception) -> bool:
     """Erro de conexão: repetir o banco noutro passo só esperaria o `connect_timeout` de novo.
 
@@ -74,7 +83,7 @@ def is_connection_lost(error: Exception) -> bool:
         return True
     if not isinstance(error, OperationalError):
         return False
-    sqlstate: str | None = getattr(error.orig, "sqlstate", None)
+    sqlstate = sqlstate_of(error)
     return (
         sqlstate is None
         or sqlstate.startswith(_CONNECTION_EXCEPTION_CLASS)
@@ -95,7 +104,7 @@ def is_unavailable_for_request(error: Exception) -> bool:
         return True
     if not isinstance(error, OperationalError):
         return False
-    sqlstate: str | None = getattr(getattr(error, "orig", None), "sqlstate", None)
+    sqlstate = sqlstate_of(error)
     # Sem SQLSTATE o servidor não chegou a responder: falha ao conectar ou conexão perdida.
     if sqlstate is None:
         return True

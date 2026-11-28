@@ -38,7 +38,7 @@ from starlette.types import ASGIApp, Message, Receive, Scope, Send
 
 from goblinshift.entrypoints.api.download_navigation import failure_redirect
 from goblinshift.entrypoints.api.wide_event import record_error
-from goblinshift.platform.db import is_unavailable_for_request
+from goblinshift.platform.db import is_unavailable_for_request, sqlstate_of
 from goblinshift.platform.telemetry import request_id_bound
 
 logger = logging.getLogger(__name__)
@@ -469,10 +469,6 @@ async def _handle_api_problem(request: Request, exc: ApiProblem) -> Response:
     )
 
 
-def _sqlstate_of(exc: Exception) -> str | None:
-    return getattr(getattr(exc, "orig", None), "sqlstate", None)
-
-
 def _is_storage_unavailable(exc: Exception) -> bool:
     return isinstance(exc, OSError) and exc.errno in _STORAGE_UNAVAILABLE_ERRNOS
 
@@ -520,7 +516,7 @@ def _service_unavailable_response(
 
 def _database_error_fields(exc: Exception) -> dict[str, str | None]:
     # Só tipo e SQLSTATE: a mensagem do driver pode trazer SQL e valores da consulta (3.7).
-    return {"error.type": type(exc).__name__, "sqlstate": _sqlstate_of(exc)}
+    return {"error.type": type(exc).__name__, "sqlstate": sqlstate_of(exc)}
 
 
 async def _handle_validation_error(request: Request, exc: RequestValidationError) -> JSONResponse:

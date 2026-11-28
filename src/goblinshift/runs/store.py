@@ -30,6 +30,7 @@ from goblinshift.files.retention import remove_file_after_commit
 from goblinshift.files.states import HolderKind
 from goblinshift.files.storage import FileStorage
 from goblinshift.files.tables import artifact, stored_object
+from goblinshift.platform.db import sqlstate_of
 from goblinshift.runs.lifecycle import (
     TERMINAL_STATUSES,
     DiscardCandidates,
@@ -148,7 +149,7 @@ def run_transaction[T](
             with factory() as session, session.begin():
                 return work(session)
         except DBAPIError as error:
-            sqlstate = getattr(error.orig, "sqlstate", None)
+            sqlstate = sqlstate_of(error)
             if sqlstate not in RETRYABLE_SQLSTATES or attempt_number == MAX_TRANSACTION_ATTEMPTS:
                 raise
             delay = retry_pause_s(attempt_number, draw=draw)
