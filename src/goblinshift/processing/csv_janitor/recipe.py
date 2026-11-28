@@ -21,7 +21,7 @@ from goblinshift.processing.csv_janitor.results import (
     WarningCode,
 )
 from goblinshift.processing.names import safe_stem
-from goblinshift.processing.previews import PendingPreview, attach_previews, write_previews
+from goblinshift.processing.previews import PendingPreview, process_each, report_with_previews
 from goblinshift.processing.recipe import (
     InputFile,
     ItemOk,
@@ -50,12 +50,10 @@ class CsvJanitorV1:
         self, params: Params, inputs: Sequence[InputFile], out: OutputDir, progress: Progress
     ) -> Report:
         require_max_inputs(inputs, self._max_tables, "tabelas")
-        items: list[ItemOk | ItemRejected] = []
-        pending: list[PendingPreview] = []
-        for table in inputs:
-            items.append(self._clean_one(table, params, out, pending))
-            progress.item_done(table.position)
-        return Report(attach_previews(items, write_previews(out, pending)))
+        processed = process_each(
+            inputs, lambda table, pending: self._clean_one(table, params, out, pending), progress
+        )
+        return report_with_previews(processed, out)
 
     def _clean_one(
         self, table: InputFile, params: Params, out: OutputDir, pending: list[PendingPreview]

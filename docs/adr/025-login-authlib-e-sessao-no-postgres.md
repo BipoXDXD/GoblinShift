@@ -12,7 +12,7 @@ A fatia 6 traz o login por Google (OIDC) e GitHub (OAuth 2.0), a sessão web, o 
 
 - **Authlib `>= 1.6.12`** (integração Starlette) para o fluxo OAuth/OIDC: PKCE S256, `state`, `nonce` e validação do ID token. `httpx2` entra como dependência direta de runtime, porque a integração o usa e o pacote não o declara; sem ele, o Authlib cai no `httpx` antigo com aviso de depreciação.
 - **Sem discovery do Google** (`server_metadata_url`): os endereços de autorização, token e JWKS, o emissor e a lista de algoritmos do ID token (só `RS256`) ficam fixos no código (`identity/providers.py`). O documento de discovery sobrescreveria a lista de algoritmos aceitos com o que o provedor anuncia, e a lista fixa é a defesa contra `alg` trocado no token. Custo: se o Google mudar um endereço, o login quebra até um deploy, o que o teste de login real na VPS mostra.
-- **Estado do login no PostgreSQL** (`login_state`, TTL de 10 min), pelo cache do Authlib. O `SessionMiddleware` do Starlette guarda só o marcador, no cookie `__Secure-gs_login` com `Path=/auth`, `SameSite=Lax`, `Secure`, `Max-Age=600` e segredo próprio (`GS_LOGIN_COOKIE_SECRET_FILE`). Com `Path=/auth`, o cookie nem chega às rotas da API.
+- **Estado do login no PostgreSQL** (`login_state`, TTL de 10 min), pelo cache do Authlib. O `SessionMiddleware` do Starlette guarda só o marcador, no cookie `__Host-gs_login` com `Path=/`, `SameSite=Lax`, `Secure`, `HttpOnly`, `Max-Age=600`, sem `Domain` e com segredo próprio (`GS_LOGIN_COOKIE_SECRET_FILE`). O prefixo `__Host-` faz o navegador recusar o cookie plantado por um subdomínio irmão com `Domain=` (CSRF de login); o nome anterior, `__Secure-gs_login` com `Path=/auth`, não tinha essa garantia. Com `Path=/` o navegador manda o cookie a toda rota, mas só as de `/auth` mexem na sessão de login, e o `SessionMiddleware` só regrava o cookie quando ela muda: as respostas da API não levam `Set-Cookie` dele. A troca de nome foi feita sem transição (decisão D3 do plano `sessao-auth-chaves`): o servidor não lê o nome antigo, e quem estava no meio do login durante o deploy (o cookie vive 10 min) recebe o erro genérico uma vez e entra de novo.
 - **Sessão server-side** em `web_session` (token opaco de 256 bits, só o hash no banco), no cookie `__Host-gs_session`. Revogação imediata, sem Redis (ADR 003).
 - **`redirect_uri` sempre de `GS_PUBLIC_ORIGIN`**, nunca do header `Host`; a mesma origem é a referência da checagem de `Origin`. Enquanto não há domínio, o código depende só dessa variável, obrigatória e `https` em produção.
 - **CSRF e cabeçalhos com código próprio**: double-submit assinado ligado à sessão mais Fetch Metadata e `Origin` (~40 linhas com `hmac`), e um middleware de cabeçalhos. **Middleware sempre ASGI puro**, nunca `BaseHTTPMiddleware`, que quebra o streaming dos downloads e os contextvars do OpenTelemetry.
@@ -54,3 +54,16 @@ Trocar `csrf_secret` invalidaria os tokens CSRF emitidos: o cookie `__Host-gs_cs
 3. retirar `GS_CSRF_SECRET_PREVIOUS_FILE` e o arquivo, e reiniciar.
 
 A variável não fica ligada no Compose nem no Coolify: o arquivo só existe durante a troca, e montá-lo sempre obrigaria a criá-lo no host.
+
+## Atualização de 2026-11-28 (#366)
+
+A recência da sessão no Google passa a vir do `auth_time` do ID token, e o teto absoluto de 8 h conta da abertura da sessão: [ADR 065](065-reautenticacao-pelo-auth-time-do-google.md).
+
+## Atualização de 2026-11-28 (#366): teto de estados de login vivos
+
+Todo `GET /auth/login/{provider}` sem autenticação grava uma linha em `login_state`. O único limite era o `limit_req` do Nginx por cliente, e muitas origens enchiam a tabela sem teto na aplicação. Agora o início confere, antes do `authorize_redirect`, se já há `MAX_LIVE_LOGIN_STATES` (20 000, cerca de 10 MB) estados vivos (`identity/login_state.py::login_states_full`). Cheio, responde a recusa genérica, sem gravar estado nem auditoria, e o log avisa no máximo uma vez por minuto (`alert=login_state_cap`, causa `gs-causa-login-anonimo-no-teto`).
+
+- **Global, e não por IP.** Um teto por IP no PostgreSQL custaria uma escrita por recusa, o recurso que se quer proteger (ADR 048, alternativa B).
+- **Só estados vivos contam.** Vencidos à espera da purga não bloqueiam ninguém. A contagem para em 20 000 e usa o índice de `expires_at`.
+- **Nada é despejado.** O teto recusa o início novo; quem já está no provedor termina o login com o estado que tem.
+- **Custo aceito (D6 do plano login-e-borda).** Com cerca de 200 IPs no ritmo da borda (10 por minuto, 10 minutos de vida), um atacante bloqueia o início de login de todos por até 10 minutos, e o alerta acende. A contagem e a gravação do estado ficam em transações separadas, então inícios simultâneos passam juntos do teto; o estouro é limitado pelas requisições em voo (tokens do threadpool vezes processos da API).
