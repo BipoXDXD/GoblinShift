@@ -1,0 +1,75 @@
+{
+  "pilha": "build local + API falsa (web/e2e/support/fakeApi.ts)",
+  "commit": "6d39f6613c17c597f4bd8378917fd8b5a5bf5fda",
+  "imagens": [
+    {
+      "arquivo": "bancada-celular.png",
+      "tela": "Bancada do Image Forge",
+      "viewport": "400x800",
+      "goblins": []
+    },
+    {
+      "arquivo": "historico.png",
+      "tela": "Histórico",
+      "viewport": "1280x800",
+      "goblins": []
+    },
+    {
+      "arquivo": "jornada.gif",
+      "tela": "Jornada do Image Forge",
+      "viewport": "1280x800",
+      "goblins": [
+        "ferrugem",
+        "rubia"
+      ]
+    },
+    {
+      "arquivo": "oficina.png",
+      "tela": "Oficina",
+      "viewport": "1280x800",
+      "goblins": [
+        "rubia"
+      ]
+    },
+    {
+      "arquivo": "receita-csv-janitor.png",
+      "tela": "Execução concluída: csv-janitor",
+      "viewport": "1280x800",
+      "goblins": [
+        "ferrugem"
+      ]
+    },
+    {
+      "arquivo": "receita-downloads-detox.png",
+      "tela": "Execução concluída: downloads-detox",
+      "viewport": "1280x800",
+      "goblins": [
+        "ferrugem"
+      ]
+    },
+    {
+      "arquivo": "receita-image-forge.png",
+      "tela": "Execução concluída: image-forge",
+      "viewport": "1280x800",
+      "goblins": [
+        "ferrugem"
+      ]
+    },
+    {
+      "arquivo": "receita-media-mill.png",
+      "tela": "Execução concluída: media-mill",
+      "viewport": "1280x800",
+      "goblins": [
+        "ferrugem"
+      ]
+    },
+    {
+      "arquivo": "receita-pdf-press.png",
+      "tela": "Execução concluída: pdf-press",
+      "viewport": "1280x800",
+      "goblins": [
+        "ferrugem"
+      ]
+    }
+  ]
+}

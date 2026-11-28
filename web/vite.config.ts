@@ -5,6 +5,7 @@ import react from "@vitejs/plugin-react";
 import { configDefaults, defineConfig } from "vitest/config";
 
 import { FONT_PRELOADS } from "./scripts/check-budget";
+import { assetsInlineLimit } from "./scripts/vite-asset-inline";
 import { preloadFonts } from "./scripts/vite-preload-fonts";
 import { serviceWorker } from "./scripts/vite-service-worker";
 
@@ -33,6 +34,8 @@ export default defineConfig({
   build: {
     // Sem source map no bundle publicado: o fonte embutido vazaria comentários (ETS item 73).
     sourcemap: false,
+    // A arte sai sempre como arquivo com nome (scripts/vite-asset-inline.ts).
+    assetsInlineLimit,
     // O chunk do 3D da abertura (three.js, ~615 KB crus) passa do aviso padrão de 500 KB de
     // propósito; quem manda no peso é o check-budget, com os tetos do ADR 027 e 030.
     chunkSizeWarningLimit: 650,
