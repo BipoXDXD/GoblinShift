@@ -542,15 +542,15 @@ class FailingOnce:
         return self._real(owner_id)
 
 
-def test_cancelamento_falho_na_purga_conta_e_fica_no_log_sem_por_a_volta_no_alerta(
+def test_statement_timeout_no_cancelamento_da_purga_conta_e_fica_no_log_fora_do_alerta(
     factory: sessionmaker[Session],
     storage: FileStorage,
     maintenance: Maintenance,
     caplog: pytest.LogCaptureFixture,
 ) -> None:
-    """#442: a Run que o `DELETE /me` não cancelou é cancelada pela purga; uma falha no
-    cancelamento conta só em `accounts_cancel_failed` e fica no log. Não conta em
-    `account_steps_failed`: é esperada, com o worker segurando a Run, e se resolve sozinha."""
+    """#442: a Run que o `DELETE /me` não cancelou é cancelada pela purga; um statement timeout
+    (57014) no cancelamento conta só em `accounts_cancel_failed` e fica no log. Não conta em
+    `account_steps_failed`: é disputa passageira com o worker e se resolve no ciclo seguinte."""
     owner = create_user(factory, "ana")
     queue_run(factory, storage, owner)
     request_deletion(factory, owner)
