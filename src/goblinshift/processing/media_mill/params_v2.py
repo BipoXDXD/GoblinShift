@@ -15,12 +15,7 @@ from dataclasses import dataclass, fields
 from enum import StrEnum
 from types import MappingProxyType
 
-from goblinshift.processing.media_mill.params import (
-    DEFAULT_THUMBNAIL_COUNT,
-    MAX_AUDIO_STREAM_INDEX,
-    THUMBNAIL_COUNTS,
-    is_stream_index,
-)
+from goblinshift.processing.media_mill.params import DEFAULT_THUMBNAIL_COUNT
 from goblinshift.processing.media_mill.validation import (
     InvalidParametersError,
     boolean,
@@ -28,6 +23,7 @@ from goblinshift.processing.media_mill.validation import (
     integer,
     is_not_integer,
     optional_integer,
+    require_outputs_rules,
 )
 
 
@@ -63,16 +59,11 @@ class ParamsV2:
     trim_end_ms: int | None = None
 
     def __post_init__(self) -> None:
-        if is_not_integer(self.thumbnail_count) or self.thumbnail_count not in THUMBNAIL_COUNTS:
-            raise InvalidParametersError(f"thumbnail_count deve ser um de {THUMBNAIL_COUNTS}")
-        if self.audio_stream_index is not None and not is_stream_index(self.audio_stream_index):
-            raise InvalidParametersError(
-                f"audio_stream_index deve estar entre 0 e {MAX_AUDIO_STREAM_INDEX}"
-            )
-        if not self.extract_audio and self.thumbnail_count == 0:
-            raise InvalidParametersError(
-                "peça ao menos uma saída: extract_audio ou thumbnail_count maior que 0"
-            )
+        require_outputs_rules(
+            extract_audio=self.extract_audio,
+            audio_stream_index=self.audio_stream_index,
+            thumbnail_count=self.thumbnail_count,
+        )
         _require_trim_ms("trim_start_ms", self.trim_start_ms, 0)
         if self.trim_end_ms is not None:
             _require_trim_ms("trim_end_ms", self.trim_end_ms, 1)

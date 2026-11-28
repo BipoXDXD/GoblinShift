@@ -133,6 +133,24 @@ def test_comparacao_da_v2_aceita_mp3_e_a_duracao_cortada() -> None:
     assert comparison_from_json(comparison_as_json(comparison)) == comparison
 
 
+def test_forma_guardada_da_imagem_nao_muda_com_a_v2_do_media_mill() -> None:
+    comparison = ImageComparison(2, 2, 1, 1, ImageFormat.PNG, ImageFormat.PNG, 10, None)
+    stored = {
+        "kind": "image",
+        "width_before": 2,
+        "height_before": 2,
+        "width_after": 1,
+        "height_after": 1,
+        "format_before": "png",
+        "format_after": "png",
+        "bytes_before": 10,
+        "bytes_after": None,
+    }
+
+    assert comparison_as_json(comparison) == stored
+    assert comparison_from_json(without(stored, "bytes_after")) is None
+
+
 def test_comparacao_antiga_sem_duracao_continua_valida() -> None:
     # Forma guardada no banco antes da v2 do Media Mill, sem as chaves de duração.
     stored = {

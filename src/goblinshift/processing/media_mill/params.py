@@ -14,19 +14,26 @@ from dataclasses import dataclass, fields
 from enum import StrEnum
 
 from goblinshift.processing.media_mill.validation import (
+    MAX_AUDIO_STREAM_INDEX as MAX_AUDIO_STREAM_INDEX,
+)
+from goblinshift.processing.media_mill.validation import (
+    THUMBNAIL_COUNTS as THUMBNAIL_COUNTS,
+)
+from goblinshift.processing.media_mill.validation import (
     InvalidParametersError as InvalidParametersError,
 )
 from goblinshift.processing.media_mill.validation import (
     boolean,
     choice,
     integer,
-    is_not_integer,
     optional_integer,
+    require_outputs_rules,
+)
+from goblinshift.processing.media_mill.validation import (
+    is_stream_index as is_stream_index,
 )
 
-THUMBNAIL_COUNTS = (0, 1, 3)
 DEFAULT_THUMBNAIL_COUNT = 1
-MAX_AUDIO_STREAM_INDEX = 15
 
 
 class AudioFormat(StrEnum):
@@ -42,16 +49,11 @@ class Params:
     thumbnail_count: int = DEFAULT_THUMBNAIL_COUNT
 
     def __post_init__(self) -> None:
-        if is_not_integer(self.thumbnail_count) or self.thumbnail_count not in THUMBNAIL_COUNTS:
-            raise InvalidParametersError(f"thumbnail_count deve ser um de {THUMBNAIL_COUNTS}")
-        if self.audio_stream_index is not None and not is_stream_index(self.audio_stream_index):
-            raise InvalidParametersError(
-                f"audio_stream_index deve estar entre 0 e {MAX_AUDIO_STREAM_INDEX}"
-            )
-        if not self.extract_audio and self.thumbnail_count == 0:
-            raise InvalidParametersError(
-                "peça ao menos uma saída: extract_audio ou thumbnail_count maior que 0"
-            )
+        require_outputs_rules(
+            extract_audio=self.extract_audio,
+            audio_stream_index=self.audio_stream_index,
+            thumbnail_count=self.thumbnail_count,
+        )
         if not self.extract_audio:
             self._require_audio_options_at_default()
 
@@ -88,7 +90,3 @@ def params_from_mapping(raw: Mapping[str, object]) -> Params:
 
 
 _KNOWN_OPTIONS = frozenset(field.name for field in fields(Params))
-
-
-def is_stream_index(value: int) -> bool:
-    return not is_not_integer(value) and 0 <= value <= MAX_AUDIO_STREAM_INDEX

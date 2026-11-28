@@ -108,7 +108,7 @@ type ItemComparison = TableComparison | PdfComparison | ImageComparison | MediaC
 def comparison_as_json(comparison: ItemComparison) -> dict[str, object]:
     """Forma guardada no banco: `kind` mais os campos, com os enums como `.value`.
 
-    Campo opcional (com default) ausente fica fora: a forma de quem não tem corte não muda.
+    A duração do Media Mill ausente fica fora: a forma de quem não tem corte não muda.
     """
     raw: dict[str, object] = {"kind": comparison.kind}
     for field in fields(comparison):
@@ -218,7 +218,11 @@ def _media(raw: _Fields) -> MediaComparison:
 
 
 def _optional_keys(cls: type[ItemComparison]) -> frozenset[str]:
-    return frozenset(field.name for field in fields(cls) if field.default is None)
+    """Chaves que podem faltar no JSON: só a duração do Media Mill v2, nada mais."""
+    return _MEDIA_DURATION_KEYS if cls is MediaComparison else frozenset()
+
+
+_MEDIA_DURATION_KEYS = frozenset({"duration_before_ms", "duration_after_ms"})
 
 
 def _pair_present(raw: _Fields, first: str, second: str) -> bool:
