@@ -12,6 +12,8 @@ class RejectionCode(StrEnum):
     AUDIO_LIMIT_EXCEEDED = "AUDIO_LIMIT_EXCEEDED"
     # Extração de áudio pedida para um vídeo sem a faixa indicada (ou sem áudio nenhum).
     AUDIO_STREAM_NOT_FOUND = "AUDIO_STREAM_NOT_FOUND"
+    # v2: o trecho pedido começa no fim do vídeo (ou da faixa de áudio) ou depois dele.
+    TRIM_OUT_OF_RANGE = "TRIM_OUT_OF_RANGE"
 
 
 class MediaRejected(Exception):  # noqa: N818 - é um desfecho do item, não um defeito

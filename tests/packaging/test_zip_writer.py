@@ -20,6 +20,9 @@ from goblinshift.processing.packaging import compression_for
         "pacote.ZIP",
         "audio/trilha.flac",
         "audio/trilha.FLAC",
+        "audio/trilha.mp3",
+        "audio/trilha.M4A",
+        "audio/trilha.opus",
     ],
 )
 def test_formatos_ja_comprimidos_vao_sem_compressao(arcname: str) -> None:

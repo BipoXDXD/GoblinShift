@@ -18,7 +18,7 @@ from dataclasses import dataclass
 from fractions import Fraction
 
 from goblinshift.processing.media_mill.limits import Limits
-from goblinshift.processing.media_mill.params import Params
+from goblinshift.processing.media_mill.plan import MillPlan
 from goblinshift.processing.media_mill.rejection import MediaRejected, RejectionCode
 from goblinshift.processing.media_mill.signature import Container
 
@@ -101,7 +101,7 @@ def parse_probe(data: bytes) -> MediaInfo:
         raise _unsupported("o ffprobe não descreveu o arquivo como vídeo legível") from error
 
 
-def inspect(info: MediaInfo, container: Container, params: Params, limits: Limits) -> Inspected:
+def inspect(info: MediaInfo, container: Container, plan: MillPlan, limits: Limits) -> Inspected:
     """Aplica allowlist, perfil e limites; devolve o vídeo aceito ou levanta `MediaRejected`."""
     _require_allowlisted(info, container)
     video = info.videos[0]
@@ -118,7 +118,7 @@ def inspect(info: MediaInfo, container: Container, params: Params, limits: Limit
         frame_rate=frame_rate,
         duration_s=duration,
         video_duration_s=video.duration_s or duration,
-        audio=_chosen_audio(info.audios, params, limits) if params.extract_audio else None,
+        audio=_chosen_audio(info.audios, plan, limits) if plan.extract_audio else None,
     )
 
 
@@ -291,8 +291,8 @@ def _checked_rotation(video: VideoStream) -> int:
     return video.rotation % FULL_TURN
 
 
-def _chosen_audio(audios: Sequence[AudioStream], params: Params, limits: Limits) -> AudioStream:
-    order = params.audio_stream_index or 0
+def _chosen_audio(audios: Sequence[AudioStream], plan: MillPlan, limits: Limits) -> AudioStream:
+    order = plan.audio_stream_index or 0
     if order >= len(audios):
         raise MediaRejected(
             RejectionCode.AUDIO_STREAM_NOT_FOUND,

@@ -50,6 +50,7 @@ export const ITEM_REJECTIONS = [
   "MEDIA_TOO_LARGE",
   "AUDIO_LIMIT_EXCEEDED",
   "AUDIO_STREAM_NOT_FOUND",
+  "TRIM_OUT_OF_RANGE",
 ] as const;
 export const ITEM_WARNINGS = [
   "CSV_ALL_RECORDS_FILTERED",
@@ -58,7 +59,11 @@ export const ITEM_WARNINGS = [
   "INPUT_NOT_SELECTED",
   "THUMBNAIL_BEFORE_TARGET",
 ] as const;
-export const ITEM_NOTICES = ["IMAGE_P3_CONVERTED"] as const;
+export const ITEM_NOTICES = [
+  "IMAGE_P3_CONVERTED",
+  "AUDIO_RESAMPLED",
+  "MEDIA_TRIM_CLAMPED",
+] as const;
 
 export const UNKNOWN_CODE = "unknown";
 

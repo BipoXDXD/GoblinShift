@@ -643,7 +643,7 @@ export interface components {
          *     para `succeeded_with_warnings`). Lista fechada: vão para o banco e para a API.
          * @enum {string}
          */
-        ItemNoticeCode: "IMAGE_P3_CONVERTED";
+        ItemNoticeCode: "IMAGE_P3_CONVERTED" | "AUDIO_RESAMPLED" | "MEDIA_TRIM_CLAMPED";
         /**
          * ItemRejectionCode
          * @description Códigos de rejeição por item do catálogo de 1.6: lista fechada.
@@ -652,7 +652,7 @@ export interface components {
          *     código, porque o relatório vem do sandbox e o código vai para o banco e para a API.
          * @enum {string}
          */
-        ItemRejectionCode: "UNSUPPORTED_FORMAT" | "UNSUPPORTED_BIT_DEPTH" | "UNSUPPORTED_COLOR_PROFILE" | "IMAGE_TOO_LARGE" | "CSV_STRUCTURE_INVALID" | "FIELD_LIMIT_EXCEEDED" | "MEDIA_TOO_LARGE" | "AUDIO_LIMIT_EXCEEDED" | "AUDIO_STREAM_NOT_FOUND";
+        ItemRejectionCode: "UNSUPPORTED_FORMAT" | "UNSUPPORTED_BIT_DEPTH" | "UNSUPPORTED_COLOR_PROFILE" | "IMAGE_TOO_LARGE" | "CSV_STRUCTURE_INVALID" | "FIELD_LIMIT_EXCEEDED" | "MEDIA_TOO_LARGE" | "AUDIO_LIMIT_EXCEEDED" | "AUDIO_STREAM_NOT_FOUND" | "TRIM_OUT_OF_RANGE";
         /**
          * ItemStatus
          * @enum {string}

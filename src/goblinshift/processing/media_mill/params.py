@@ -13,13 +13,20 @@ from collections.abc import Mapping
 from dataclasses import dataclass, fields
 from enum import StrEnum
 
+from goblinshift.processing.media_mill.validation import (
+    InvalidParametersError as InvalidParametersError,
+)
+from goblinshift.processing.media_mill.validation import (
+    boolean,
+    choice,
+    integer,
+    is_not_integer,
+    optional_integer,
+)
+
 THUMBNAIL_COUNTS = (0, 1, 3)
 DEFAULT_THUMBNAIL_COUNT = 1
 MAX_AUDIO_STREAM_INDEX = 15
-
-
-class InvalidParametersError(ValueError):
-    """Configuração recusada antes de ler qualquer vídeo."""
 
 
 class AudioFormat(StrEnum):
@@ -35,9 +42,9 @@ class Params:
     thumbnail_count: int = DEFAULT_THUMBNAIL_COUNT
 
     def __post_init__(self) -> None:
-        if _is_not_integer(self.thumbnail_count) or self.thumbnail_count not in THUMBNAIL_COUNTS:
+        if is_not_integer(self.thumbnail_count) or self.thumbnail_count not in THUMBNAIL_COUNTS:
             raise InvalidParametersError(f"thumbnail_count deve ser um de {THUMBNAIL_COUNTS}")
-        if self.audio_stream_index is not None and not _is_stream_index(self.audio_stream_index):
+        if self.audio_stream_index is not None and not is_stream_index(self.audio_stream_index):
             raise InvalidParametersError(
                 f"audio_stream_index deve estar entre 0 e {MAX_AUDIO_STREAM_INDEX}"
             )
@@ -69,10 +76,12 @@ def params_from_mapping(raw: Mapping[str, object]) -> Params:
     if unknown:
         raise InvalidParametersError(f"opções desconhecidas: {unknown}")
     return Params(
-        extract_audio=_boolean(raw.get("extract_audio", True), "extract_audio"),
-        audio_format=_audio_format(raw.get("audio_format", AudioFormat.WAV.value)),
-        audio_stream_index=_optional_integer(raw.get("audio_stream_index"), "audio_stream_index"),
-        thumbnail_count=_integer(
+        extract_audio=boolean(raw.get("extract_audio", True), "extract_audio"),
+        audio_format=choice(
+            raw.get("audio_format", AudioFormat.WAV.value), "audio_format", AudioFormat
+        ),
+        audio_stream_index=optional_integer(raw.get("audio_stream_index"), "audio_stream_index"),
+        thumbnail_count=integer(
             raw.get("thumbnail_count", DEFAULT_THUMBNAIL_COUNT), "thumbnail_count"
         ),
     )
@@ -81,36 +90,5 @@ def params_from_mapping(raw: Mapping[str, object]) -> Params:
 _KNOWN_OPTIONS = frozenset(field.name for field in fields(Params))
 
 
-def _is_not_integer(value: object) -> bool:
-    # bool é subclasse de int em Python; `true` do JSON não é uma quantidade.
-    return isinstance(value, bool) or not isinstance(value, int)
-
-
-def _is_stream_index(value: int) -> bool:
-    return not _is_not_integer(value) and 0 <= value <= MAX_AUDIO_STREAM_INDEX
-
-
-def _audio_format(raw: object) -> AudioFormat:
-    if not isinstance(raw, str):
-        raise InvalidParametersError("audio_format deve ser texto")
-    try:
-        return AudioFormat(raw)
-    except ValueError:
-        allowed = [member.value for member in AudioFormat]
-        raise InvalidParametersError(f"audio_format deve ser um de {allowed}") from None
-
-
-def _integer(raw: object, option: str) -> int:
-    if isinstance(raw, int) and not isinstance(raw, bool):
-        return raw
-    raise InvalidParametersError(f"{option} deve ser inteiro")
-
-
-def _optional_integer(raw: object, option: str) -> int | None:
-    return None if raw is None else _integer(raw, option)
-
-
-def _boolean(raw: object, option: str) -> bool:
-    if not isinstance(raw, bool):
-        raise InvalidParametersError(f"{option} deve ser booleano")
-    return raw
+def is_stream_index(value: int) -> bool:
+    return not is_not_integer(value) and 0 <= value <= MAX_AUDIO_STREAM_INDEX

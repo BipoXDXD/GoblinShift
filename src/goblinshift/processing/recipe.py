@@ -67,6 +67,11 @@ class ItemNoticeCode(StrEnum):
     para `succeeded_with_warnings`). Lista fechada: vão para o banco e para a API."""
 
     IMAGE_P3_CONVERTED = "IMAGE_P3_CONVERTED"
+    # Media Mill v2: o áudio com perda saiu reamostrado (Opus sempre a 48 kHz; MP3 e AAC fora de
+    # 44,1/48 kHz vão para 48 kHz).
+    AUDIO_RESAMPLED = "AUDIO_RESAMPLED"
+    # Media Mill v2: o fim do trecho passava da duração do vídeo e foi ajustado a ela.
+    MEDIA_TRIM_CLAMPED = "MEDIA_TRIM_CLAMPED"
 
 
 @dataclass(frozen=True)
@@ -162,6 +167,8 @@ class ItemRejectionCode(StrEnum):
     MEDIA_TOO_LARGE = "MEDIA_TOO_LARGE"
     AUDIO_LIMIT_EXCEEDED = "AUDIO_LIMIT_EXCEEDED"
     AUDIO_STREAM_NOT_FOUND = "AUDIO_STREAM_NOT_FOUND"
+    # Media Mill v2: o trecho começa no fim do vídeo ou da faixa de áudio, ou depois dele.
+    TRIM_OUT_OF_RANGE = "TRIM_OUT_OF_RANGE"
 
 
 @dataclass(frozen=True)

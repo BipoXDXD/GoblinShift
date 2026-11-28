@@ -11,6 +11,7 @@ from typing import Any
 import pytest
 
 from goblinshift.processing.media_mill import Limits, Params
+from goblinshift.processing.media_mill.plan import plan_from_v1
 from goblinshift.processing.media_mill.probe import (
     inspect,
     parse_probe,
@@ -65,7 +66,7 @@ def inspected(
     container: Container = Container.MOV,
     params: Params | None = None,
 ) -> Any:
-    return inspect(parse_probe(data), container, params or Params(), Limits())
+    return inspect(parse_probe(data), container, plan_from_v1(params or Params()), Limits())
 
 
 def rejection(

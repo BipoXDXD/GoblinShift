@@ -5841,7 +5841,9 @@
       "ItemNoticeCode": {
         "type": "string",
         "enum": [
-          "IMAGE_P3_CONVERTED"
+          "IMAGE_P3_CONVERTED",
+          "AUDIO_RESAMPLED",
+          "MEDIA_TRIM_CLAMPED"
         ],
         "title": "ItemNoticeCode",
         "description": "Fatos sobre o item que a interface mostra, mas que não são aviso (A2: não mudam o estado\npara `succeeded_with_warnings`). Lista fechada: vão para o banco e para a API."
@@ -5857,7 +5859,8 @@
           "FIELD_LIMIT_EXCEEDED",
           "MEDIA_TOO_LARGE",
           "AUDIO_LIMIT_EXCEEDED",
-          "AUDIO_STREAM_NOT_FOUND"
+          "AUDIO_STREAM_NOT_FOUND",
+          "TRIM_OUT_OF_RANGE"
         ],
         "title": "ItemRejectionCode",
         "description": "Códigos de rejeição por item do catálogo de 1.6: lista fechada.\n\nCada receita usa um subconjunto. A coleta do worker recusa no `report.json` qualquer outro\ncódigo, porque o relatório vem do sandbox e o código vai para o banco e para a API."

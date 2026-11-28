@@ -341,6 +341,7 @@ export const TEXT = {
           "O vídeo passa de 300 s, de 1920 × 1080 ou de 60 fps, tem áudio mais longo que o vídeo, gera arquivo grande demais ou demorou demais para processar.",
         AUDIO_LIMIT_EXCEEDED: "A faixa de áudio passa de 48 kHz ou de 2 canais.",
         AUDIO_STREAM_NOT_FOUND: "O vídeo não tem a faixa de áudio pedida.",
+        TRIM_OUT_OF_RANGE: "O início do trecho fica depois do fim do vídeo.",
       },
       warnings: {
         CSV_ALL_RECORDS_FILTERED: "Os filtros tiraram todos os registros desta tabela.",
@@ -363,6 +364,8 @@ export const TEXT = {
       },
       notices: {
         IMAGE_P3_CONVERTED: "A imagem estava em Display P3 e foi convertida para sRGB.",
+        AUDIO_RESAMPLED: "O áudio foi reamostrado para 48 kHz, a taxa que o formato pede.",
+        MEDIA_TRIM_CLAMPED: "O fim do trecho passava do fim do vídeo e foi ajustado.",
       },
       unknownNotice: (code: string) => `Nota desconhecida (${code}).`,
       duplicateOf: (position: number) =>
