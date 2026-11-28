@@ -35,17 +35,20 @@ e novos dos itens citados. `usage` imprime, separados por tab, o consumo das úl
 origem (`conta` ou `padrão`).
 `orphan-files` é, por padrão, um relatório só de leitura: nada é apagado nem alterado. Percorre o
 disco do storage e lista, uma linha por arquivo e separados por tab (chave, bytes, modificação em
-UTC e categoria), o que nenhuma linha viva de `stored_object` referencia: `sem-linha` (órfão puro)
-e `marcado-removido-mas-presente` (linha `deleted` ou `missing` cujo arquivo ainda existe; em
-`missing` talvez convenha restaurar a linha em vez de apagar o arquivo). Arquivo modificado há
-menos de `--min-age-hours` (padrão 6, aceita decimal) fica de fora, porque pode ser gravação em
-curso; a lista vai até `--limit` linhas (padrão 200) e os totais por categoria, em stderr, contam
-tudo. Sem a sentinela de montagem o storage não é verificado e a saída é 4. Sai com 0 mesmo com
-órfãos: decidir o que fazer com eles é do administrador. Com `--delete-orphans --yes` apaga até
-`--limit` arquivos `sem-linha` (nunca `marcado-removido-mas-presente`), conferindo de novo a linha
-e o `mtime` logo antes de cada remoção; imprime uma linha por arquivo apagado (categoria
-`apagado`) e os totais em stderr. `--delete-orphans` sem `--yes` (ou `--yes` sozinho) sai com 2
-sem apagar nada: rode antes sem a flag e confira a lista.
+UTC e categoria), o que nenhuma linha viva de `stored_object` referencia: `sem-linha` (órfão puro,
+com nome num formato da aplicação), `desconhecido` (sem linha e com nome fora desses formatos, como
+um `dump.sql` na raiz; nunca apagado) e `marcado-removido-mas-presente` (linha `deleted` ou
+`missing` cujo arquivo ainda existe; em `missing` talvez convenha restaurar a linha em vez de
+apagar o arquivo). Arquivo modificado há menos de `--min-age-hours` (padrão 6, aceita decimal)
+fica de fora, porque pode ser gravação em curso; a lista vai até `--limit` linhas (padrão 200) e
+os totais por categoria, em stderr, contam tudo. Sem a sentinela de montagem o storage não é
+verificado e a saída é 4. Sai com 0 mesmo com órfãos: decidir o que fazer com eles é do
+administrador. Com `--delete-orphans --yes` apaga até `--limit` arquivos `sem-linha` (nunca
+`desconhecido` nem `marcado-removido-mas-presente`), conferindo de novo a linha e o `mtime` logo
+antes de cada remoção; cada arquivo apagado sai na hora numa linha (categoria `apagado`), e o que
+sumiu, estava adulterado ou falhou ao apagar sai na hora em stderr, com os totais no fim. Falha
+ao apagar um arquivo não para os outros, mas a saída é 4. `--delete-orphans` sem `--yes` (ou
+`--yes` sozinho) sai com 2 sem apagar nada: rode antes sem a flag e confira a lista.
 Sai com 0 em sucesso, 1 se a conta ou a chave não existir, 2 em erro de uso e 3 se faltar um
 segredo obrigatório, com uma linha em stderr que nomeia a variável; Ctrl-C sai com 130 e a linha
 `gs-admin: interrompido`. Qualquer outra falha sai com 4
@@ -71,6 +74,7 @@ from sqlalchemy.orm import Session, sessionmaker
 from goblinshift import capacity
 from goblinshift.entrypoints.worker import run_finished_reporter
 from goblinshift.files.orphans import (
+    DeletionOutcome,
     OrphanDeletion,
     OrphanFile,
     OrphanReport,
@@ -537,17 +541,25 @@ def _delete_orphans(
     try:
         with context.factory() as session:
             result = delete_orphan_files(
-                session, storage, modified_before=modified_before, limit=limit
+                session,
+                storage,
+                modified_before=modified_before,
+                limit=limit,
+                on_outcome=_print_deletion_outcome,
             )
     except StorageNotMountedError as error:
         return _fail(EXIT_FAILURE, str(error))
-    for file in result.deleted:
-        print(_orphan_line(file, category=_DELETED_CATEGORY))
     _print_deletion_totals(result, limit)
-    return EXIT_OK
+    return EXIT_FAILURE if result.failed else EXIT_OK
 
 
-_DELETED_CATEGORY = "apagado"
+def _print_deletion_outcome(file: OrphanFile, outcome: DeletionOutcome) -> None:
+    """Cada desfecho sai na hora, com flush: uma queda no meio deixa o rastro do que já foi."""
+    if outcome is DeletionOutcome.DELETED:
+        print(_orphan_line(file, category=outcome), flush=True)
+    elif outcome is not DeletionOutcome.CHANGED:
+        key = ascii(file.key)[1:-1]
+        print(f"gs-admin: {outcome}: {key}", file=sys.stderr, flush=True)
 
 
 def _orphan_line(file: OrphanFile, *, category: str | None = None) -> str:
@@ -559,16 +571,17 @@ def _orphan_line(file: OrphanFile, *, category: str | None = None) -> str:
 
 def _print_deletion_totals(result: OrphanDeletion, limit: int) -> None:
     deleted_bytes = sum(file.size_bytes for file in result.deleted)
-    print(
-        f"gs-admin: {len(result.deleted)} órfãos sem linha apagados, {deleted_bytes} bytes",
-        file=sys.stderr,
-    )
-    print(f"gs-admin: {result.skipped} poupados porque mudaram depois da lista", file=sys.stderr)
-    if len(result.deleted) >= limit:
-        print(
-            f"gs-admin: chegou ao limite de {limit}; pode haver mais, rode de novo",
-            file=sys.stderr,
-        )
+    lines = [
+        f"{len(result.deleted)} órfãos sem linha apagados, {deleted_bytes} bytes",
+        f"{result.skipped} poupados porque mudaram depois da lista",
+        f"{len(result.vanished)} sumiram antes da remoção",
+        f"{len(result.tampered)} adulterados (não são arquivo comum), não apagados",
+        f"{len(result.failed)} falharam ao apagar",
+    ]
+    if result.truncated:
+        lines.append(f"chegou ao limite de {limit} e sobrou órfão; rode de novo")
+    for line in lines:
+        print(f"gs-admin: {line}", file=sys.stderr)
 
 
 def _print_orphan_totals(report: OrphanReport, limit: int) -> None:
@@ -579,6 +592,11 @@ def _print_orphan_totals(report: OrphanReport, limit: int) -> None:
     print(
         f"gs-admin: {report.marked_removed_count} marcados como removidos mas ainda presentes, "
         f"{report.marked_removed_bytes} bytes",
+        file=sys.stderr,
+    )
+    print(
+        f"gs-admin: {report.unknown_count} desconhecidos (nome fora dos formatos da aplicação; "
+        f"nunca apagados), {report.unknown_bytes} bytes",
         file=sys.stderr,
     )
     if report.truncated:
