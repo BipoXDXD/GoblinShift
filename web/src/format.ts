@@ -24,11 +24,16 @@ export function formatBytes(bytes: number): string {
   return `${roundedSize.format(value)} ${unit}`;
 }
 
-/** Exibe os bytes exatos se o arredondamento esconder o excesso. */
+/**
+ * Exibe os bytes exatos se o arredondamento esconder o excesso, sem perder o teto arredondado
+ * que a interface anuncia ("50 MB (52.428.800 bytes)").
+ */
 export function formatByteComparison(bytes: number, limit: number): readonly [string, string] {
   const size = formatBytes(bytes);
   const max = formatBytes(limit);
-  return size === max ? [exactBytes.format(bytes), exactBytes.format(limit)] : [size, max];
+  return size === max
+    ? [exactBytes.format(bytes), `${max} (${exactBytes.format(limit)})`]
+    : [size, max];
 }
 
 /** Instante (ISO 8601 com fuso) no fuso e no formato da pessoa. */
