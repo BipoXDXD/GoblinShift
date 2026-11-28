@@ -24,7 +24,7 @@ from goblinshift.files.artifacts import (
 from goblinshift.files.states import ArtifactRole
 from goblinshift.files.storage import FileStorage
 from goblinshift.files.tables import artifact, stored_object
-from goblinshift.platform.db import unit_of_work
+from goblinshift.platform.db import transaction_now, unit_of_work
 from goblinshift.runs.retention import (
     ANONYMIZE_AFTER,
     DELETE_AFTER,
@@ -34,7 +34,6 @@ from goblinshift.runs.retention import (
     delete_old_runs,
     history_backlog,
 )
-from goblinshift.runs.store import db_now
 from goblinshift.runs.tables import attempt, idempotency_record, run, run_input, run_output
 from tests.capacity.support import account_reserved, live_amount
 from tests.runs.support import (
@@ -55,7 +54,7 @@ ACCEPTED_DETAILS = {"warnings": [], "rows_read": 7, "rows_written": 7}
 
 def now_of(factory: sessionmaker[Session]) -> datetime:
     with factory() as session:
-        return db_now(session)
+        return transaction_now(session)
 
 
 def finished_run(

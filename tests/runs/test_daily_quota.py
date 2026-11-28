@@ -13,7 +13,7 @@ from sqlalchemy.orm import Session, sessionmaker
 
 from goblinshift.files.storage import FileStorage
 from goblinshift.files.tables import stored_object, upload
-from goblinshift.platform.db import unit_of_work
+from goblinshift.platform.db import transaction_now, unit_of_work
 from goblinshift.platform.settings import LOCAL_EXECUTOR_IMAGE
 from goblinshift.runs.acceptance import (
     DailyQuotaExceededError,
@@ -29,7 +29,6 @@ from goblinshift.runs.quotas import (
     active_run_id,
     daily_usage,
 )
-from goblinshift.runs.store import db_now
 from goblinshift.runs.tables import run, run_input
 from tests.runs.support import (
     count_rows,
@@ -176,7 +175,7 @@ def accept(factory: sessionmaker[Session], owner: uuid.UUID, command: RunCommand
 
 def database_now(factory: sessionmaker[Session]) -> datetime:
     with factory() as session:
-        return db_now(session)
+        return transaction_now(session)
 
 
 def fill_runs(factory: sessionmaker[Session], owner: uuid.UUID, count: int, age: timedelta) -> None:

@@ -55,6 +55,7 @@ from goblinshift.catalog import (
 from goblinshift.files import objects
 from goblinshift.files.states import HolderKind
 from goblinshift.files.uploads import ReadyUpload, lock_ready_uploads
+from goblinshift.platform.db import transaction_now
 from goblinshift.processing.executor.report_file import REPORT_MAX_BYTES
 from goblinshift.processing.output_dir import DEFAULT_MAX_BYTES
 from goblinshift.processing.packaging import PackageLimits
@@ -66,7 +67,6 @@ from goblinshift.runs.quotas import (
     daily_usage,
     quota_for,
 )
-from goblinshift.runs.store import db_now
 from goblinshift.runs.tables import idempotency_record, run, run_input
 
 # Operação gravada no registro de idempotência; a chave é por conta e por operação (1.6).
@@ -303,7 +303,7 @@ def accept_run(
         if validated.preset_id is not None:
             presets.hold_for_run(session, owner_id, validated.preset_id)
         _lock_global_queue(session)
-        now = db_now(session)
+        now = transaction_now(session)
         usage = daily_usage(session, owner_id, now)
         quota = quota_for(session, owner_id, quota_defaults)
         _check_run_quota(usage, quota, now)

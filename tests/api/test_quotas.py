@@ -19,9 +19,8 @@ from goblinshift.files import uploads as uploads_module
 from goblinshift.files.limits import MIN_INTENT_RESERVED_BYTES as MIN
 from goblinshift.files.limits import UPLOAD_CREATION_WINDOW
 from goblinshift.files.tables import upload
-from goblinshift.platform.db import unit_of_work
+from goblinshift.platform.db import transaction_now, unit_of_work
 from goblinshift.runs.quotas import MAX_RUNS_PER_WINDOW
-from goblinshift.runs.store import db_now
 from tests.api.files_support import UPLOADS, create_upload, new_account, send_content
 from tests.api.support import assert_problem
 from tests.capacity.support import create_account_pool, set_global_max
@@ -242,7 +241,7 @@ def test_31a_execucao_em_24h_429_com_retry_after(
     owner, auth = new_account(factory)
     upload_id = ready(client, auth)
     with factory() as session:
-        now = db_now(session)
+        now = transaction_now(session)
     for _ in range(MAX_RUNS_PER_WINDOW):
         insert_finished_run(factory, owner, now - timedelta(hours=23))
 

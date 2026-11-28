@@ -25,6 +25,7 @@ from goblinshift.files.limits import (
 )
 from goblinshift.identity import Scope, find_account
 from goblinshift.identity.providers import ProviderName, provider_for_issuer
+from goblinshift.platform.db import transaction_now
 from goblinshift.runs.quotas import (
     QuotaLimits,
     active_run_id,
@@ -32,7 +33,6 @@ from goblinshift.runs.quotas import (
     executor_time_ms,
     quota_for,
 )
-from goblinshift.runs.store import db_now
 
 router = APIRouter()
 
@@ -103,7 +103,7 @@ def get_me(
     owner_id = principal.owner_id
     defaults: QuotaLimits = request.app.state.quota_defaults
     with session.begin():
-        now = db_now(session)
+        now = transaction_now(session)
         account = find_account(session, owner_id)
         storage = capacity.usage(session, owner_id)
         daily = daily_usage(session, owner_id, now)

@@ -20,9 +20,8 @@ from goblinshift.files.states import ObjectState
 from goblinshift.files.storage import FileStorage
 from goblinshift.files.tables import stored_object, upload
 from goblinshift.files.uploads import request_deletion
-from goblinshift.platform.db import unit_of_work
+from goblinshift.platform.db import transaction_now, unit_of_work
 from goblinshift.runs.retention import HISTORY_REFERENCES
-from goblinshift.runs.store import db_now
 from goblinshift.runs.tables import run_input
 from tests.files.support import ready_upload
 from tests.runs.support import insert_finished_run, new_owner
@@ -69,7 +68,7 @@ def test_upload_no_historico_nao_e_apagado_e_o_de_fora_sai(
     factory: sessionmaker[Session], storage: FileStorage
 ) -> None:
     with factory() as session:
-        now = db_now(session)
+        now = transaction_now(session)
     in_history = old_deleted_upload(factory, storage, now, in_history=True)
     outside = old_deleted_upload(factory, storage, now, in_history=False)
 
@@ -87,7 +86,7 @@ def test_predicado_do_historico_so_marca_o_upload_referenciado(
     factory: sessionmaker[Session], storage: FileStorage
 ) -> None:
     with factory() as session:
-        now = db_now(session)
+        now = transaction_now(session)
     in_history = old_deleted_upload(factory, storage, now, in_history=True)
     old_deleted_upload(factory, storage, now, in_history=False)
 
@@ -105,7 +104,7 @@ def test_predicado_do_historico_usa_o_indice_de_dono_e_upload(
     factory: sessionmaker[Session], storage: FileStorage
 ) -> None:
     with factory() as session:
-        now = db_now(session)
+        now = transaction_now(session)
     old_deleted_upload(factory, storage, now, in_history=True)
     statement = select(upload.c.id).where(HISTORY_REFERENCES.upload(upload.c.owner_id, upload.c.id))
 

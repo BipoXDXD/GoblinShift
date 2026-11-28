@@ -45,7 +45,7 @@ from goblinshift.files.objects import holders_with_open_uses, release_expired_do
 from goblinshift.files.retention import file_backlog, remove_file_after_commit
 from goblinshift.files.states import HolderKind
 from goblinshift.files.storage import FileStorage, ObjectTamperedError
-from goblinshift.platform.db import is_connection_lost, sqlstate_of
+from goblinshift.platform.db import is_connection_lost, sqlstate_of, transaction_now
 from goblinshift.platform.telemetry import exception_fields
 from goblinshift.runs import retention as run_retention
 from goblinshift.runs.lifecycle import (
@@ -68,7 +68,6 @@ from goblinshift.runs.store import (
     RunFinishedHook,
     apply_transition,
     complete_after_commit,
-    db_now,
     load_run_any_owner,
     release_run_holds,
     run_transaction,
@@ -847,7 +846,7 @@ class Maintenance:
     def measure(self) -> dict[str, int]:
         """Medidores do evento do ciclo: o tamanho do que acumula e o que os alertas leem."""
         with self._factory() as session, session.begin():
-            now = db_now(session)
+            now = transaction_now(session)
             stuck: int = session.execute(
                 select(func.count()).where(
                     run.c.status == Status.STOPPING,
@@ -866,8 +865,9 @@ class Maintenance:
             }
 
     def _at_db_now[T](self, step: Callable[[Session, datetime], T]) -> T:
+        """Roda `step` numa transação nova, com o `transaction_now` dela."""
         with self._factory() as session, session.begin():
-            return step(session, db_now(session))
+            return step(session, transaction_now(session))
 
     # Comum -----------------------------------------------------------------------------
 

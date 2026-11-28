@@ -16,10 +16,9 @@ from goblinshift.capacity import set_account_storage_max
 from goblinshift.identity import ADMIN_ISSUER, Scope
 from goblinshift.identity.providers import GITHUB_ISSUER, GOOGLE_ISSUER
 from goblinshift.identity.tables import app_user
-from goblinshift.platform.db import unit_of_work
+from goblinshift.platform.db import transaction_now, unit_of_work
 from goblinshift.runs.acceptance import RUN_OUTPUT_CEILING_BYTES
 from goblinshift.runs.quotas import set_account_quota
-from goblinshift.runs.store import db_now
 from goblinshift.runs.tables import attempt
 from tests.api.files_support import bearer, create_upload, new_account, send_content
 from tests.identity.support import new_key
@@ -129,7 +128,7 @@ def test_consumo_reflete_uploads_execucoes_e_reservas(
     content = b"a,b\n1,2\n"
     upload_id = ready(client, auth, content)
     with factory() as session:
-        now = db_now(session)
+        now = transaction_now(session)
     oldest = now - timedelta(hours=3)
     insert_finished_run(factory, owner, oldest)
     accepted = client.post(
@@ -193,7 +192,7 @@ def test_consumo_de_outra_conta_nao_aparece(
     other_owner, other_auth = new_account(factory)
     other_upload = ready(client, other_auth, b"segredo")
     with factory() as session:
-        insert_finished_run(factory, other_owner, db_now(session) - timedelta(hours=1))
+        insert_finished_run(factory, other_owner, transaction_now(session) - timedelta(hours=1))
     _, auth = new_account(factory)
 
     response = client.get(ME, headers=auth)
@@ -232,7 +231,7 @@ def test_tempo_de_executor_da_conta_aparece_no_consumo(
 ) -> None:
     owner, auth = new_account(factory)
     with factory() as session:
-        now = db_now(session)
+        now = transaction_now(session)
     run_id = insert_finished_run(factory, owner, now - timedelta(hours=1))
     with unit_of_work(factory) as session:
         session.execute(

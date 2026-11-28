@@ -15,8 +15,7 @@ from goblinshift.files.retention import NAME_AFTER, anonymize_deleted_uploads, e
 from goblinshift.files.states import TransferDirection
 from goblinshift.files.tables import upload
 from goblinshift.identity import Scope
-from goblinshift.platform.db import unit_of_work
-from goblinshift.runs.store import db_now
+from goblinshift.platform.db import transaction_now, unit_of_work
 from tests.api.files_support import (
     OCTET_STREAM,
     UPLOADS,
@@ -143,7 +142,7 @@ def test_upload_anonimizado_pela_retencao_aparece_sem_nome(
             .values(created_at=func.now() - NAME_AFTER)
         )
     with unit_of_work(factory) as session:
-        assert anonymize_deleted_uploads(session, db_now(session), 10) == 1
+        assert anonymize_deleted_uploads(session, transaction_now(session), 10) == 1
 
     response = client.get(upload_url(item), headers=auth)
 

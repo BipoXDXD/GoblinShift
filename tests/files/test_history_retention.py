@@ -28,9 +28,8 @@ from goblinshift.files.storage import FileStorage
 from goblinshift.files.tables import artifact, object_use, stored_object, upload
 from goblinshift.files.upload_requests import create_intents_once
 from goblinshift.files.uploads import request_deletion
-from goblinshift.platform.db import unit_of_work
+from goblinshift.platform.db import transaction_now, unit_of_work
 from goblinshift.runs.retention import HISTORY_REFERENCES
-from goblinshift.runs.store import db_now
 from tests.files.support import create_intent, create_user, ready_upload
 
 pytestmark = pytest.mark.integration
@@ -41,7 +40,7 @@ LIMIT = 10
 
 def now_of(factory: sessionmaker[Session]) -> datetime:
     with factory() as session:
-        return db_now(session)
+        return transaction_now(session)
 
 
 def deleted_upload(

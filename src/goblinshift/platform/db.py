@@ -4,9 +4,10 @@
 import time
 from collections.abc import Callable, Iterator
 from contextlib import contextmanager
+from datetime import datetime
 
 import psycopg
-from sqlalchemy import Engine, MetaData, create_engine
+from sqlalchemy import Engine, MetaData, create_engine, func, select
 from sqlalchemy.exc import DBAPIError, OperationalError
 from sqlalchemy.exc import TimeoutError as PoolTimeoutError
 from sqlalchemy.orm import Session, sessionmaker
@@ -114,6 +115,21 @@ def is_unavailable_for_request(error: Exception) -> bool:
         sqlstate in _UNAVAILABLE_SQLSTATES
         or sqlstate[:_SQLSTATE_CLASS_LENGTH] in _UNAVAILABLE_SQLSTATE_CLASSES
     )
+
+
+def transaction_now(session: Session) -> datetime:
+    """`now()` da transação: o relógio de todas as decisões de prazo (3.4)."""
+    now: datetime = session.execute(select(func.now())).scalar_one()
+    return now
+
+
+def db_wall_clock(session: Session) -> datetime:
+    """`clock_timestamp()`: a hora do banco agora, que não fica parada no começo da transação.
+
+    Lida depois de uma trava, inclui a espera por ela, que o `now()` da transação não vê.
+    """
+    clock: datetime = session.execute(select(func.clock_timestamp())).scalar_one()
+    return clock
 
 
 def make_engine(settings: Settings) -> Engine:

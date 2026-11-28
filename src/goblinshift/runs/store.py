@@ -442,21 +442,6 @@ def _reserve_published_objects(session: Session, run_id: uuid.UUID) -> None:
             return
 
 
-def db_now(session: Session) -> datetime:
-    """`now()` da transação: o relógio de todas as decisões de prazo (3.4)."""
-    now: datetime = session.execute(select(func.now())).scalar_one()
-    return now
-
-
-def db_clock(session: Session) -> datetime:
-    """`clock_timestamp()`: a hora do banco agora, que não fica parada no começo da transação.
-
-    Lida depois de uma trava, inclui a espera por ela, que o `now()` da transação não vê.
-    """
-    clock: datetime = session.execute(select(func.clock_timestamp())).scalar_one()
-    return clock
-
-
 def lease_expired(lease_expires_at: datetime, clock: datetime) -> bool:
     """Vencido é `lease_expires_at < clock`, o mesmo corte da reconciliação (3.4)."""
     return lease_expires_at < clock

@@ -98,7 +98,7 @@ from goblinshift.identity.accounts import (
     list_accounts,
     list_pending_accounts,
 )
-from goblinshift.platform.db import make_engine, make_session_factory, unit_of_work
+from goblinshift.platform.db import make_engine, make_session_factory, transaction_now, unit_of_work
 from goblinshift.platform.settings import MissingSecretError, Settings
 from goblinshift.platform.telemetry import (
     UserHasher,
@@ -116,7 +116,6 @@ from goblinshift.runs.quotas import (
     executor_time_ms,
     quota_override,
 )
-from goblinshift.runs.store import db_now
 
 # Nome do serviço nos eventos que a CLI emite (`OTEL_SERVICE_NAME` tem precedência).
 _SERVICE_NAME = "goblinshift-admin"
@@ -450,7 +449,7 @@ def _usage(args: argparse.Namespace, context: _Context) -> int:
     with unit_of_work(context.factory) as session:
         if find_account(session, args.user) is None:
             return _fail(EXIT_NOT_FOUND, f"conta {args.user} não existe")
-        now = db_now(session)
+        now = transaction_now(session)
         daily = daily_usage(session, args.user, now)
         executor_ms = executor_time_ms(session, args.user, now)
         storage = capacity.usage(session, args.user)

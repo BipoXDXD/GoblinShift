@@ -22,8 +22,7 @@ from goblinshift.capacity import (
     released_backlog,
 )
 from goblinshift.capacity.tables import resource_reservation
-from goblinshift.platform.db import unit_of_work
-from goblinshift.runs.store import db_now
+from goblinshift.platform.db import transaction_now, unit_of_work
 from tests.capacity.support import new_owner, reserve_now
 
 pytestmark = pytest.mark.integration
@@ -53,7 +52,7 @@ def released_on(factory: sessionmaker[Session], holder_id: uuid.UUID, when: date
 
 def now_of(factory: sessionmaker[Session]) -> datetime:
     with factory() as session:
-        return db_now(session)
+        return transaction_now(session)
 
 
 def reservations(factory: sessionmaker[Session]) -> int:
@@ -72,7 +71,7 @@ def test_reserva_liberada_ha_90_dias_sai_e_as_demais_ficam(
     released_at(factory, recent, RELEASED_RETENTION - timedelta(minutes=1))
 
     with unit_of_work(factory) as session:
-        removed = delete_released_reservations(session, db_now(session), limit=10)
+        removed = delete_released_reservations(session, transaction_now(session), limit=10)
 
     assert removed == 1
     assert reservations(factory) == 2
@@ -84,9 +83,9 @@ def test_limpeza_do_livro_razao_respeita_o_lote(factory: sessionmaker[Session]) 
         released_at(factory, reserve_now(factory, owner, 1), RELEASED_RETENTION + SECOND)
 
     with unit_of_work(factory) as session:
-        first = delete_released_reservations(session, db_now(session), limit=2)
+        first = delete_released_reservations(session, transaction_now(session), limit=2)
     with unit_of_work(factory) as session:
-        second = delete_released_reservations(session, db_now(session), limit=2)
+        second = delete_released_reservations(session, transaction_now(session), limit=2)
 
     assert (first, second) == (2, 1)
 
