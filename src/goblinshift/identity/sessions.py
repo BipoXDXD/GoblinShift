@@ -113,8 +113,10 @@ def authenticate_session(session: Session, token: str, now: datetime) -> Princip
     `resolve_session` e `record_session_use` separados.
     """
     resolved = resolve_session(session, token, now)
-    if not isinstance(resolved, Principal) or resolved.session_id is None:
+    if not isinstance(resolved, Principal):
         return None
+    if resolved.session_id is None:
+        raise RuntimeError("Principal de sessão sem session_id")
     record_session_use(session, resolved.session_id, now)
     return resolved
 

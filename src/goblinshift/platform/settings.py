@@ -206,17 +206,14 @@ class Settings(BaseSettings):
                 self.login_cookie_secret_file,
                 _DEV_LOGIN_COOKIE_KEY,
             ),
-            csrf_previous_key=self._previous_csrf_key(production),
+            csrf_previous_key=self._previous_csrf_key(),
         )
 
-    def _previous_csrf_key(self, production: bool) -> bytes | None:
+    def _previous_csrf_key(self) -> bytes | None:
         """Chave anterior do CSRF, com as regras da atual; sem o arquivo, None em todo ambiente."""
         if self.csrf_secret_previous_file is None:
             return None
-        # Com o arquivo, `_server_key` só o lê e confere o tamanho: o padrão de dev nunca vale.
-        return self._server_key(
-            production, "GS_CSRF_SECRET_PREVIOUS_FILE", self.csrf_secret_previous_file, ""
-        )
+        return _read_server_key("GS_CSRF_SECRET_PREVIOUS_FILE", self.csrf_secret_previous_file)
 
     def checked_public_origin(self) -> str:
         """A origem pública validada: a do login e a da URL nos eventos da API (3.6, 3.7)."""
@@ -254,10 +251,7 @@ class Settings(BaseSettings):
             if production:
                 raise MissingSecretError(f"{name} é obrigatório em produção")
             return dev.encode()
-        key = _read_secret(name, secret_file)
-        if len(key) < MIN_SECRET_CHARS:
-            raise WebConfigError(f"{name} precisa de pelo menos {MIN_SECRET_CHARS} caracteres")
-        return key.encode()
+        return _read_server_key(name, secret_file)
 
     def cursor_signing_key(self) -> bytes:
         return self._secret_or_dev_default(self.cursor_secret, "GS_CURSOR_SECRET", _DEV_CURSOR_KEY)
@@ -306,6 +300,14 @@ class Settings(BaseSettings):
             port=self.db_port,
             database=self.db_name,
         )
+
+
+def _read_server_key(name: str, path: Path) -> bytes:
+    """Chave do servidor lida do arquivo; menos de `MIN_SECRET_CHARS` caracteres impede a subida."""
+    key = _read_secret(name, path)
+    if len(key) < MIN_SECRET_CHARS:
+        raise WebConfigError(f"{name} precisa de pelo menos {MIN_SECRET_CHARS} caracteres")
+    return key.encode()
 
 
 def _read_secret(name: str, path: Path) -> str:

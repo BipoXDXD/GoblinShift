@@ -48,9 +48,9 @@ Alternativas consideradas:
 - `tests/runs/test_maintenance_identity.py`: o ciclo de contas remove as janelas velhas e registra o tamanho; a purga da conta não deixa janela para trás.
 - `tests/test_schema_constraints.py`: a migração 0007 bate com o modelo e é reversível.
 
-## Adendo (issue #442, item 46b): a mutação recusada pelo CSRF conta
+## Atualização de 2026-11-27 (#442)
 
-A contagem passou para antes do CSRF. `authenticate` identifica a credencial sem conferir o CSRF e sem gravar o uso da sessão, conta a requisição na classe da rota, confere o CSRF na mutação pela sessão e só então registra o uso da sessão (`record_session_use`). Antes, o CSRF vinha primeiro e a recusa não contava: uma página de outro site, ou um subdomínio irmão (`Sec-Fetch-Site: same-site`), podia mandar o navegador repetir mutações sem limite, e cada recusa estendia a inatividade da sessão.
+A mutação recusada pelo CSRF passou a contar no limite (item 46b): a contagem veio para antes do CSRF. `authenticate` identifica a credencial sem conferir o CSRF e sem gravar o uso da sessão, conta a requisição na classe da rota, confere o CSRF na mutação pela sessão e só então registra o uso da sessão (`record_session_use`). Antes, o CSRF vinha primeiro e a recusa não contava: uma página de outro site, ou um subdomínio irmão (`Sec-Fetch-Site: same-site`), podia mandar o navegador repetir mutações sem limite, e cada recusa estendia a inatividade da sessão.
 
 - A mutação com CSRF inválido conta como `COMMAND` (ou `RUN_CREATE`). Depois do limite, a resposta é `429 RATE_LIMITED`, não mais `403 CSRF_FAILED`.
 - Um site hostil consegue gastar o limite de comandos da conta durante um minuto. O custo é o mesmo de quem tem a credencial, e o limite existe para proteger a VPS. A recusa não estende a sessão e não chega aos serviços.

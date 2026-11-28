@@ -239,11 +239,12 @@ class AccountJobs:
         self._factory = factory
         self._clock = clock
         self._config = config
-        # Mede o prazo da retenção da auditoria; os testes o trocam por um relógio falso.
+        # Mede a duração do ciclo e o prazo da retenção da auditoria; os testes o trocam por um
+        # relógio falso.
         self._monotonic = monotonic
 
     def run_cycle(self) -> dict[str, int]:
-        started = time.monotonic()
+        started = self._monotonic()
         counts: dict[str, int] = {}
         failed = 0
         for name, step in self._cycle_steps():
@@ -277,7 +278,7 @@ class AccountJobs:
                 extra={"fields": {"alert": "audit_retention_behind", "events": audit_overdue}},
             )
         fields: dict[str, object] = {"main": True, **counts}
-        fields["duration_ms"] = round((time.monotonic() - started) * 1000)
+        fields["duration_ms"] = round((self._monotonic() - started) * 1000)
         logger.info("ciclo de contas", extra={"fields": fields})
         return counts
 

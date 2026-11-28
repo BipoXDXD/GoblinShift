@@ -376,16 +376,22 @@ def _audit_at(factory: sessionmaker[Session], *occurred_at: datetime) -> None:
             )
 
 
-def test_evento_de_exatos_91_dias_nao_conta_como_atraso(factory: sessionmaker[Session]) -> None:
+@pytest.mark.parametrize(
+    ("age", "overdue"),
+    [
+        (AUDIT_RETENTION + timedelta(days=1), 0),
+        (AUDIT_RETENTION + timedelta(days=1, seconds=1), 1),
+    ],
+    ids=["91_dias", "91_dias_e_1_s"],
+)
+def test_atraso_da_auditoria_comeca_depois_de_91_dias(
+    factory: sessionmaker[Session], age: timedelta, overdue: int
+) -> None:
     # Atraso é passar mais de um dia da retenção de 90: 91 dias ainda não, 91 dias e 1 s sim.
-    _audit_at(
-        factory,
-        NOW - AUDIT_RETENTION - timedelta(days=1),
-        NOW - AUDIT_RETENTION - timedelta(days=1, seconds=1),
-    )
+    _audit_at(factory, NOW - age)
 
     with factory() as session:
-        assert count_overdue_audit_events(session, NOW) == 1
+        assert count_overdue_audit_events(session, NOW) == overdue
 
 
 def test_estimativa_da_auditoria_le_as_estatisticas_sem_varrer(

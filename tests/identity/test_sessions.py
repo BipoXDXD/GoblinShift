@@ -2,7 +2,7 @@
 
 import hashlib
 from datetime import UTC, datetime, timedelta
-from uuid import UUID
+from uuid import UUID, uuid7
 
 import pytest
 from sqlalchemy import select, update
@@ -19,6 +19,7 @@ from goblinshift.identity import (
     resolve_session,
     revoke_all_credentials,
     revoke_session,
+    sessions,
     start_session,
 )
 from goblinshift.identity.tables import api_key, app_user, web_session
@@ -341,6 +342,17 @@ def test_resolve_session_nao_grava_o_uso(factory: sessionmaker[Session]) -> None
     row = _row(factory, issued.session_id)
     assert row["last_seen_at"] == NOW
     assert row["idle_expires_at"] == NOW + timedelta(minutes=30)
+
+
+def test_principal_resolvido_sem_session_id_e_erro_de_programacao(
+    factory: sessionmaker[Session], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # `resolve_session` só devolve Principal de sessão: sem `session_id` é defeito, não recusa.
+    keyless = Principal(owner_id=uuid7(), scopes=frozenset(Scope), via="api_key")
+    monkeypatch.setattr(sessions, "resolve_session", lambda *_: keyless)
+
+    with pytest.raises(RuntimeError, match="session_id"), factory() as session:
+        authenticate_session(session, "qualquer", NOW)
 
 
 # --- Conta ------------------------------------------------------------------------------------

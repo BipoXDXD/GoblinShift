@@ -32,7 +32,6 @@ from goblinshift.identity.accounts import (
     unblock_account,
 )
 from goblinshift.identity.audit import (
-    CSRF_FAILURE_AUDIT_INTERVAL,
     AuditEventType,
     AuditOutcome,
     LimitChange,
@@ -89,7 +88,6 @@ from goblinshift.identity.users import (
 
 __all__ = [
     "ADMIN_ISSUER",
-    "CSRF_FAILURE_AUDIT_INTERVAL",
     "CURRENT_TERMS_VERSION",
     "DEFAULT_KEY_DAYS",
     "KEY_PREFIX",
