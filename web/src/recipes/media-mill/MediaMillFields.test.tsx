@@ -130,6 +130,18 @@ describe("MediaMillFields", () => {
     });
   });
 
+  it("em WAV e FLAC o seletor desabilitado mostra o bitrate default, não o do formato anterior", async () => {
+    const { user } = setup();
+
+    await user.click(mp3());
+    await user.selectOptions(bitrate(), "320");
+    await user.click(flac());
+
+    expect(bitrate()).toBeDisabled();
+    expect(bitrate()).toHaveValue("192");
+    expect(bitrateOptions()).toEqual(["192"]);
+  });
+
   it("trocar de formato mantém o bitrate que a lista nova também tem", async () => {
     const { user } = setup();
 
@@ -186,7 +198,9 @@ describe("MediaMillFields", () => {
     expect(bitrate()).toBeDisabled();
     expect(trimStart()).toBeEnabled();
     expect(formatGroup()).toHaveAccessibleDescription(/Marque Extrair o áudio/);
-    expect(bitrate()).toHaveAccessibleDescription(/Marque Extrair o áudio/);
+    expect(bitrate()).toHaveAccessibleDescription(
+      "Marque Extrair o áudio para escolher formato, qualidade e faixa.",
+    );
   });
 
   it("sem nenhuma saída o rascunho é inválido na extração", async () => {

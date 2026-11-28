@@ -37,17 +37,18 @@ export function MediaMillFields({
   const errorOf = (field: keyof MediaMillFormValues): string | null =>
     errors.get(fieldId(field)) ?? null;
   const audioOff = !values.extract_audio;
-  const lossy = isLossy(values.audio_format);
-  const bitrates = isLossy(values.audio_format)
-    ? settings.bitratesByFormat[values.audio_format]
-    : [values.audio_bitrate_kbps];
+  const lossyFormat = isLossy(values.audio_format) ? values.audio_format : null;
+  const lossy = lossyFormat !== null;
+  // Em WAV e FLAC o comando leva o default; o seletor desabilitado mostra o mesmo valor.
+  const shownBitrate = lossy ? values.audio_bitrate_kbps : settings.defaults.audio_bitrate_kbps;
+  const bitrates = lossyFormat === null ? [shownBitrate] : settings.bitratesByFormat[lossyFormat];
   const formatHint = [
     lossy ? T.lossyFormatHint : T.audioFormatHint,
     ...(values.audio_format === "opus" ? [T.opusHint] : []),
     ...(audioOff ? [T.audioDisabledHint] : []),
   ].join(" ");
   const bitrateHint = audioOff
-    ? T.audioDisabledHint
+    ? T.audioBitrateDisabledHint
     : lossy
       ? undefined
       : T.audioBitrateLosslessHint;
@@ -140,7 +141,7 @@ export function MediaMillFields({
           <select
             {...control}
             disabled={audioOff || !lossy}
-            value={values.audio_bitrate_kbps}
+            value={shownBitrate}
             onChange={(event) => {
               const chosen = bitrates.find(
                 (bitrate) => String(bitrate) === event.currentTarget.value,

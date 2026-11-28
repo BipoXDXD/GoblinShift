@@ -155,7 +155,7 @@ describe("parseMediaMill", () => {
       {
         fieldId: id,
         label,
-        message: "Use m:ss, como 1:15, ou segundos, como 75, até 5:00.",
+        message: "Use m:ss, como 1:15, ou segundos, como 75. O máximo é 5:00.",
       },
     ]);
   });
