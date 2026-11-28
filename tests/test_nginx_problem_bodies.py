@@ -224,7 +224,7 @@ def test_auth_nao_traduz_413_nem_falha_de_upstream() -> None:
 
 
 # Named locations que redirecionam a navegação, não respondem erro: o POST do compartilhamento sem
-# service worker vai para a Oficina (ADR 062, tests/test_nginx_share_target.py).
+# service worker vai para a Oficina (ADR 064, tests/test_nginx_share_target.py).
 REDIRECT_LOCATIONS = frozenset({"location @share_unavailable"})
 
 

@@ -1,4 +1,4 @@
-// Caixa de entrada do compartilhamento (ADR 062): o service worker guarda aqui os arquivos que
+// Caixa de entrada do compartilhamento (ADR 064): o service worker guarda aqui os arquivos que
 // chegam pelo `POST /compartilhar` do `share_target`, e a página os lê depois, uma vez só. Sem
 // `self` nem `window`: o mesmo código roda no service worker e na página, e o teste usa um
 // `CacheStorage` falso.

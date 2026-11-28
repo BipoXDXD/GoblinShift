@@ -1,4 +1,4 @@
-// Service worker do GoblinShift (ADR 062). Só duas coisas: receber o `POST /compartilhar` do
+// Service worker do GoblinShift (ADR 064). Só duas coisas: receber o `POST /compartilhar` do
 // `share_target` (manifest.webmanifest) e tratar o clique na notificação de término. Não guarda
 // cache de página nem de asset e não intercepta nenhum outro pedido: um deploy novo vale na próxima
 // navegação, como sem service worker (`Cache-Control: no-cache` no index.html).

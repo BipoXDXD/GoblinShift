@@ -3,7 +3,7 @@ import { resolve } from "node:path";
 import { build, type Plugin } from "vite";
 
 /**
- * Compila o service worker (ADR 062) num `sw.js` sozinho, na raiz do build e sem hash: o
+ * Compila o service worker (ADR 064) num `sw.js` sozinho, na raiz do build e sem hash: o
  * navegador o busca sempre pelo mesmo nome, e o escopo dele é o caminho de onde vem. Como entrada
  * do build da página, o código que ele divide com ela (a caixa de entrada) iria para um chunk
  * importado, e um service worker clássico não aceita `import`; o registro `type: "module"` ainda

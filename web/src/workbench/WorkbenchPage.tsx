@@ -59,7 +59,7 @@ interface CatalogGateProps {
   readonly recipe: RecipeModule;
   /** Preset (`?preset=`) ou execução (`?execucao=`) que pré-preenche os parâmetros. */
   readonly source: SourceRef | null;
-  /** Compartilhamento (`?compartilhado=`) cujos arquivos a Bancada recebe ao abrir (ADR 062). */
+  /** Compartilhamento (`?compartilhado=`) cujos arquivos a Bancada recebe ao abrir (ADR 064). */
   readonly sharedId: string | null;
   readonly uploadServices: UploadServices;
 }

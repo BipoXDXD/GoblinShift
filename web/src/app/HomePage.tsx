@@ -23,7 +23,7 @@ const SUMMARIES: Readonly<Record<RecipeId, string>> = T.summaries;
 export function HomePage(): ReactElement {
   const recipesHeadingId = useId();
   const [search] = useSearchParams();
-  // O "Compartilhar" do celular sem service worker cai aqui (Nginx, ADR 062).
+  // O "Compartilhar" do celular sem service worker cai aqui (Nginx, ADR 064).
   const shareUnavailable = search.get(SHARE_STATUS_PARAM) === SHARE_UNAVAILABLE;
   return (
     <div className="flex flex-col gap-12 md:gap-16">

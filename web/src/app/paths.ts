@@ -17,7 +17,7 @@ export const PATHS = {
   credits: "/creditos",
   acceptTerms: "/termos/aceitar",
   accountDeleted: "/conta-excluida",
-  // Destino do `share_target` do manifest (ADR 062): o service worker recebe o POST e manda o GET.
+  // Destino do `share_target` do manifest (ADR 064): o service worker recebe o POST e manda o GET.
   share: "/compartilhar",
 } as const;
 

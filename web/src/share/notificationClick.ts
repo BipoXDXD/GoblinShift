@@ -1,4 +1,4 @@
-// Clique numa notificação de término (aviso de término, ADR 062): foca a aba que já mostra a
+// Clique numa notificação de término (aviso de término, ADR 064): foca a aba que já mostra a
 // execução ou abre `data.url`. Sem `self`: o service worker passa o `clients` dele, e o teste um
 // falso.
 

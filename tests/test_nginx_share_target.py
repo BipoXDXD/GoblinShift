@@ -1,4 +1,4 @@
-"""Compartilhar do celular sem service worker (ADR 062): o Nginx não guarda o arquivo.
+"""Compartilhar do celular sem service worker (ADR 064): o Nginx não guarda o arquivo.
 
 O `share_target` do manifest manda os arquivos num `POST /compartilhar`, que o service worker
 intercepta. Sem ele (primeira visita, navegador sem suporte, registro que falhou), o POST chega ao

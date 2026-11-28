@@ -66,7 +66,7 @@ interface WorkbenchProps {
   readonly notice?: ReactNode;
   /** O preset cujos parâmetros abriram o formulário, que "Atualizar preset" substitui. */
   readonly sourcePreset?: Preset | null;
-  /** Compartilhamento cujos arquivos entram no lote ao abrir (ADR 062); `null` sem nenhum. */
+  /** Compartilhamento cujos arquivos entram no lote ao abrir (ADR 064); `null` sem nenhum. */
   readonly sharedId?: string | null;
 }
 

@@ -1,4 +1,4 @@
-# ADR 062. Service worker só para compartilhar e avisar
+# ADR 064. Service worker só para compartilhar e avisar
 
 - **Estado:** Aceito (2026-11-28, plano `paridade-plataforma-e-50mb`, Tarefa 9; D6 = a)
 - **Plano:** [2.2](../GoblinShiftPlan.md#s2-2) (Bancada) e [3.6](../GoblinShiftPlan.md#s3-6) (Nginx da SPA)

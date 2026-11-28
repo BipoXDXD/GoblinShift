@@ -19,7 +19,7 @@ type Shared =
   | { readonly kind: "ready"; readonly names: readonly string[] };
 
 /**
- * Para onde o "Compartilhar" do celular leva (ADR 062): o service worker guardou os arquivos e
+ * Para onde o "Compartilhar" do celular leva (ADR 064): o service worker guardou os arquivos e
  * redirecionou para cá com o id. Pelos nomes, vê quais receitas aceitam todos os arquivos. Se uma
  * receita específica serve, abre a Bancada dela; senão (nenhuma ou mais de uma), mostra a escolha,
  * em que o Downloads Detox, que aceita qualquer arquivo, sempre aparece. A caixa de entrada só é
