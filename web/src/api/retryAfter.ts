@@ -1,3 +1,5 @@
+import { parseHttpDateMs } from "./httpDate";
+
 const DELTA_SECONDS = /^\d+$/;
 const MS_PER_SECOND = 1_000;
 // Acima de 2^31 - 1 ms o setTimeout dispara na hora; 5 min já cobre qualquer pausa real da API.
@@ -18,8 +20,8 @@ export function parseRetryAfterMs(header: string | null, nowMs: number): number 
   if (DELTA_SECONDS.test(value)) {
     return Math.min(Number(value) * MS_PER_SECOND, MAX_RETRY_AFTER_MS);
   }
-  const dateMs = Date.parse(value);
-  if (Number.isNaN(dateMs) || !value.endsWith("GMT")) {
+  const dateMs = parseHttpDateMs(value);
+  if (dateMs === null) {
     return null;
   }
   return Math.min(Math.max(0, dateMs - nowMs), MAX_RETRY_AFTER_MS);

@@ -1,6 +1,7 @@
 node_modules/
 dist/
 dist-notice/
+dist-notice-incident/
 coverage/
 *.tsbuildinfo
 test-results/

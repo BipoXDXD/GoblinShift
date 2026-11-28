@@ -5,6 +5,7 @@ import { createBrowserRouter, RouterProvider } from "react-router";
 import { ApiClientProvider } from "../api/ApiClientContext";
 import { createApiClient } from "../api/client";
 import { readCsrfCookie } from "../api/csrf";
+import { createServerClock } from "../api/serverClock";
 import { SITE_NOTICE } from "../notice/siteNotice";
 import { createContentUploader } from "../upload/xhr";
 import { createAppQueryClient } from "./queryClient";
@@ -18,11 +19,15 @@ const UPLOAD_RATE_LIMIT_FALLBACK_MS = 2_000;
 export function App(): ReactElement {
   // Um cliente e um router por montagem: testes e Strict Mode não compartilham cache nem histórico.
   const [queryClient] = useState(createAppQueryClient);
+  // O "agora" de tudo que compara datas do servidor: o relógio local corrigido pelo `Date` das
+  // respostas da API (D9).
+  const [clock] = useState(() => createServerClock(Date.now));
   const [apiClient] = useState(() =>
     createApiClient({
       fetch: (input, init) => window.fetch(input, init),
       csrfToken: readCsrfCookie,
-      now: Date.now,
+      now: clock.now,
+      observeServerDate: clock.observe,
     }),
   );
   const [router] = useState(() =>
@@ -33,7 +38,8 @@ export function App(): ReactElement {
           uploader: createContentUploader({
             createXhr: () => new XMLHttpRequest(),
             csrfToken: readCsrfCookie,
-            now: Date.now,
+            now: clock.now,
+            observeServerDate: clock.observe,
           }),
           rateLimit: {
             maxAttempts: UPLOAD_RATE_LIMIT_ATTEMPTS,
@@ -41,7 +47,7 @@ export function App(): ReactElement {
             random: Math.random,
           },
         },
-        now: Date.now,
+        now: clock.now,
         notice: SITE_NOTICE,
       }),
     ),

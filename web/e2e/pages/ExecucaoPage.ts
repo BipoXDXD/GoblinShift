@@ -1,7 +1,5 @@
 import { expect, type Download, type Page } from "@playwright/test";
 
-import { E2E } from "../support/env";
-
 /** A tela da execução: acompanhar o estado e baixar os resultados. */
 export class ExecucaoPage {
   readonly #page: Page;
@@ -34,15 +32,9 @@ export class ExecucaoPage {
 
   /** Baixa pelo link "Baixar <arquivo>" e devolve o download já concluído. */
   async download(fileName: string): Promise<Download> {
+    // O link não tem o atributo `download`: o clique é a navegação que o Playwright intercepta (e o
+    // modo remoto põe a chave nela), e o `Content-Disposition: attachment` da API decide o nome.
     const link = this.#page.getByRole("link", { name: new RegExp(`^Baixar ${fileName}`) });
-    // O Chromium baixa `a[download]` por fora da interceptação de rede, e a chave do modo remoto só
-    // existe nela: sem o atributo, o clique vira a navegação que o Playwright intercepta, e o
-    // `Content-Disposition: attachment` da API continua decidindo que é download e o nome.
-    if (E2E.remote) {
-      await link.evaluate((anchor) => {
-        anchor.removeAttribute("download");
-      });
-    }
     const [download] = await Promise.all([this.#page.waitForEvent("download"), link.click()]);
     return download;
   }

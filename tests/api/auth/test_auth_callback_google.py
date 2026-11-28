@@ -7,11 +7,14 @@ import hmac
 import io
 import json
 import logging
+import re
 import time
 from collections.abc import Callable
+from datetime import UTC, datetime
 from hashlib import sha256
 from typing import Any
 from urllib.parse import parse_qs, urlencode, urlsplit
+from uuid import UUID
 
 import httpx2 as httpx
 import pytest
@@ -23,25 +26,30 @@ from sqlalchemy import func, select
 from sqlalchemy.orm import Session, sessionmaker
 
 from goblinshift.entrypoints.api import auth_login
+from goblinshift.entrypoints.api.dependencies import current_time
 from goblinshift.entrypoints.api.problems import REQUEST_ID_HEADER
 from goblinshift.identity import csrf_token_matches
 from goblinshift.identity.providers import GOOGLE_ISSUER, GOOGLE_TOKEN_URL
-from goblinshift.identity.tables import app_user, login_state
+from goblinshift.identity.tables import app_user, login_state, web_session
 from goblinshift.platform.db import unit_of_work
 from goblinshift.platform.settings import WebIdentityConfig
 from tests.api.auth.support import (
     StoredSessions,
     accounts,
+    alert_events,
     assert_login_failed,
+    audit_by_ref,
     audit_events,
     browser,
     cookie_header,
     cookie_value,
+    delete_me_headers,
     login,
     mask_ref,
     open_signup,
     start_login,
 )
+from tests.api.support import assert_problem
 from tests.identity.fake_providers import (
     GOOGLE_CLIENT,
     GOOGLE_SUBJECT,
@@ -133,7 +141,7 @@ def test_callback_apaga_o_estado_e_o_marcador(
     login(client, fake, "google")
 
     assert count_rows(factory, login_state) == 0
-    assert "__Secure-gs_login" not in client.cookies
+    assert "__Host-gs_login" not in client.cookies
 
 
 def test_login_emite_sessao_nova_e_revoga_a_anterior(
@@ -167,6 +175,270 @@ def test_cookie_de_sessao_desconhecido_nao_atrapalha_o_login(
     [issued] = sessions.started
     assert issued.issued_for(client.cookies["__Host-gs_session"])
     assert sessions.revoked == []
+
+
+# --- Reautenticação só vale para a conta da sessão --------------------------------------------
+
+
+def test_reauth_com_outra_conta_e_recusada_e_mantem_a_sessao(
+    client: TestClient,
+    fake: FakeProviders,
+    sessions: StoredSessions,
+    factory: sessionmaker[Session],
+    login_app: FastAPI,
+) -> None:
+    open_signup(login_app)
+    fake.google_subject = "sub-a"
+    login(client, fake, "google")
+    [account_a] = [account["id"] for account in accounts(factory)]
+    fake.google_subject = "sub-b"
+
+    response = login(client, fake, "google", reauth="1")
+
+    assert_login_failed(response)
+    assert sessions.revoked == []
+    assert len(sessions.started) == 1
+    assert [account["subject"] for account in accounts(factory)] == ["sub-a"]
+    assert audit_events(factory)[-1] == ("LOGIN_FAILED", "failure", account_a)
+
+
+def test_reauth_com_a_mesma_conta_abre_sessao_recente_e_revoga_a_anterior(
+    client: TestClient,
+    fake: FakeProviders,
+    sessions: StoredSessions,
+    factory: sessionmaker[Session],
+    login_app: FastAPI,
+) -> None:
+    open_signup(login_app)
+    login(client, fake, "google")
+    [account] = accounts(factory)
+
+    response = login(client, fake, "google", reauth="1", return_to="/acesso")
+
+    assert response.status_code == 303
+    assert response.headers["location"] == "/acesso"
+    first, second = sessions.started
+    assert second.issued_for(client.cookies["__Host-gs_session"])
+    assert sessions.revoked == [first.session_id]
+    assert sessions.started_for == [account["id"], account["id"]]
+    assert audit_events(factory)[-1] == ("LOGIN_SUCCEEDED", "success", account["id"])
+
+
+def test_reauth_sem_sessao_valida_vira_login_comum(
+    client: TestClient,
+    fake: FakeProviders,
+    sessions: StoredSessions,
+    factory: sessionmaker[Session],
+    login_app: FastAPI,
+) -> None:
+    open_signup(login_app)
+
+    response = login(client, fake, "google", reauth="1")
+
+    assert response.status_code == 303
+    [account] = accounts(factory)
+    assert sessions.started_for == [account["id"]]
+    assert audit_events(factory) == [("LOGIN_SUCCEEDED", "success", account["id"])]
+
+
+def test_reauth_com_sessao_revogada_vira_login_comum(
+    client: TestClient,
+    fake: FakeProviders,
+    sessions: StoredSessions,
+    factory: sessionmaker[Session],
+    login_app: FastAPI,
+) -> None:
+    open_signup(login_app)
+    fake.google_subject = "sub-a"
+    login(client, fake, "google")
+    with unit_of_work(factory) as session:
+        session.execute(web_session.update().values(revoked_at=func.now()))
+    fake.google_subject = "sub-b"
+
+    response = login(client, fake, "google", reauth="1")
+
+    assert response.status_code == 303
+    assert [account["subject"] for account in accounts(factory)] == ["sub-a", "sub-b"]
+    assert sessions.started[-1].issued_for(client.cookies["__Host-gs_session"])
+
+
+# --- Recência pelo `auth_time` (D1, D3, D4) --------------------------------------------------
+
+
+def freeze_api_clock(app: FastAPI) -> int:
+    """Fixa o relógio da API no segundo atual e o devolve; o `auth_time` do teste parte dele."""
+    frozen = int(time.time())
+    app.dependency_overrides[current_time] = lambda: datetime.fromtimestamp(frozen, UTC)
+    return frozen
+
+
+def session_authenticated_at(factory: sessionmaker[Session]) -> list[datetime]:
+    with unit_of_work(factory) as session:
+        return list(
+            session.execute(
+                select(web_session.c.authenticated_at).order_by(
+                    web_session.c.created_at, web_session.c.id
+                )
+            ).scalars()
+        )
+
+
+def test_sessao_do_google_conta_recencia_pelo_auth_time(
+    client: TestClient, fake: FakeProviders, login_app: FastAPI
+) -> None:
+    # Navegador logado no Google há 3 dias: o login entra, mas não vale como recente.
+    open_signup(login_app)
+    fake.claims_patch = {"auth_time": _now() - 3 * 24 * 3600}
+
+    assert login(client, fake, "google").status_code == 303
+    response = client.delete("/api/v1/me", headers=delete_me_headers(client))
+
+    assert_problem(response, 401, "REAUTH_REQUIRED")
+
+
+def test_auth_time_recente_vale_como_login_recente(
+    client: TestClient, fake: FakeProviders, factory: sessionmaker[Session], login_app: FastAPI
+) -> None:
+    open_signup(login_app)
+    frozen = freeze_api_clock(login_app)
+    fake.claims_patch = {"auth_time": frozen - 60}
+
+    login(client, fake, "google")
+
+    assert session_authenticated_at(factory) == [datetime.fromtimestamp(frozen - 60, UTC)]
+    assert client.delete("/api/v1/me", headers=delete_me_headers(client)).status_code == 202
+
+
+def test_sem_auth_time_vale_agora_e_alerta(
+    client: TestClient,
+    fake: FakeProviders,
+    factory: sessionmaker[Session],
+    login_app: FastAPI,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    # "Session age claims" desligado ou app não verificado: falha aberta com alerta (D3).
+    open_signup(login_app)
+    frozen = freeze_api_clock(login_app)
+    fake.omit_auth_time = True
+    caplog.set_level(logging.WARNING, logger=auth_login.__name__)
+
+    assert login(client, fake, "google").headers["location"] == "/"
+
+    assert session_authenticated_at(factory) == [datetime.fromtimestamp(frozen, UTC)]
+    assert alert_events(caplog.records) == ["google_auth_time_missing"]
+
+
+def test_com_auth_time_nao_ha_alerta(
+    client: TestClient, fake: FakeProviders, login_app: FastAPI, caplog: pytest.LogCaptureFixture
+) -> None:
+    open_signup(login_app)
+    caplog.set_level(logging.WARNING, logger=auth_login.__name__)
+
+    login(client, fake, "google")
+
+    assert alert_events(caplog.records) == []
+
+
+def test_auth_time_no_futuro_vira_agora(
+    client: TestClient, fake: FakeProviders, factory: sessionmaker[Session], login_app: FastAPI
+) -> None:
+    # Relógio do Google adiantado: nem recusa nem `ValueError` de `start_session`.
+    open_signup(login_app)
+    frozen = freeze_api_clock(login_app)
+    fake.claims_patch = {"auth_time": frozen + 120}
+
+    assert login(client, fake, "google").headers["location"] == "/"
+
+    assert session_authenticated_at(factory) == [datetime.fromtimestamp(frozen, UTC)]
+
+
+@pytest.mark.parametrize("auth_time", ["123", True, -5], ids=repr)
+def test_auth_time_com_tipo_errado_e_recusado(
+    client: TestClient,
+    fake: FakeProviders,
+    sessions: StoredSessions,
+    factory: sessionmaker[Session],
+    login_app: FastAPI,
+    auth_time: object,
+) -> None:
+    open_signup(login_app)
+    fake.claims_patch = {"auth_time": auth_time}
+
+    assert_nothing_logged_in(factory, sessions, login(client, fake, "google"))
+
+
+# --- Reautenticação com `auth_time` velho (D2) -----------------------------------------------
+
+REAUTH_STALE_WITH_REF = re.compile(
+    r"/\?login_error=reauth_stale#ref=([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})"
+)
+
+
+def test_reauth_com_auth_time_velho_mantem_a_sessao_e_avisa(
+    client: TestClient,
+    fake: FakeProviders,
+    sessions: StoredSessions,
+    factory: sessionmaker[Session],
+    login_app: FastAPI,
+) -> None:
+    # "Entre de novo", e o Google volta sem pedir a senha: a confirmação não vale.
+    open_signup(login_app)
+    login(client, fake, "google")
+    [account] = accounts(factory)
+    fake.claims_patch = {"auth_time": _now() - 2 * 3600}
+
+    response = login(client, fake, "google", reauth="1")
+
+    assert response.status_code == 303
+    matched = REAUTH_STALE_WITH_REF.fullmatch(response.headers["location"])
+    assert matched is not None, response.headers["location"]
+    assert matched.group(1) == response.headers[REQUEST_ID_HEADER]
+    assert "__Host-gs_session" not in response.headers.get("set-cookie", "")
+    assert sessions.revoked == []
+    assert len(sessions.started) == 1
+    assert sessions.started[0].issued_for(client.cookies["__Host-gs_session"])
+    assert audit_events(factory)[-1] == ("REAUTH_REQUIRED", "failure", account["id"])
+    assert audit_by_ref(factory, UUID(matched.group(1))) == [("REAUTH_REQUIRED", account["id"])]
+
+
+@pytest.mark.parametrize(("age", "stale"), [(600, False), (601, True)], ids=["600s", "601s"])
+def test_reauth_na_fronteira_de_10_min(
+    client: TestClient,
+    fake: FakeProviders,
+    sessions: StoredSessions,
+    login_app: FastAPI,
+    age: int,
+    stale: bool,
+) -> None:
+    # Como `require_recent_session`, só passar de 10 min recusa.
+    open_signup(login_app)
+    frozen = freeze_api_clock(login_app)
+    login(client, fake, "google")
+    fake.claims_patch = {"auth_time": frozen - age}
+
+    response = login(client, fake, "google", reauth="1")
+
+    assert response.headers["location"].startswith("/?login_error=reauth_stale") is stale
+    assert len(sessions.started) == (1 if stale else 2)
+
+
+def test_reauth_com_auth_time_recente_abre_sessao_recente(
+    client: TestClient,
+    fake: FakeProviders,
+    sessions: StoredSessions,
+    login_app: FastAPI,
+) -> None:
+    open_signup(login_app)
+    login(client, fake, "google")
+    fake.claims_patch = {"auth_time": _now() - 60}
+
+    response = login(client, fake, "google", reauth="1")
+
+    assert response.headers["location"] == "/"
+    first, second = sessions.started
+    assert sessions.revoked == [first.session_id]
+    assert second.issued_for(client.cookies["__Host-gs_session"])
+    assert client.delete("/api/v1/me", headers=delete_me_headers(client)).status_code == 202
 
 
 # --- Cadastro fechado e contas recusadas -----------------------------------------------------
@@ -276,12 +548,12 @@ def test_callback_com_state_reusado_e_recusado(
 ) -> None:
     open_signup(login_app)
     started = start_login(client, "google")
-    marker = client.cookies["__Secure-gs_login"]
+    marker = client.cookies["__Host-gs_login"]
     callback = fake.consent(started.headers["location"])
     assert client.get(callback).status_code == 303
 
     # Mesmo com o cookie de login antigo de volta, o estado já foi consumido.
-    client.cookies.set("__Secure-gs_login", marker, path="/auth")
+    client.cookies.set("__Host-gs_login", marker, path="/")
     response = client.get(callback)
 
     assert_login_failed(response)
