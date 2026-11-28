@@ -2,7 +2,7 @@
 
 - **Estado:**
   - Prazos do cliente (190 s no `start`, 160 s no `remove`): **aceito** (PR #230, no lote de 10/11/2026).
-  - Lock da área com prazo e `503 busy`, e `runsc` obrigatório em `load_config`: **proposto, entra com a reinstalação** do `executor-ctl` no host, depois de 11/11/2026 14:00 UTC, na mesma janela do #220 (PR #235).
+  - Lock da área com prazo e `503 busy`, e `runsc` obrigatório em `load_config`: **aceito; implementado em `deploy/executor_ctl`** (`server.py` e `config.py`, PR #235); vale no host a partir da reinstalação do `executor-ctl` (data a confirmar pelo dono; até lá, conferir com `systemctl status goblinshift-executor-ctl`).
 - **Plano:** [3.2](../GoblinShiftPlan.md#s3-2) e [3.6](../GoblinShiftPlan.md#s3-6)
 - **Relacionado:** [ADR 004](004-container-gvisor-por-tentativa.md) (um container gVisor por tentativa, criado pelo `executor-ctl`), [ADR 005](005-area-do-executor-em-filesystem-fixo.md) (área do executor), [ADR 047](047-pausa-de-claims-apos-falha-de-banco.md) (pausa dos claims)
 
