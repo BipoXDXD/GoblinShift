@@ -5,11 +5,11 @@ import pytest
 from alembic.util import CommandError
 from sqlalchemy.exc import OperationalError
 
+from goblinshift.platform.db import is_lock_timeout
 from goblinshift.platform.migration_locks import (
     LOCK_ATTEMPTS,
     MIGRATION_LOCK_TIMEOUT_MS,
     MIGRATION_STATEMENT_TIMEOUT_MS,
-    is_lock_timeout,
     run_with_lock_retries,
     session_settings,
 )

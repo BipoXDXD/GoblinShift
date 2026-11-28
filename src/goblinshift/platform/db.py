@@ -4,7 +4,9 @@ import time
 from collections.abc import Callable, Iterator
 from contextlib import contextmanager
 
+import psycopg
 from sqlalchemy import Engine, MetaData, create_engine
+from sqlalchemy.exc import OperationalError
 from sqlalchemy.exc import TimeoutError as PoolTimeoutError
 from sqlalchemy.orm import Session, sessionmaker
 
@@ -22,6 +24,21 @@ metadata = MetaData(
         "ck": "%(table_name)s_%(constraint_name)s_check",
     }
 )
+
+
+def is_lock_timeout(error: BaseException) -> bool:
+    """O comando desistiu do lock (55P03), e não de outra coisa."""
+    return isinstance(error, OperationalError) and isinstance(
+        error.orig, psycopg.errors.LockNotAvailable
+    )
+
+
+def is_lock_contention(error: BaseException) -> bool:
+    """Disputa passageira por linha travada: o `lock_timeout` (55P03) ou o `statement_timeout`
+    (57014) estourou. O banco respondeu e outra tentativa, mais tarde, tende a passar."""
+    return is_lock_timeout(error) or (
+        isinstance(error, OperationalError) and isinstance(error.orig, psycopg.errors.QueryCanceled)
+    )
 
 
 def make_engine(settings: Settings) -> Engine:
