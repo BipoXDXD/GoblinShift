@@ -411,11 +411,12 @@ def test_erro_numa_imagem_no_meio_do_lote_sobe_sem_progresso_nem_preview(
 ) -> None:
     # A primeira imagem sai inteira (conteúdo gravado e preview pendente); a segunda levanta.
     boom = RuntimeError("falha inesperada na segunda imagem")
-    calls: list[int] = []
+    calls: list[str] = []
 
     def prepare_that_fails_second(path: Path, limits: Limits) -> Prepared:
-        calls.append(len(calls))
-        if len(calls) == 2:
+        # O Workspace grava cada entrada como inputs/<posição com 4 dígitos>.
+        calls.append(path.name)
+        if path.name == "0001":
             raise boom
         return prepare(path, limits)
 
@@ -430,7 +431,7 @@ def test_erro_numa_imagem_no_meio_do_lote_sobe_sem_progresso_nem_preview(
         ImageForgeV1().run(Params(), work.inputs, out, work.progress)
 
     assert raised.value is boom
-    assert calls == [0, 1]
+    assert calls == ["0000", "0001"]
     assert work.progress.done == [0]
     assert [name for name, _role in out.created] == ["images/a.png"]
     assert work.previews() == []

@@ -2,8 +2,6 @@
 
 from pathlib import Path
 
-import pytest
-
 from goblinshift.processing.output_dir import FileSystemOutputDir
 from goblinshift.processing.previews import (
     IMAGE_PREVIEW_MAX_BYTES,
@@ -123,10 +121,12 @@ def test_process_each_processa_na_ordem_e_avisa_o_progresso_de_cada_item(tmp_pat
     progress = RecordedProgress()
     seen: list[tuple[int, list[int]]] = []
 
-    def process_one(source: InputFile, pending: list[PendingPreview]) -> ItemRejected:
+    def process_one(source: InputFile, pending_previews: list[PendingPreview]) -> ItemRejected:
         # O progresso do item anterior já foi avisado quando o seguinte começa.
         seen.append((source.position, list(progress.done)))
-        pending.append(PendingPreview(source.position, f"o{source.position}", "p.jpg", b"x"))
+        pending_previews.append(
+            PendingPreview(source.position, f"o{source.position}", "p.jpg", b"x")
+        )
         return rejected(source.position)
 
     processed = process_each(input_files(tmp_path, 3), process_one, progress)
@@ -138,21 +138,34 @@ def test_process_each_processa_na_ordem_e_avisa_o_progresso_de_cada_item(tmp_pat
 
 
 def test_erro_num_item_sobe_sem_progresso_nem_preview(tmp_path: Path) -> None:
+    # Composto como nas receitas: o relatório (e com ele os previews) só vem se o laço terminar.
     progress = RecordedProgress()
     boom = RuntimeError("falha no segundo item")
+    seen: list[int] = []
+    out = FileSystemOutputDir(tmp_path)
 
-    def process_one(source: InputFile, pending: list[PendingPreview]) -> ItemRejected:
+    def process_one(source: InputFile, pending_previews: list[PendingPreview]) -> ItemRejected:
+        seen.append(source.position)
+        pending_previews.append(
+            PendingPreview(source.position, f"o{source.position}", f"p{source.position}.jpg", b"x")
+        )
         if source.position == 1:
             raise boom
-        pending.append(PendingPreview(source.position, "o0", "p0.jpg", b"x"))
         return rejected(source.position)
 
-    with pytest.raises(RuntimeError) as raised:
-        process_each(input_files(tmp_path, 3), process_one, progress)
+    # Sem `pytest.raises` de propósito: um laço que engolisse o erro chegaria aos previews, e é
+    # isso que a primeira asserção acusa.
+    raised: Exception | None = None
+    try:
+        report_with_previews(process_each(input_files(tmp_path, 3), process_one, progress), out)
+    except RuntimeError as error:
+        raised = error
 
-    assert raised.value is boom
+    assert out.created == ()
+    assert not (tmp_path / "previews").exists()
+    assert raised is boom
+    assert seen == [0, 1]
     assert progress.done == [0]
-    assert not (tmp_path / "out" / "previews").exists()
 
 
 def test_report_with_previews_anexa_por_posicao_e_guarda_os_details(tmp_path: Path) -> None:

@@ -4,6 +4,9 @@ São opcionais: a receita guarda os bytes em memória enquanto processa e os gra
 o conteúdo, só enquanto cabem nos tetos de 1.7 (220 arquivos e 480 MiB somados) e no teto do
 formato, que a coleta do worker também confere. O conteúdo nunca perde espaço para um preview, e
 faltar espaço nunca falha a execução: o preview só não existe.
+
+O módulo também guarda o laço por item das receitas (`process_each`) e o relatório que grava e
+anexa os previews depois dele (`report_with_previews`).
 """
 
 from collections.abc import Callable, Iterable, Mapping, Sequence
@@ -72,13 +75,9 @@ def process_each(
 def report_with_previews(
     processed: Processed, out: OutputDir, *, details: Mapping[str, DetailValue] | None = None
 ) -> Report:
-    """Grava os previews pendentes depois de todo o conteúdo e os anexa aos itens por posição.
-
-    Separada de `process_each` porque o Media Mill a chama só depois que o rascunho sai."""
+    """Grava os previews pendentes depois de todo o conteúdo e os anexa aos itens por posição."""
     items = attach_previews(processed.items, write_previews(out, processed.pending))
-    if details is None:
-        return Report(items)
-    return Report(items, details=details)
+    return Report(items, details=details or {})
 
 
 def write_previews(

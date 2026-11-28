@@ -321,29 +321,30 @@ def test_erro_numa_tabela_no_meio_do_lote_sobe_sem_progresso_nem_preview(
 ) -> None:
     # A primeira tabela sai inteira (conteúdo gravado e preview pendente); a segunda levanta.
     boom = RuntimeError("falha inesperada na segunda tabela")
-    calls: list[int] = []
+    contents = {name: f"nome\r\n{name}\r\n" for name in ("a", "b", "c")}
+    calls: list[str] = []
 
     def clean_table_that_fails_second(
         data: bytes, params: Params, limits: Limits
     ) -> TableCleaned | TableRejected:
-        calls.append(len(calls))
-        if len(calls) == 2:
+        name = next(name for name, content in contents.items() if content.encode() == data)
+        calls.append(name)
+        if name == "b":
             raise boom
         return clean_table(data, params, limits)
 
     monkeypatch.setattr(
         "goblinshift.processing.csv_janitor.recipe.clean_table", clean_table_that_fails_second
     )
-    work.add("a.csv", VALID)
-    work.add("b.csv", VALID)
-    work.add("c.csv", VALID)
+    for name, content in contents.items():
+        work.add(f"{name}.csv", content)
     out = FileSystemOutputDir(work.out_dir)
 
     with pytest.raises(RuntimeError) as raised:
         CsvJanitorV1().run(Params(), work.inputs, out, work.progress)
 
     assert raised.value is boom
-    assert calls == [0, 1]
+    assert calls == ["a", "b"]
     assert work.progress.done == [0]
     assert [name for name, _role in out.created] == ["a.csv"]
     assert not (work.out_dir / "previews").exists()
