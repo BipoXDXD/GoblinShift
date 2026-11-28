@@ -32,6 +32,7 @@ from goblinshift.files import purge as files_purge
 from goblinshift.files.storage import FileStorage
 from goblinshift.identity import purge as identity_purge
 from goblinshift.identity import rate_limit
+from goblinshift.identity.login_state import count_login_states
 from goblinshift.platform.db import (
     is_connection_lost,
     is_lock_contention,
@@ -321,6 +322,9 @@ class AccountJobs:
                 "login_states_removed",
                 lambda s: identity_purge.delete_expired_login_states(s, now, batch),
             ),
+            # Tamanho de `login_state` depois da limpeza: mostra a enxurrada de logins anônimos
+            # antes do teto de estados vivos (`MAX_LIVE_LOGIN_STATES`).
+            counted("login_states", count_login_states),
             counted(
                 "web_sessions_removed",
                 lambda s: identity_purge.delete_ended_web_sessions(s, now, batch),
