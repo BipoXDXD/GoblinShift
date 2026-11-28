@@ -127,7 +127,7 @@ main() {
   NETWORK="$(k6_network "$host")"
   RESULTS="${GS_LOAD_RESULTS:-$ROOT/deploy/load/results}"
   mkdir -p "$RESULTS"
-  compose ps --status running --services | grep -qx api ||
+  grep -qx api <<<"$(compose ps --status running --services)" ||
     { echo "run-local: a API do projeto '$PROJECT' não está rodando" >&2; exit 1; }
 
   WORK_DIR="$(mktemp -d)"

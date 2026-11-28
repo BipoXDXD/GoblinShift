@@ -16,14 +16,24 @@ const COMMA = ",";
 const LF = "\n";
 const CR = "\r";
 
-/** Amostra lida, ou `null` se o texto estiver vazio ou não for CSV bem formado. */
+/**
+ * Amostra lida, ou `null` se o texto estiver vazio ou não for CSV bem formado. A tabela sai
+ * retangular: a largura é a do maior registro lido, cabeçalho incluído, e os mais curtos ganham
+ * `""` no fim. Assim toda célula tem um `<th>` na coluna; o rótulo do nome em branco é da tela.
+ */
 export function parseCsvSample(text: string): CsvSample | null {
   const records = readRecords(text);
-  const [header, ...rows] = records ?? [];
+  const [header, ...rest] = records ?? [];
   if (header === undefined) {
     return null;
   }
-  return { header, rows: rows.slice(0, MAX_SAMPLE_ROWS) };
+  const rows = rest.slice(0, MAX_SAMPLE_ROWS);
+  const width = Math.max(header.length, ...rows.map((row) => row.length));
+  return { header: padTo(header, width), rows: rows.map((row) => padTo(row, width)) };
+}
+
+function padTo(fields: readonly string[], width: number): string[] {
+  return [...fields, ...Array.from({ length: width - fields.length }, () => "")];
 }
 
 /**

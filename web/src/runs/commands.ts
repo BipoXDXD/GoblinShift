@@ -119,8 +119,10 @@ export async function deleteRunArtifacts(client: ApiClient, runId: string): Prom
 }
 
 /**
- * Rota de download de um artefato. O download é sempre por navegação (`<a href>`), com o
- * `attachment` do servidor, nunca por fetch para um Blob, que traria até 512 MiB à memória (2.2).
+ * Rota de download de um artefato. O download é sempre por navegação (`<a href>`), nunca por fetch
+ * para um Blob, que traria até 512 MiB à memória (2.2). O `attachment` do servidor decide que é
+ * download e o nome; sem o atributo `download` no link, a navegação que falha volta à tela da
+ * execução com `?falha=<code>` (64a), em vez de o navegador gravar o problem+json com o nome.
  */
 export function artifactDownloadPath(artifactId: string): string {
   return `/api/v1/artifacts/${encodeURIComponent(artifactId)}/download`;

@@ -35,7 +35,24 @@ describe("parseCsvSample", () => {
   });
 
   it("campos vazios continuam no lugar", () => {
-    expect(parseCsvSample('a,b,c\n,,\n""\n')?.rows).toEqual([["", "", ""], [""]]);
+    expect(parseCsvSample('a,b,c\n,,\n""\n')?.rows).toEqual([
+      ["", "", ""],
+      ["", "", ""],
+    ]);
+  });
+
+  it("completa o cabeçalho até a linha mais longa", () => {
+    expect(parseCsvSample("a,b\n1,2,3\n")).toEqual({
+      header: ["a", "b", ""],
+      rows: [["1", "2", "3"]],
+    });
+  });
+
+  it("completa as linhas mais curtas que o cabeçalho", () => {
+    expect(parseCsvSample("a,b,c\n1\n")).toEqual({
+      header: ["a", "b", "c"],
+      rows: [["1", "", ""]],
+    });
   });
 
   it("corta em MAX_SAMPLE_ROWS registros", () => {
