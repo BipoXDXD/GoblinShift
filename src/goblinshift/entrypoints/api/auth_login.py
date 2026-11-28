@@ -276,8 +276,9 @@ async def start_login(
         await run_in_threadpool(_record_login_failure, factory, attempt)
         return _login_failed(attempt)
     request.session[_return_to_key(name)] = _safe_return_to(return_to)
+    reauthenticating = reauth == "1"
     reauth_user = None
-    if reauth == "1":
+    if reauthenticating:
         reauth_user = await run_in_threadpool(
             _session_owner, factory, request.cookies.get(SESSION_COOKIE), now
         )
@@ -285,7 +286,7 @@ async def start_login(
         request.session.pop(_reauth_key(name), None)
     else:
         request.session[_reauth_key(name)] = str(reauth_user)
-    extra = {"prompt": REAUTH_PROMPT} if reauth == "1" else {}
+    extra = {"prompt": REAUTH_PROMPT} if reauthenticating else {}
     response: Response = await login_provider.oauth_app.authorize_redirect(
         request, _redirect_uri(request, name), **extra
     )

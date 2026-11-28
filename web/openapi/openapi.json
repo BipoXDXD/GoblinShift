@@ -5932,17 +5932,12 @@
           "provider": {
             "anyOf": [
               {
-                "type": "string",
-                "enum": [
-                  "google",
-                  "github"
-                ]
+                "$ref": "#/components/schemas/ProviderName"
               },
               {
                 "type": "null"
               }
             ],
-            "title": "Provider",
             "description": "O provedor de login da conta: a reautenticação oferece só ele. Nulo na conta do operador, que não entra pelo navegador."
           },
           "scopes": {
@@ -6299,6 +6294,14 @@
           "total"
         ],
         "title": "Progress"
+      },
+      "ProviderName": {
+        "type": "string",
+        "enum": [
+          "google",
+          "github"
+        ],
+        "title": "ProviderName"
       },
       "ReceivedContent": {
         "properties": {

@@ -701,11 +701,8 @@ export interface components {
             id: string;
             /** Display Name */
             display_name: string;
-            /**
-             * Provider
-             * @description O provedor de login da conta: a reautenticação oferece só ele. Nulo na conta do operador, que não entra pelo navegador.
-             */
-            provider: ("google" | "github") | null;
+            /** @description O provedor de login da conta: a reautenticação oferece só ele. Nulo na conta do operador, que não entra pelo navegador. */
+            provider: components["schemas"]["ProviderName"] | null;
             /** Scopes */
             scopes: components["schemas"]["Scope"][];
             /**
@@ -839,6 +836,11 @@ export interface components {
             /** Total */
             total: number;
         };
+        /**
+         * ProviderName
+         * @enum {string}
+         */
+        ProviderName: "google" | "github";
         /** ReceivedContent */
         ReceivedContent: {
             /**

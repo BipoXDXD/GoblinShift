@@ -26,8 +26,7 @@ export function SignInPrompt({
 }: SignInPromptProps): ReactElement {
   const titleId = useId();
   const { pathname, search } = useLocation();
-  // Na reautenticação, o provedor da sessão; sem o /me (carregando ou falha), os dois.
-  const { data: account } = useMe();
+  const returnTo = safeReturnTo(pathname, search);
   return (
     <section
       aria-labelledby={titleId}
@@ -39,12 +38,19 @@ export function SignInPrompt({
           {reauth ? T.reauthTitle : T.promptTitle}
         </Heading>
         <p>{reauth ? T.reauthBody : T.promptBody}</p>
-        <SignInLinks
-          returnTo={safeReturnTo(pathname, search)}
-          reauth={reauth}
-          provider={account?.provider ?? null}
-        />
+        {reauth ? <ReauthLinks returnTo={returnTo} /> : <SignInLinks returnTo={returnTo} />}
       </div>
     </section>
+  );
+}
+
+/** Só a reautenticação lê o /me, pelo provedor da sessão; sem ele (carregando ou falha), os dois. */
+function ReauthLinks({ returnTo }: { readonly returnTo: string }): ReactElement {
+  const { data: account } = useMe();
+  return (
+    <SignInLinks
+      returnTo={returnTo}
+      mode={{ kind: "reauth", provider: account?.provider ?? null }}
+    />
   );
 }

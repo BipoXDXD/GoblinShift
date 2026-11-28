@@ -231,3 +231,11 @@ def test_find_login_account_separa_os_provedores(factory: sessionmaker[Session])
     active_account(factory, GOOGLE)
 
     assert find(factory, ExternalIdentity(GITHUB.issuer, GOOGLE.subject, "x")) is None
+
+
+def test_find_login_account_separa_os_sujeitos_do_mesmo_provedor(
+    factory: sessionmaker[Session],
+) -> None:
+    active_account(factory, GOOGLE)
+
+    assert find(factory, ExternalIdentity(GOOGLE.issuer, "outro-sujeito", "x")) is None

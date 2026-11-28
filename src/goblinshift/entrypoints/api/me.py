@@ -80,7 +80,7 @@ class Terms(BaseModel):
 class MeResponse(BaseModel):
     id: UUID
     display_name: str
-    provider: Literal["google", "github"] | None = Field(
+    provider: ProviderName | None = Field(
         description=(
             "O provedor de login da conta: a reautenticação oferece só ele. Nulo na conta do "
             "operador, que não entra pelo navegador."
@@ -118,7 +118,7 @@ def get_me(
     return MeResponse(
         id=account.id,
         display_name=account.display_name,
-        provider=_provider(account.issuer),
+        provider=provider_for_issuer(account.issuer),
         scopes=sorted(principal.scopes),
         via=principal.via,
         limits=Limits(
@@ -148,12 +148,3 @@ def get_me(
             acceptance_required=account.needs_terms_acceptance(current_version),
         ),
     )
-
-
-def _provider(issuer: str) -> Literal["google", "github"] | None:
-    name = provider_for_issuer(issuer)
-    if name is ProviderName.GOOGLE:
-        return "google"
-    if name is ProviderName.GITHUB:
-        return "github"
-    return None

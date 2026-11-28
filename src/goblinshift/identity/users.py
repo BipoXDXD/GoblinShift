@@ -11,7 +11,7 @@ from datetime import datetime
 from enum import Enum, auto
 from uuid import UUID
 
-from sqlalchemy import and_, select
+from sqlalchemy import ColumnElement, and_, select
 from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.orm import Session
 
@@ -48,12 +48,15 @@ class LoginRefusal:
     reason: LoginRefused
 
 
+def _is_identity(identity: ExternalIdentity) -> ColumnElement[bool]:
+    """A linha de `app_user` da identidade: `(issuer, subject)` é a chave única dela."""
+    return and_(app_user.c.issuer == identity.issuer, app_user.c.subject == identity.subject)
+
+
 def find_login_account(session: Session, identity: ExternalIdentity) -> UUID | None:
     """A conta da identidade, sem criar nem atualizar nada; None se ela ainda não existe."""
     user_id: UUID | None = session.execute(
-        select(app_user.c.id).where(
-            app_user.c.issuer == identity.issuer, app_user.c.subject == identity.subject
-        )
+        select(app_user.c.id).where(_is_identity(identity))
     ).scalar_one_or_none()
     return user_id
 
@@ -99,11 +102,7 @@ def resolve_login(
     )
     account = session.execute(statement).one_or_none()
     if account is None:
-        account = session.execute(
-            select(*columns).where(
-                app_user.c.issuer == identity.issuer, app_user.c.subject == identity.subject
-            )
-        ).one()
+        account = session.execute(select(*columns).where(_is_identity(identity))).one()
     user_id: UUID = account.id
     if account.deletion_requested_at is not None:
         return LoginRefusal(user_id, LoginRefused.DELETION_REQUESTED)
