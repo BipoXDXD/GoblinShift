@@ -8,7 +8,8 @@ export const CATALOG_BODY = {
       versions: [
         {
           version: 1,
-          status: "current",
+          status: "deprecated",
+          sunset_at: "2027-03-01T00:00:00Z",
           limits: {
             max_inputs: 5,
             max_input_bytes: 33554432,
@@ -25,6 +26,38 @@ export const CATALOG_BODY = {
             formula_guard: "none",
             input_delimiter: ",",
             output_columns: null,
+            output_delimiter: ",",
+            trim_columns: [],
+          },
+          parameters_schema: {
+            type: "object",
+            properties: {
+              filters: { type: "array", maxItems: 5 },
+            },
+          },
+        },
+        {
+          version: 2,
+          status: "current",
+          limits: {
+            max_inputs: 5,
+            max_input_bytes: 33554432,
+            table_bytes: 8388608,
+            records: 20000,
+            columns: 100,
+            record_bytes: 1048576,
+            field_bytes: 65536,
+          },
+          defaults: {
+            case_rules: [],
+            collapse_whitespace_columns: [],
+            deduplicate_by: [],
+            filters: [],
+            formula_guard: "none",
+            input_delimiter: ",",
+            input_encoding: "utf-8",
+            output_columns: null,
+            output_bom: false,
             output_delimiter: ",",
             trim_columns: [],
           },

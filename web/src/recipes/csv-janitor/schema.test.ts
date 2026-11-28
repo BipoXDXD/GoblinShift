@@ -1,7 +1,7 @@
 import { describe, expect, expectTypeOf, it } from "vitest";
 
-import type { RecipeParameters } from "../types";
-import type { CASE_MODES, DELIMITERS, FILTER_OPS, FORMULA_GUARDS } from "./schema";
+import type { RecipeParametersAt } from "../types";
+import type { CASE_MODES, DELIMITERS, ENCODINGS, FILTER_OPS, FORMULA_GUARDS } from "./schema";
 import {
   csvJanitorField,
   parseCsvJanitor as parseWithLimits,
@@ -9,7 +9,7 @@ import {
   type CsvJanitorLimits,
 } from "./schema";
 
-type Parameters = RecipeParameters<"csv-janitor">;
+type Parameters = RecipeParametersAt<"csv-janitor", 2>;
 
 const LIMITS: CsvJanitorLimits = { maxColumns: 100, maxFilters: 5 };
 const MAX_LIST_COLUMNS = LIMITS.maxColumns;
@@ -17,8 +17,11 @@ const MAX_FILTERS = LIMITS.maxFilters;
 
 const DEFAULT_VALUES: CsvJanitorFormValues = {
   input_delimiter: ",",
+  input_encoding: "utf-8",
   output_delimiter: ",",
+  output_bom: false,
   trim_columns: "",
+  collapse_whitespace_columns: "",
   case_rules: [],
   filters: [],
   deduplicate_by: "",
@@ -42,6 +45,9 @@ function parametersOf(draft: ReturnType<typeof parseCsvJanitor>) {
   if (!draft.ok) {
     throw new Error(`rascunho inválido: ${JSON.stringify(draft.issues)}`);
   }
+  if (draft.command.recipe_version !== 2) {
+    throw new Error("o formulário deveria montar a versão 2");
+  }
   return draft.command.parameters;
 }
 
@@ -56,6 +62,9 @@ describe("constantes espelham os tipos gerados", () => {
   it("cobrem cada união da spec", () => {
     expectTypeOf<(typeof DELIMITERS)[number]>().toEqualTypeOf<
       NonNullable<Parameters["input_delimiter"]>
+    >();
+    expectTypeOf<(typeof ENCODINGS)[number]>().toEqualTypeOf<
+      NonNullable<Parameters["input_encoding"]>
     >();
     expectTypeOf<(typeof FORMULA_GUARDS)[number]>().toEqualTypeOf<
       NonNullable<Parameters["formula_guard"]>
@@ -77,11 +86,14 @@ describe("parseCsvJanitor", () => {
       ok: true,
       command: {
         recipe_id: "csv-janitor",
-        recipe_version: 1,
+        recipe_version: 2,
         parameters: {
           input_delimiter: ",",
+          input_encoding: "utf-8",
           output_delimiter: ",",
+          output_bom: false,
           trim_columns: [],
+          collapse_whitespace_columns: [],
           case_rules: [],
           filters: [],
           deduplicate_by: [],
@@ -90,6 +102,39 @@ describe("parseCsvJanitor", () => {
         },
       },
     });
+  });
+
+  it("monta o comando v2 com codificação, BOM e colapso", () => {
+    const draft = parseCsvJanitor(
+      values({
+        input_encoding: "windows-1252",
+        output_bom: true,
+        collapse_whitespace_columns: "nome\nendereço",
+      }),
+    );
+
+    expect(draft).toEqual({
+      ok: true,
+      command: {
+        recipe_id: "csv-janitor",
+        recipe_version: 2,
+        parameters: expect.objectContaining({
+          input_encoding: "windows-1252",
+          output_bom: true,
+          collapse_whitespace_columns: ["nome", "endereço"],
+        }) as unknown,
+      },
+    });
+  });
+
+  it("colapso acima do máximo de colunas aponta o campo", () => {
+    const issues = issuesOf(
+      parseCsvJanitor(values({ collapse_whitespace_columns: lines(MAX_LIST_COLUMNS + 1) })),
+    );
+
+    expect(issues.map((issue) => issue.fieldId)).toEqual([
+      "csv-janitor-collapse_whitespace_columns",
+    ]);
   });
 
   it("listas de colunas: uma por linha, sem linhas em branco, texto preservado", () => {
@@ -263,6 +308,14 @@ describe("csvJanitorField", () => {
   it.each([
     [["input_delimiter"], "csv-janitor-input_delimiter", "Delimitador dos arquivos de entrada"],
     [["trim_columns", "3"], "csv-janitor-trim_columns", "Colunas sem espaços nas pontas"],
+    [["input_encoding"], "csv-janitor-input_encoding", "Codificação dos arquivos de entrada"],
+    [["output_bom"], "csv-janitor-output_bom", "Marcar a saída como UTF-8 para o Excel (BOM)"],
+    // A API recusa coluna repetida no colapso com o caminho da lista: o erro cai no campo.
+    [
+      ["collapse_whitespace_columns", "1"],
+      "csv-janitor-collapse_whitespace_columns",
+      "Colunas com espaços internos juntados",
+    ],
     [["output_columns"], "csv-janitor-output_columns", "Colunas finais, na ordem"],
     [["case_rules"], "csv-janitor-case_rules-adicionar", "Regras de caixa"],
     [

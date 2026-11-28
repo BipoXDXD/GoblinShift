@@ -92,7 +92,8 @@ function catalogForm<K extends RecipeId, S>({
 const RECIPES: { readonly [K in RecipeId]: RecipeModule<K> } = {
   "csv-janitor": {
     id: "csv-janitor",
-    version: 1,
+    version: 2,
+    reusableVersions: [1],
     title: RECIPE_TITLES["csv-janitor"],
     accept: ".csv,text/csv",
     formFor: catalogForm({

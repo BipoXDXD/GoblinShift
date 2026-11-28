@@ -125,7 +125,7 @@ export const TEXT = {
     openWorkbenchOf: (recipe: string) => `da ${recipe}`,
     summaries: {
       "csv-janitor":
-        "Limpa tabelas CSV: espaços nas pontas, duplicatas, colunas, caixa e filtros, sem adivinhar o significado dos dados.",
+        "Limpa tabelas CSV: codificação, espaços, duplicatas, colunas, caixa e filtros, sem adivinhar o significado dos dados.",
       "image-forge":
         "Reduz e converte imagens em lote, mantendo a proporção, e gera miniaturas se você quiser.",
       "downloads-detox":
@@ -528,9 +528,23 @@ export const TEXT = {
     inputDelimiter: "Delimitador dos arquivos de entrada",
     outputDelimiter: "Delimitador dos arquivos de saída",
     delimiters: { ",": "Vírgula (,)", ";": "Ponto e vírgula (;)", "\t": "Tabulação" },
+    inputEncoding: "Codificação dos arquivos de entrada",
+    inputEncodings: {
+      "utf-8": "UTF-8 (padrão)",
+      "windows-1252": "Windows-1252 (Excel no Windows)",
+      "latin-1": "Latin-1 (ISO-8859-1)",
+    },
+    inputEncodingHint:
+      "Escolha a codificação em que o arquivo foi salvo; nada é adivinhado. Se os acentos saírem trocados, tente outra.",
+    outputBom: "Marcar a saída como UTF-8 para o Excel (BOM)",
+    outputBomHint:
+      "O Excel abre os acentos corretamente. Outros programas podem mostrar um caractere a mais no início.",
     columnListHint: "Uma coluna por linha, com o nome exato do cabeçalho.",
     trimColumns: "Colunas sem espaços nas pontas",
     trimColumnsHint: "Remove espaços do início e do fim dos valores; os espaços internos ficam.",
+    collapseColumns: "Colunas com espaços internos juntados",
+    collapseColumnsHint:
+      "Troca sequências de espaços e tabulações dentro do valor por um espaço só; quebras de linha ficam.",
     deduplicateBy: "Remover duplicatas pelas colunas",
     deduplicateByHint: "Mantém a primeira ocorrência. Deixe vazio para não remover.",
     outputColumns: "Colunas finais, na ordem",
