@@ -12,6 +12,7 @@ from goblinshift.identity.audit import (
     AuditEventType,
     AuditOutcome,
     record,
+    record_anonymous_login_failure,
     record_csrf_failure,
     truncate_ip,
 )
@@ -179,3 +180,84 @@ def test_csrf_failed_agregado_grava_as_mesmas_colunas_do_record(
         None,
         None,
     )
+
+
+# --- record_anonymous_login_failure (integração) ----------------------------------------------
+
+REF = UUID("00000000-0000-7000-8000-0000000000dd")
+
+
+def _anonymous_failure(factory: sessionmaker[Session], now: datetime, limit: int = 3) -> bool:
+    with unit_of_work(factory) as session:
+        return record_anonymous_login_failure(
+            session, ip="203.0.113.7", request_id=REF, now=now, limit=limit
+        )
+
+
+def _login_failed_rows(factory: sessionmaker[Session]) -> list[tuple[UUID | None, datetime]]:
+    with unit_of_work(factory) as session:
+        rows = session.execute(
+            select(audit_event.c.user_id, audit_event.c.occurred_at)
+            .where(audit_event.c.event_type == "LOGIN_FAILED")
+            .order_by(audit_event.c.id)
+        ).all()
+    return [(row.user_id, row.occurred_at) for row in rows]
+
+
+def _account_failure(factory: sessionmaker[Session], now: datetime) -> None:
+    with unit_of_work(factory) as session:
+        record(
+            session,
+            event=AuditEventType.LOGIN_FAILED,
+            user_id=CONTA,
+            ip="203.0.113.7",
+            outcome=AuditOutcome.FAILURE,
+            now=now,
+        )
+
+
+@pytest.mark.integration
+def test_login_failed_anonimo_para_no_teto_do_minuto(factory: sessionmaker[Session]) -> None:
+    gravou = [
+        _anonymous_failure(factory, AGORA + timedelta(seconds=seconds)) for seconds in (0, 1, 2, 3)
+    ]
+
+    assert gravou == [True, True, True, False]
+    assert len(_login_failed_rows(factory)) == 3
+
+
+@pytest.mark.integration
+def test_teto_anonimo_reabre_depois_de_um_minuto(factory: sessionmaker[Session]) -> None:
+    # A janela é `occurred_at > now - 1 min`: no minuto exato, a primeira já ficou de fora.
+    for seconds in (0, 1, 2, 3):
+        _anonymous_failure(factory, AGORA + timedelta(seconds=seconds))
+
+    assert _anonymous_failure(factory, AGORA + timedelta(minutes=1)) is True
+    assert len(_login_failed_rows(factory)) == 4
+
+
+@pytest.mark.integration
+def test_teto_anonimo_nao_conta_recusa_de_conta(factory: sessionmaker[Session]) -> None:
+    for _ in range(3):
+        _account_failure(factory, AGORA)
+
+    assert _anonymous_failure(factory, AGORA + timedelta(seconds=1)) is True
+
+
+@pytest.mark.integration
+def test_login_failed_anonimo_grava_as_mesmas_colunas_do_record(
+    factory: sessionmaker[Session],
+) -> None:
+    _anonymous_failure(factory, AGORA)
+
+    with unit_of_work(factory) as session:
+        row = session.execute(select(audit_event)).one()
+
+    assert (row.event_type, row.outcome, row.user_id, row.ip_prefix, row.request_id) == (
+        "LOGIN_FAILED",
+        "failure",
+        None,
+        ip_network("203.0.113.0/24"),
+        REF,
+    )
+    assert (row.occurred_at, row.details) == (AGORA, None)
