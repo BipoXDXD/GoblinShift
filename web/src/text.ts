@@ -120,6 +120,8 @@ export const TEXT = {
     title: "Arquivos em lote, limpos pelas goblins da oficina.",
     lead: "Escolha uma receita para começar.",
     recipesHeading: "Receitas",
+    trySample: "Testar com um exemplo",
+    orChoose: "ou escolha uma receita",
     openWorkbench: "Abrir a Bancada",
     // Completa o nome acessível do link sem repetir o título do cartão na tela.
     openWorkbenchOf: (recipe: string) => `da ${recipe}`,
@@ -748,6 +750,7 @@ export const TEXT = {
     noMatchesHint: "Mude ou limpe os filtros para ver mais execuções.",
     recentHeading: "Execuções recentes",
     recentEmptyHint: "Escolha uma receita acima para começar.",
+    firstTime: { question: "Primeira vez?", link: "Teste com um arquivo de exemplo." },
     seeAll: "Ver o histórico completo",
     // Anunciados depois do "Carregar mais", junto com quantas execuções chegaram.
     noMore: "Não há mais execuções.",

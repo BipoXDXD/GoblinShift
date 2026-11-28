@@ -17,7 +17,7 @@ import {
 } from "../test/fakeApi";
 import { fakeUploader } from "../test/fakeUploader";
 import { expectHeadingFocused } from "../test/focus";
-import { renderRoutes } from "../test/renderRoutes";
+import { currentUrl, renderRoutes } from "../test/renderRoutes";
 
 await preloadRoutes("/bancada/csv-janitor");
 
@@ -37,6 +37,8 @@ interface SetupOptions {
   readonly deleteUpload?: () => Response;
   /** Quem baixa a amostra do "Testar com arquivo de exemplo"; por padrão, o do appRoutes. */
   readonly fetchSample?: typeof fetch;
+  /** Query da URL de entrada, com o `?`. */
+  readonly search?: string;
 }
 
 function renderWorkbench({
@@ -46,6 +48,7 @@ function renderWorkbench({
   catalog = catalogHandler(),
   deleteUpload = () => new Response(null, { status: 202 }),
   fetchSample,
+  search = "",
 }: SetupOptions = {}) {
   const deletions = Object.fromEntries(
     [1, 2, 3].map((sequence) => [`DELETE /api/v1/uploads/${uploadIdFor(sequence)}`, deleteUpload]),
@@ -62,7 +65,7 @@ function renderWorkbench({
     uploader,
     ...(fetchSample === undefined ? {} : { fetchSample }),
   });
-  const view = renderRoutes({ routes, path: `/bancada/${recipe}`, client: api.client });
+  const view = renderRoutes({ routes, path: `/bancada/${recipe}${search}`, client: api.client });
   return { ...view, api, pending, user: userEvent.setup() };
 }
 
@@ -999,6 +1002,22 @@ describe("Bancada: testar com arquivo de exemplo", () => {
     await expectHeadingFocused("Execução");
     const body = await bodyOf(runRequests(api.requests)[0]);
     expect(body.input_upload_ids).toEqual([uploadIdFor(1)]);
+  });
+
+  it("a Bancada com ?exemplo=1 carrega a amostra uma vez e limpa a URL", async () => {
+    const requested: string[] = [];
+    const fetchSample: typeof fetch = (input) => {
+      requested.push(typeof input === "string" ? input : "outro tipo de pedido");
+      return Promise.resolve(new Response("imagem"));
+    };
+    const { router } = await setup({ recipe: "image-forge", search: "?exemplo=1", fetchSample });
+
+    await waitUntilSent(1);
+    expect(screen.getByText("exemplo-oficina.jpg")).toBeInTheDocument();
+    expect(requested).toEqual([expect.stringMatching(/exemplo-oficina\.jpg/)]);
+    expect(currentUrl(router)).toBe("/bancada/image-forge");
+    // Voltar não reabre o pedido: o `replace` tirou a URL com `?exemplo=1` do histórico.
+    expect(router.state.historyAction).toBe("REPLACE");
   });
 
   it("falha ao baixar a amostra mostra o motivo e mantém o poço", async () => {

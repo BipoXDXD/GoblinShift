@@ -159,6 +159,27 @@ test("media-mill: vídeos → áudio FLAC e três miniaturas → executar → ve
   await expectDownload(page, execucao, sameName("media-mill.zip"));
 });
 
+test("image-forge: do exemplo ao resultado, a um clique da abertura", async ({ page, api }) => {
+  await page.goto("/");
+  await page.getByRole("link", { name: "Testar com um exemplo" }).click();
+
+  // A Bancada carrega a amostra sozinha e tira o `?exemplo=1` da URL (recarregar não repete).
+  await expect(page).toHaveURL(/\/bancada\/image-forge$/);
+  const bancada = new BancadaPage(page);
+  await expect(
+    bancada.entry("exemplo-oficina.jpg").getByText("Enviado", { exact: true }),
+  ).toHaveCount(1);
+  await bancada.run();
+
+  const execucao = new ExecucaoPage(page);
+  await execucao.waitForStatus("Concluída");
+  if (api !== null) {
+    expect(api.createdRuns).toHaveLength(1);
+    expect(api.createdRuns[0]?.recipe_id).toBe("image-forge");
+  }
+  await expectDownload(page, execucao, sameName("image-forge.zip"));
+});
+
 function expectCommand(api: FakeApi, journey: Journey, order: readonly string[]): void {
   expect(api.createdRuns).toHaveLength(1);
   const [command] = api.createdRuns;

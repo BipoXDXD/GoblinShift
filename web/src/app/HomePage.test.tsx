@@ -117,6 +117,42 @@ describe("Oficina: execuções recentes", () => {
   });
 });
 
+describe("Oficina: primeiro uso", () => {
+  it("a abertura tem uma ação primária que leva à Bancada do Image Forge com exemplo", async () => {
+    setup(() => jsonResponse(EMPTY));
+
+    const trySample = await screen.findByRole("link", { name: "Testar com um exemplo" });
+    expect(trySample).toHaveAttribute("href", "/bancada/image-forge?exemplo=1");
+    // Antes da cena 3D na ordem do DOM: no celular, a cena e os cartões ficam abaixo da dobra.
+    const scene = screen.getByRole("img", { name: /^Rúbia, / });
+    expect(trySample.compareDocumentPosition(scene) & Node.DOCUMENT_POSITION_FOLLOWING).toBe(
+      Node.DOCUMENT_POSITION_FOLLOWING,
+    );
+    const orChoose = screen.getByRole("link", { name: "ou escolha uma receita" });
+    expect(orChoose).toHaveAttribute("href", "#receitas");
+    expect(document.getElementById("receitas")).toHaveAccessibleName("Receitas");
+  });
+
+  it("Oficina sem execuções convida para o exemplo", async () => {
+    setup(() => jsonResponse(EMPTY));
+
+    const section = await recentSection();
+    await within(section).findByRole("heading", { name: "Nenhuma execução ainda" });
+    expect(section).toHaveTextContent("Primeira vez? Teste com um arquivo de exemplo.");
+    expect(
+      within(section).getByRole("link", { name: "Teste com um arquivo de exemplo." }),
+    ).toHaveAttribute("href", "/bancada/image-forge?exemplo=1");
+  });
+
+  it("com execuções no histórico, não convida para o exemplo", async () => {
+    setup(() => jsonResponse({ data: [runBody()], next_cursor: null }));
+
+    const section = await recentSection();
+    await within(section).findAllByRole("listitem");
+    expect(section).not.toHaveTextContent("Primeira vez?");
+  });
+});
+
 describe("navegação", () => {
   it("o cabeçalho leva ao Histórico e marca a página atual", async () => {
     setup(() => jsonResponse({ data: [], next_cursor: null }), "/historico");

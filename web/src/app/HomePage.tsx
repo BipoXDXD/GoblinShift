@@ -9,14 +9,18 @@ import { PresetsSection } from "../presets/PresetsSection";
 import { RECIPE_LIST } from "../recipes/registry";
 import type { RecipeId } from "../recipes/types";
 import { TEXT } from "../text";
-import { workbenchPath } from "./paths";
+import { buttonClassName } from "../components/ui/Button";
+import { workbenchPath, workbenchSamplePath } from "./paths";
 
 const T = TEXT.home;
 const SUMMARIES: Readonly<Record<RecipeId, string>> = T.summaries;
+/** Âncora da seção das receitas, alvo do "ou escolha uma receita" da abertura. */
+const RECIPES_ANCHOR = "receitas";
 
 /**
- * Oficina (2.2): a abertura e as receitas. A ação são os cartões, então a tela não tem botão
- * primário; as execuções recentes vêm depois das receitas. A abertura tem o elenco em 3D, uma goblin por
+ * Oficina (2.2): a abertura e as receitas. A ação primária da abertura é "Testar com um exemplo"
+ * (D4), que abre a Bancada do Image Forge já com a imagem de exemplo; os cartões seguem como a
+ * escolha de receita, e as execuções recentes vêm depois deles. A abertura tem o elenco em 3D, uma goblin por
  * vez, que chega depois do conteúdo (ADR 027, 030 e 038).
  */
 export function HomePage(): ReactElement {
@@ -30,10 +34,27 @@ export function HomePage(): ReactElement {
         <div className="flex max-w-prose flex-col gap-4">
           <FocusHeading size="hero">{T.title}</FocusHeading>
           <p className="text-lg text-fg-muted">{T.lead}</p>
+          {/* Antes da cena na ordem do DOM: no celular, a cena e os cartões ficam abaixo da dobra,
+              e o primeiro uso fica a um clique. */}
+          <div className="flex flex-wrap items-center gap-x-4 gap-y-2">
+            <Link
+              to={workbenchSamplePath("image-forge")}
+              className={buttonClassName({ variant: "primary", size: "lg" })}
+            >
+              {T.trySample}
+            </Link>
+            <a href={`#${RECIPES_ANCHOR}`} className={buttonClassName({ variant: "tertiary" })}>
+              {T.orChoose}
+            </a>
+          </div>
         </div>
         <OficinaHero />
       </section>
-      <section aria-labelledby={recipesHeadingId} className="flex flex-col gap-4">
+      <section
+        id={RECIPES_ANCHOR}
+        aria-labelledby={recipesHeadingId}
+        className="flex scroll-mt-4 flex-col gap-4"
+      >
         <h2 id={recipesHeadingId} className="text-sm font-semibold text-fg-muted">
           {T.recipesHeading}
         </h2>

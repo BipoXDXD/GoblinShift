@@ -487,24 +487,21 @@ function useSample(
   return { status, load };
 }
 
-/** Carrega a amostra pedida pela URL uma vez por pedido (o modo estrito roda o efeito duas). */
+/**
+ * Carrega a amostra pedida pela URL e avisa quem tirou o pedido dela. O modo estrito roda o efeito
+ * duas vezes antes de a URL mudar; o segundo `load` não baixa de novo, porque o primeiro ainda
+ * está em curso.
+ */
 function useSampleRequest(
   requested: boolean,
   load: () => void,
   onRequested: (() => void) | undefined,
 ): void {
-  const handled = useRef(false);
   useEffect(() => {
-    if (!requested) {
-      handled.current = false;
-      return;
+    if (requested) {
+      load();
+      onRequested?.();
     }
-    if (handled.current) {
-      return;
-    }
-    handled.current = true;
-    load();
-    onRequested?.();
   }, [requested, load, onRequested]);
 }
 
