@@ -50,6 +50,14 @@ def _authenticate(factory: sessionmaker[Session], token: str, now: datetime) -> 
         return authenticate_session(session, token, now)
 
 
+def _keep_alive(factory: sessionmaker[Session], token: str, start: datetime, end: datetime) -> None:
+    """Usa a sessão a cada 20 min de `start` até `end`, para a inatividade não vencer antes."""
+    used_at = start
+    while used_at < end:
+        used_at = min(used_at + timedelta(minutes=20), end)
+        assert _authenticate(factory, token, used_at)
+
+
 def _row(factory: sessionmaker[Session], session_id: UUID) -> dict[str, object]:
     with factory() as session:
         row = session.execute(select(web_session).where(web_session.c.id == session_id)).one()
@@ -88,7 +96,7 @@ def test_prazos_da_sessao_nova(factory: sessionmaker[Session]) -> None:
     issued = _start(factory, new_user(factory), authenticated_at=NOW - timedelta(minutes=1))
 
     assert issued.idle_expires_at == NOW + timedelta(minutes=30)
-    assert issued.absolute_expires_at == NOW + timedelta(hours=8) - timedelta(minutes=1)
+    assert issued.absolute_expires_at == NOW + timedelta(hours=8)
     row = _row(factory, issued.session_id)
     assert row["last_seen_at"] == NOW
     assert row["idle_expires_at"] == issued.idle_expires_at
@@ -96,22 +104,28 @@ def test_prazos_da_sessao_nova(factory: sessionmaker[Session]) -> None:
 
 
 def test_inatividade_nunca_passa_do_teto_absoluto(factory: sessionmaker[Session]) -> None:
-    issued = _start(
-        factory, new_user(factory), authenticated_at=NOW - timedelta(hours=7, minutes=50)
-    )
+    # Aberta há 7h50: a inatividade não passa do teto, a 10 min de NOW.
+    opened = NOW - timedelta(hours=7, minutes=50)
+    issued = _start(factory, new_user(factory), authenticated_at=opened, now=opened)
 
-    assert issued.idle_expires_at == issued.absolute_expires_at == NOW + timedelta(minutes=10)
+    assert issued.absolute_expires_at == NOW + timedelta(minutes=10)
+    assert issued.idle_expires_at == opened + timedelta(minutes=30)
 
 
-@pytest.mark.parametrize(
-    "age",
-    [pytest.param(timedelta(hours=8), id="8h"), pytest.param(timedelta(hours=9), id="9h")],
-)
-def test_login_no_provedor_de_8h_ou_mais_nao_abre_sessao(
-    factory: sessionmaker[Session], age: timedelta
+def test_login_antigo_no_provedor_abre_sessao_com_teto_contado_de_agora(
+    factory: sessionmaker[Session],
 ) -> None:
-    with pytest.raises(ValueError, match="8 h"):
-        _start(factory, new_user(factory), authenticated_at=NOW - age)
+    issued = _start(factory, new_user(factory), authenticated_at=NOW - timedelta(days=3))
+
+    assert issued.absolute_expires_at == NOW + timedelta(hours=8)
+    row = _row(factory, issued.session_id)
+    assert row["authenticated_at"] == NOW - timedelta(days=3)
+    assert row["absolute_expires_at"] == NOW + timedelta(hours=8)
+
+
+def test_authenticated_at_no_futuro_e_recusado(factory: sessionmaker[Session]) -> None:
+    with pytest.raises(ValueError, match="futuro"):
+        _start(factory, new_user(factory), authenticated_at=NOW + timedelta(seconds=1))
 
 
 def test_token_e_csrf_mudam_a_cada_sessao(factory: sessionmaker[Session]) -> None:
@@ -215,9 +229,10 @@ def test_recusa_por_inatividade_vale_na_fronteira_de_30_min(
 
 
 def test_recusa_pelo_teto_absoluto_vence_a_inatividade(factory: sessionmaker[Session]) -> None:
-    # Perto do teto, a inatividade é cortada nele: os dois prazos coincidem.
-    login = NOW - timedelta(hours=7, minutes=50)
-    issued = _start(factory, new_user(factory), authenticated_at=login)
+    # Aberta há 7h50 e usada até NOW: o teto, conferido antes da inatividade, vence aos 10 min.
+    opened = NOW - timedelta(hours=7, minutes=50)
+    issued = _start(factory, new_user(factory), authenticated_at=opened, now=opened)
+    _keep_alive(factory, issued.token, opened, NOW)
 
     resolved = _resolve(factory, issued.token, NOW + timedelta(minutes=10))
 
@@ -285,13 +300,13 @@ def test_sessao_expira_8h_apos_login_mesmo_com_uso(factory: sessionmaker[Session
     assert _authenticate(factory, issued.token, NOW + timedelta(hours=8)) is None
 
 
-def test_teto_absoluto_conta_do_login_no_provedor(factory: sessionmaker[Session]) -> None:
+def test_teto_absoluto_conta_da_abertura_da_sessao(factory: sessionmaker[Session]) -> None:
+    # Login no provedor há 7 h, sessão aberta agora: o teto é NOW + 8 h, não NOW + 1 h.
     issued = _start(factory, new_user(factory), authenticated_at=NOW - timedelta(hours=7))
     assert _authenticate(factory, issued.token, NOW + timedelta(minutes=29))
     assert _authenticate(factory, issued.token, NOW + timedelta(minutes=58))
 
-    assert _authenticate(factory, issued.token, NOW + timedelta(minutes=59, seconds=59))
-    assert _authenticate(factory, issued.token, NOW + timedelta(hours=1)) is None
+    assert _authenticate(factory, issued.token, NOW + timedelta(hours=1))
 
 
 # --- last_seen_at -----------------------------------------------------------------------------
@@ -319,9 +334,9 @@ def test_last_seen_grava_com_um_minuto(factory: sessionmaker[Session]) -> None:
 
 
 def test_last_seen_respeita_o_teto_absoluto(factory: sessionmaker[Session]) -> None:
-    issued = _start(
-        factory, new_user(factory), authenticated_at=NOW - timedelta(hours=7, minutes=50)
-    )
+    opened = NOW - timedelta(hours=7, minutes=50)
+    issued = _start(factory, new_user(factory), authenticated_at=opened, now=opened)
+    _keep_alive(factory, issued.token, opened, NOW)
     used_at = NOW + timedelta(minutes=5)
 
     assert _authenticate(factory, issued.token, used_at)

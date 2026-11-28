@@ -184,12 +184,12 @@ def test_sessao_expira_com_30_min_sem_uso(
 def test_sessao_expira_8h_apos_login_mesmo_com_uso(
     app: FastAPI, client: TestClient, factory: sessionmaker[Session]
 ) -> None:
-    issued = open_session(
-        app, new_user(factory), authenticated_at=NOW - timedelta(hours=7), now=NOW
-    )
+    # O teto conta da abertura da sessão (7 h antes de NOW), não do login no provedor.
+    opened = NOW - timedelta(hours=7)
+    issued = open_session(app, new_user(factory), authenticated_at=opened, now=opened)
 
-    for minutes in (25, 50):
-        _freeze(app, NOW + timedelta(minutes=minutes))
+    for minutes in range(25, 7 * 60 + 51, 25):
+        _freeze(app, opened + timedelta(minutes=minutes))
         assert client.get(ME, headers=_cookie_only(issued)).status_code == 200
     _freeze(app, NOW + timedelta(hours=1))
     response = client.get(ME, headers=_cookie_only(issued))
