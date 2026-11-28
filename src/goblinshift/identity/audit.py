@@ -7,22 +7,29 @@ arquivo, conteúdo, tokens ou o IP inteiro: o IP é truncado (/24 em IPv4, /48 e
 
 Só eventos de quem tem credencial válida (mais o login, já limitado por IP no Nginx) são
 auditados: um atacante sem credencial cai no 401, e não consegue inundar a tabela.
+
+O `CSRF_FAILED` é agregado: no máximo uma linha por conta a cada `CSRF_FAILURE_AUDIT_INTERVAL`
+(`record_csrf_failure`). Um site hostil faz o navegador da vítima repetir mutações com o cookie
+dela, e cada recusa gravaria uma linha; no ritmo da borda, a entrada superaria a retenção.
 """
 
 from collections.abc import Mapping
 from dataclasses import dataclass
-from datetime import datetime
+from datetime import datetime, timedelta
 from enum import StrEnum
 from ipaddress import IPv4Address, IPv4Network, IPv6Address, IPv6Network, ip_address, ip_network
+from typing import Any
 from uuid import UUID
 
-from sqlalchemy import insert, null
+from sqlalchemy import ColumnElement, exists, insert, literal, null, select
 from sqlalchemy.orm import Session
 
 from goblinshift.identity.tables import audit_event
 
 IPV4_PREFIX = 24
 IPV6_PREFIX = 48
+# Janela da agregação do `CSRF_FAILED`: uma linha por conta neste intervalo.
+CSRF_FAILURE_AUDIT_INTERVAL = timedelta(minutes=1)
 
 
 class AuditEventType(StrEnum):
@@ -94,16 +101,90 @@ def record(
     """
     session.execute(
         insert(audit_event).values(
-            user_id=user_id,
-            event_type=event.value,
-            outcome=outcome.value,
-            ip_prefix=truncate_ip(ip),
-            occurred_at=now,
-            request_id=request_id,
-            # `null()` e não `None`: no JSONB, `None` grava o JSON `null`, que não é NULL de SQL.
-            details=null() if details is None else details,
+            _event_values(
+                event=event,
+                user_id=user_id,
+                ip=ip,
+                outcome=outcome,
+                now=now,
+                request_id=request_id,
+                details=details,
+            )
         )
     )
+
+
+def record_csrf_failure(session: Session, *, user_id: UUID, ip: str | None, now: datetime) -> bool:
+    """Grava o `CSRF_FAILED` da conta, salvo se já houver um nos últimos
+    `CSRF_FAILURE_AUDIT_INTERVAL`; devolve se gravou. Roda na transação de quem chama.
+
+    Um só `INSERT ... SELECT ... WHERE NOT EXISTS`, com as mesmas colunas de `record`
+    (`_event_values`). A janela é aberta no início: `occurred_at > now - intervalo`, então a
+    falha no minuto exato depois da gravada grava de novo. A busca usa o índice
+    `(user_id, occurred_at)`.
+
+    Duas requisições simultâneas da mesma conta podem gravar as duas: nenhuma vê a outra antes do
+    commit. A corrida é aceita: o teto vira a concorrência da conta, e o limite de requisições,
+    que conta a recusa antes do CSRF, segura o resto.
+
+    Hoje `occurred_at` e a janela vêm do relógio da aplicação (`now`). Quando o `occurred_at`
+    passar a vir do banco (build-e-conteineres, T21), a janela também passa a comparar com o
+    `now()` do banco: mudar aqui e em `_event_values`, juntos.
+    """
+    values = _event_values(
+        event=AuditEventType.CSRF_FAILED,
+        user_id=user_id,
+        ip=ip,
+        outcome=AuditOutcome.FAILURE,
+        now=now,
+    )
+    recent = (
+        select(audit_event.c.id)
+        .where(
+            audit_event.c.user_id == user_id,
+            audit_event.c.event_type == AuditEventType.CSRF_FAILED.value,
+            audit_event.c.occurred_at > now - CSRF_FAILURE_AUDIT_INTERVAL,
+        )
+        .limit(1)
+    )
+    row = select(*(_as_column(name, value) for name, value in values.items())).where(
+        ~exists(recent)
+    )
+    # RETURNING, e não `rowcount`: o driver devolve -1 no `INSERT ... SELECT`.
+    inserted = session.execute(
+        insert(audit_event).from_select(list(values), row).returning(audit_event.c.id)
+    ).first()
+    return inserted is not None
+
+
+def _event_values(
+    *,
+    event: AuditEventType,
+    user_id: UUID | None,
+    ip: str | None,
+    outcome: AuditOutcome,
+    now: datetime,
+    request_id: UUID | None = None,
+    details: Mapping[str, object] | None = None,
+) -> dict[str, Any]:
+    # Um lugar só monta as colunas do evento, para `record` e para a agregação do CSRF.
+    return {
+        "user_id": user_id,
+        "event_type": event.value,
+        "outcome": outcome.value,
+        "ip_prefix": truncate_ip(ip),
+        "occurred_at": now,
+        "request_id": request_id,
+        # `null()` e não `None`: no JSONB, `None` grava o JSON `null`, que não é NULL de SQL.
+        "details": null() if details is None else details,
+    }
+
+
+def _as_column(name: str, value: Any) -> ColumnElement[Any]:
+    # No `INSERT ... SELECT`, cada valor vira um literal com o tipo da coluna de destino.
+    if isinstance(value, ColumnElement):
+        return value.label(name)
+    return literal(value, audit_event.c[name].type).label(name)
 
 
 def truncate_ip(ip: str | None) -> IPv4Network | IPv6Network | None:

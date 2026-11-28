@@ -347,6 +347,45 @@ def test_chave_do_servidor_com_32_caracteres_e_aceita(tmp_path: Path) -> None:
     assert web.csrf_key == b"k" * 32
 
 
+def test_segredo_anterior_do_csrf_e_lido_do_arquivo(tmp_path: Path) -> None:
+    previous = _secret_file(tmp_path, "csrf-anterior", "p" * 64)
+
+    web = _production(tmp_path, csrf_secret_previous_file=previous).web_identity()
+
+    assert web.csrf_previous_key == b"p" * 64
+
+
+def test_segredo_anterior_curto_demais_e_recusado(tmp_path: Path) -> None:
+    short = _secret_file(tmp_path, "csrf-anterior", "p" * 31)
+
+    with pytest.raises(WebConfigError, match=r"GS_CSRF_SECRET_PREVIOUS_FILE.*32"):
+        _production(tmp_path, csrf_secret_previous_file=short).web_identity()
+
+
+def test_segredo_anterior_inexistente_nao_sobe(tmp_path: Path) -> None:
+    with pytest.raises(MissingSecretError, match="GS_CSRF_SECRET_PREVIOUS_FILE"):
+        _production(tmp_path, csrf_secret_previous_file=tmp_path / "nao-existe").web_identity()
+
+
+@pytest.mark.parametrize("environment", ["production", "development"])
+def test_sem_segredo_anterior_a_config_fica_none(tmp_path: Path, environment: str) -> None:
+    settings = (
+        _production(tmp_path)
+        if environment == "production"
+        else Settings.model_validate({"environment": environment})
+    )
+
+    assert settings.web_identity().csrf_previous_key is None
+
+
+def test_segredo_anterior_nao_aparece_no_repr(tmp_path: Path) -> None:
+    previous = _secret_file(tmp_path, "csrf-anterior", "p" * 64)
+
+    web = _production(tmp_path, csrf_secret_previous_file=previous).web_identity()
+
+    assert "p" * 64 not in repr(web)
+
+
 @pytest.mark.parametrize("missing", CLIENT_IDS)
 def test_producao_sem_id_de_cliente_nao_sobe(tmp_path: Path, missing: str) -> None:
     with pytest.raises(WebConfigError, match=f"GS_{missing.upper()}"):
