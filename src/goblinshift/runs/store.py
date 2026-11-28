@@ -64,8 +64,7 @@ ACTIVE_STATUSES = frozenset({Status.RUNNING, Status.STOPPING})
 RunFinishedHook = Callable[[uuid.UUID], None]
 
 
-# O nome segue o vocabulário do protocolo (3.4: fencing), não o sufixo Error.
-class LostFencing(Exception):  # noqa: N818
+class LostFencing(Exception):  # noqa: N818 - vocabulário do protocolo (3.4: fencing)
     """Outra tentativa ou o reconciliador assumiu a execução; quem recebe para sem escrever."""
 
 

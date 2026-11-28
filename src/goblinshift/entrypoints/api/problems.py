@@ -269,8 +269,7 @@ def normalize_problem_responses(schema: dict[str, Any]) -> None:
 PROBLEM_RESPONSES = problem_responses(401, 403, 422, 429, 500, 503)
 
 
-# O nome segue o termo "problem" da RFC 9457, que é o que a classe representa.
-class ApiProblem(Exception):  # noqa: N818
+class ApiProblem(Exception):  # noqa: N818 - termo "problem" da RFC 9457, o que a classe representa
     """Erro que uma rota devolve ao cliente; o status sai do catálogo pelo `code`."""
 
     def __init__(
