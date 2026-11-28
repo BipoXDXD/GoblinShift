@@ -42,7 +42,7 @@ from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.exc import OperationalError
 from sqlalchemy.orm import Session
 
-from goblinshift import capacity, presets
+from goblinshift import capacity, identity, presets
 from goblinshift.catalog import (
     CATALOG,
     FieldError,
@@ -300,6 +300,9 @@ def accept_run(
         replay = _find_live_record(session, owner_id, key, digest)
         if replay is not None:
             return replay
+        # Depois do replay (a Run já aceita continua valendo) e antes da fila: o bloqueio ou a
+        # exclusão confirmados enquanto esta aceitação esperava a recusam aqui.
+        identity.lock_active_account(session, owner_id)
         if validated.preset_id is not None:
             presets.hold_for_run(session, owner_id, validated.preset_id)
         _lock_global_queue(session)

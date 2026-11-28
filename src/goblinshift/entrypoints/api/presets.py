@@ -33,8 +33,13 @@ from goblinshift.entrypoints.api.json_command import (
     body_validation_error,
     json_command,
 )
-from goblinshift.entrypoints.api.problems import ApiProblem, ProblemCode, problem_responses
-from goblinshift.identity import Principal, Scope
+from goblinshift.entrypoints.api.problems import (
+    ApiProblem,
+    ProblemCode,
+    problem_responses,
+    session_no_longer_valid_problem,
+)
+from goblinshift.identity import Principal, Scope, UnknownAccountError
 from goblinshift.presets import (
     MAX_NAME_CHARS,
     MAX_PRESETS_PER_ACCOUNT,
@@ -165,6 +170,9 @@ def create_preset_route(
         ) from None
     except PresetNameTakenError:
         raise _name_taken() from None
+    except UnknownAccountError:
+        # Bloqueio ou exclusão chegou depois da autenticação: a credencial deixou de valer.
+        raise session_no_longer_valid_problem() from None
     response.headers["Location"] = request.app.url_path_for(
         get_preset_route.__name__, preset_id=str(created.id)
     )

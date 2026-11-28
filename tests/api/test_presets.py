@@ -7,17 +7,19 @@ from typing import Any
 
 import httpx2 as httpx
 import pytest
+from fastapi import FastAPI
 from fastapi.testclient import TestClient
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session, sessionmaker
 
 from goblinshift.catalog import CATALOG, Catalog, VersionStatus
 from goblinshift.entrypoints.api import presets as presets_route
-from goblinshift.identity import Scope
+from goblinshift.identity import Scope, block_account
 from goblinshift.platform.db import unit_of_work
 from goblinshift.presets import MAX_PRESETS_PER_ACCOUNT, create_preset, parse_draft
 from goblinshift.presets import drafts as drafts_module
 from goblinshift.presets.tables import preset
+from tests.api.simulated_session import SimulatedSessions
 from tests.api.support import assert_problem
 from tests.identity.support import ALL_SCOPES, new_key, new_user
 
@@ -132,6 +134,27 @@ def test_criar_responde_201_com_location_etag_e_o_corpo_do_contrato(
     assert body["parameters"] == {"trim_columns": ["a"]}
     assert body["revision"] == 1
     assert "sunset" not in response.headers
+
+
+def test_post_presets_de_conta_bloqueada_da_401(
+    app: FastAPI, client: TestClient, factory: sessionmaker[Session]
+) -> None:
+    owner = new_user(factory)
+    now = datetime.now(UTC)
+    # A sessão já foi aceita quando o bloqueio chega: a corrida entre a autenticação e a rota.
+    SimulatedSessions(app, now).sign_in(owner)
+    with unit_of_work(factory) as session:
+        assert block_account(session, owner, now)
+
+    response = client.post(PRESETS, json=preset_body())
+
+    problem = assert_problem(response, 401, "AUTHENTICATION_REQUIRED")
+    assert problem["detail"] == "A sessão não vale mais para esta conta."
+    with factory() as session:
+        created = session.execute(
+            select(func.count()).select_from(preset).where(preset.c.owner_id == owner)
+        ).scalar_one()
+    assert created == 0
 
 
 @pytest.mark.parametrize("field", ["id", "owner_id", "revision", "created_at"])

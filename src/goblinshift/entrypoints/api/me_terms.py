@@ -21,7 +21,12 @@ from goblinshift.entrypoints.api.dependencies import (
     terms_version,
 )
 from goblinshift.entrypoints.api.json_command import command_openapi, json_command
-from goblinshift.entrypoints.api.problems import ApiProblem, ProblemCode, problem_responses
+from goblinshift.entrypoints.api.problems import (
+    ApiProblem,
+    ProblemCode,
+    problem_responses,
+    session_no_longer_valid_problem,
+)
 from goblinshift.identity import (
     AuditEventType,
     AuditOutcome,
@@ -80,7 +85,5 @@ def accept_current_terms(
                     now=now,
                 )
     except UnknownAccountError:
-        raise ApiProblem(
-            ProblemCode.AUTHENTICATION_REQUIRED, "A sessão não vale mais para esta conta."
-        ) from None
+        raise session_no_longer_valid_problem() from None
     return AcceptedTermsResponse(version=accepted.version, accepted_at=accepted.accepted_at)

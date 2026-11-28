@@ -1,6 +1,7 @@
 """Presets privados com revisão, com PostgreSQL real (1.6, 1.7 e 3.3)."""
 
 from collections.abc import Callable
+from datetime import UTC, datetime
 from functools import partial
 from uuid import UUID, uuid4
 
@@ -8,6 +9,7 @@ import pytest
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session, sessionmaker
 
+from goblinshift.identity import UnknownAccountError, request_account_deletion
 from goblinshift.platform.db import unit_of_work
 from goblinshift.presets import (
     MAX_PRESETS_PER_ACCOUNT,
@@ -69,6 +71,18 @@ def test_criar_devolve_o_preset_na_revisao_1(factory: sessionmaker[Session]) -> 
     assert created.parameters["trim_columns"] == ["a"]
     assert created.revision == 1
     assert created.created_at == created.updated_at
+
+
+def test_criar_preset_com_exclusao_pedida_levanta_unknown_account(
+    factory: sessionmaker[Session],
+) -> None:
+    owner = new_user(factory)
+    in_session(factory, lambda s: request_account_deletion(s, owner, datetime.now(UTC)))
+
+    with pytest.raises(UnknownAccountError):
+        create(factory, owner)
+
+    assert count_presets(factory, owner) == 0
 
 
 def test_nome_repetido_na_mesma_conta_e_recusado(factory: sessionmaker[Session]) -> None:

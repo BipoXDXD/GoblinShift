@@ -31,7 +31,12 @@ from goblinshift.entrypoints.api.idempotency import (
     parse_idempotency_header,
 )
 from goblinshift.entrypoints.api.json_command import command_openapi, json_command
-from goblinshift.entrypoints.api.problems import ApiProblem, ProblemCode, problem_responses
+from goblinshift.entrypoints.api.problems import (
+    ApiProblem,
+    ProblemCode,
+    problem_responses,
+    session_no_longer_valid_problem,
+)
 from goblinshift.identity import (
     DEFAULT_KEY_DAYS,
     KEY_RETENTION,
@@ -157,9 +162,7 @@ def create_api_key(
         ) from None
     except UnknownAccountError, SessionNoLongerValidError:
         # Bloqueio, exclusão ou logout chegou depois da autenticação: a credencial deixou de valer.
-        raise ApiProblem(
-            ProblemCode.AUTHENTICATION_REQUIRED, "A sessão não vale mais para esta conta."
-        ) from None
+        raise session_no_longer_valid_problem() from None
     response.headers["Cache-Control"] = "no-store"
     return CreatedApiKey(
         id=issued.id,

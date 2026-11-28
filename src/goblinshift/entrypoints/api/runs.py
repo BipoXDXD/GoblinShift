@@ -47,12 +47,13 @@ from goblinshift.entrypoints.api.problems import (
     ApiProblem,
     ProblemCode,
     problem_responses,
+    session_no_longer_valid_problem,
 )
 from goblinshift.entrypoints.api.wide_event import record_run_accepted
 from goblinshift.files.errors import InputNotAvailableError
 from goblinshift.files.limits import MAX_BATCH_FILES
 from goblinshift.files.states import ArtifactRole, Availability
-from goblinshift.identity import Principal, Scope
+from goblinshift.identity import Principal, Scope, UnknownAccountError
 from goblinshift.platform.settings import Settings
 from goblinshift.presets import PresetNotFoundError, get_preset
 from goblinshift.processing.recipe import ItemNoticeCode, ItemRejectionCode, ItemWarningCode
@@ -501,6 +502,9 @@ def _accept(
         raise account_storage_problem(session, owner_id) from None
     except GlobalCapacityExceededError:
         raise environment_storage_problem() from None
+    except UnknownAccountError:
+        # Bloqueio ou exclusão chegou depois da autenticação: a credencial deixou de valer.
+        raise session_no_longer_valid_problem() from None
     return _respond_accepted(owner_id, accepted, session, request, response)
 
 
