@@ -80,7 +80,8 @@ jobs:
         # sob runsc, que depende deste; aqui ficariam minutos acima do orçamento.
         # `--fail-on-skip`: teste pulado reprova (tests/skip_guard.py). O que só roda como root fica
         # fora daqui (`needs_root`) e roda no passo seguinte. Os da arte (`arte`) precisam de Blender
-        # e ImageMagick locais e não rodam na CI.
+        # e ImageMagick locais e não rodam na CI. Os do `oasdiff` rodam aqui mesmo: baixam a imagem
+        # fixada em scripts/openapi-breaking.sh e levam segundos.
         run: uv run pytest --fail-on-skip -m "not openobserve and not executor_image and not needs_root and not real_clock and not arte"
       - name: Testes que exigem root (runner descartável, sudo sem senha)
         # Política nativa de imagens e troca de UID na área de trabalho do executor-ctl. O runner
