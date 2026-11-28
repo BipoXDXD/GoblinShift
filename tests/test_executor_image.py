@@ -486,7 +486,8 @@ def test_ffmpeg_continua_lgpl(image: str) -> None:
     result = run_tool(image, "ffmpeg", "-hide_banner", "-L")
 
     assert result.returncode == 0, result.stderr
-    assert "GNU Lesser General Public License" in result.stdout
+    # O texto da licença quebra linha no meio da frase: compara com os espaços normalizados.
+    assert "GNU Lesser General Public License" in " ".join(result.stdout.split())
     buildconf = run_tool(image, "ffmpeg", "-hide_banner", "-buildconf")
     assert buildconf.returncode == 0, buildconf.stderr
     conf = buildconf.stdout
