@@ -3,6 +3,7 @@ import { z } from "zod";
 
 import { createApiClient, type ApiClient } from "../api/client";
 import { meBody } from "./account";
+import { testNow } from "./clock";
 
 /** Resposta de uma rota falsa; `null` deixa o pedido pendurado para sempre. */
 type Handler = (request: Request) => Response | Promise<Response> | null;
@@ -26,6 +27,11 @@ interface FakeApiOptions {
    * `GET /me`. O padrão acompanha o `GET /me` padrão: há sessão.
    */
   readonly csrfToken?: string | null;
+  /**
+   * Relógio do cliente (o `Retry-After` em HTTP-date). O padrão é o relógio fixo das telas; um
+   * teste com timers falsos que precise do relógio andando passa `Date.now` de propósito.
+   */
+  readonly now?: () => number;
 }
 
 /** Cookie de CSRF do navegador com sessão, nos testes que não escolhem outro. */
@@ -33,7 +39,7 @@ export const TEST_CSRF_TOKEN = "csrf-da-sessao-de-teste";
 
 export function fakeApi(
   handlers: Readonly<Record<string, Handler>>,
-  { csrfToken = TEST_CSRF_TOKEN }: FakeApiOptions = {},
+  { csrfToken = TEST_CSRF_TOKEN, now = testNow }: FakeApiOptions = {},
 ): FakeApi {
   const requests: Request[] = [];
   const fetchMock = vi.fn<typeof fetch>((input, init) => {
@@ -44,7 +50,7 @@ export function fakeApi(
     const response = handler === undefined ? problemResponse(404, "NOT_FOUND") : handler(request);
     return response === null ? new Promise<Response>(() => undefined) : Promise.resolve(response);
   });
-  const client = createApiClient({ fetch: fetchMock, csrfToken: () => csrfToken, now: Date.now });
+  const client = createApiClient({ fetch: fetchMock, csrfToken: () => csrfToken, now });
   return { client, fetchMock, requests };
 }
 

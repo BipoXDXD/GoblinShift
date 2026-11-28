@@ -75,10 +75,15 @@ api_key = Table(
     Column("expires_at", DateTime(timezone=True), nullable=False),
     Column("revoked_at", DateTime(timezone=True)),
     Column("last_used_at", DateTime(timezone=True)),
+    # `Idempotency-Key` da emissão pela sessão (opcional; #442, 57b): a repetição na mesma conta
+    # responde 409 com o id desta chave. O formato é o de `runs.acceptance`.
+    Column("idem_key", Text),
     Index(None, "owner_id"),
+    Index(None, "owner_id", "idem_key", unique=True, postgresql_where=text("idem_key IS NOT NULL")),
     CheckConstraint("octet_length(secret_hash) = 32", name="secret_hash"),
     CheckConstraint("cardinality(scopes) > 0", name="scopes"),
     CheckConstraint("expires_at > created_at", name="expires_at"),
+    CheckConstraint("idem_key ~ '^[A-Za-z0-9_-]{16,64}$'", name="idem_key"),
 )
 
 # Sessão web opaca e revogável (3.6). O nome evita confusão com a Session do SQLAlchemy.
@@ -162,11 +167,29 @@ audit_event = Table(
     ),
 )
 
-# Contador de janela fixa de um minuto por conta e classe de rota (1.7; ADR 028). Dado efêmero:
-# a manutenção apaga as janelas velhas, e a purga da conta as leva junto (CASCADE), sem etapa
-# própria. Sem índice em `window_start`: a tabela guarda só as janelas dos últimos minutos, e a
-# limpeza lê poucas linhas. As classes repetem `RequestClass`; um teste confere.
-request_window = Table(
+# Contador de janela fixa de um minuto por conta, canal e classe de rota (1.7; ADR 028; #442,
+# 49a). O canal é o `Principal.via`: as chaves da conta dividem um balde, e a sessão web tem o
+# seu. Dado efêmero: a manutenção apaga as janelas velhas, e a purga da conta as leva junto
+# (CASCADE), sem etapa própria. Sem índice em `window_start`: a tabela guarda só as janelas dos
+# últimos minutos, e a limpeza lê poucas linhas. Classes e canais repetem `RequestClass` e
+# `RequestChannel`; um teste confere.
+channel_request_window = Table(
+    "channel_request_window",
+    metadata,
+    Column("owner_id", Uuid, ForeignKey("app_user.id", ondelete="CASCADE"), nullable=False),
+    Column("channel", Text, nullable=False),
+    Column("request_class", Text, nullable=False),
+    Column("window_start", DateTime(timezone=True), nullable=False),
+    Column("request_count", Integer, nullable=False),
+    PrimaryKeyConstraint("owner_id", "channel", "request_class", "window_start"),
+    CheckConstraint("channel IN ('session', 'api_key')", name="channel"),
+    CheckConstraint("request_class IN ('read', 'command', 'run_create')", name="request_class"),
+    CheckConstraint("request_count > 0", name="request_count"),
+)
+
+# A janela sem canal da 0007. O código não grava mais nela desde a 0031; só a réplica anterior ao
+# deploy, até sair. A manutenção a esvazia, e o DROP vem num PR seguinte (contract; preflight R4).
+legacy_request_window = Table(
     "request_window",
     metadata,
     Column("owner_id", Uuid, ForeignKey("app_user.id", ondelete="CASCADE"), nullable=False),

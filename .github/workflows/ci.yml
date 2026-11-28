@@ -80,7 +80,8 @@ jobs:
         # sob runsc, que depende deste; aqui ficariam minutos acima do orçamento.
         # `--fail-on-skip`: teste pulado reprova (tests/skip_guard.py). O que só roda como root fica
         # fora daqui (`needs_root`) e roda no passo seguinte. Os da arte (`arte`) precisam de Blender
-        # e ImageMagick locais e não rodam na CI.
+        # e ImageMagick locais e não rodam na CI. Os do `oasdiff` rodam aqui mesmo: baixam a imagem
+        # fixada em scripts/openapi-breaking.sh e levam segundos.
         run: uv run pytest --fail-on-skip -m "not openobserve and not executor_image and not needs_root and not real_clock and not arte"
       - name: Testes que exigem root (runner descartável, sudo sem senha)
         # Política nativa de imagens e troca de UID na área de trabalho do executor-ctl. O runner
@@ -177,6 +178,14 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
+          # O primeiro pai traz a spec anterior para o oasdiff (ADR 061).
+          fetch-depth: 2
+      # No pull_request, HEAD é o merge sintético e HEAD^1 é a ponta da main; no push da main,
+      # HEAD^1 é a main anterior. Quebra aceita só com ADR em docs/api/quebras-aceitas.txt.
+      - name: Contrato /api/v1 só aditivo (oasdiff breaking contra o primeiro pai)
+        run: |
+          git show HEAD^1:web/openapi/openapi.json > "$RUNNER_TEMP/openapi-base.json"
+          ./scripts/openapi-breaking.sh "$RUNNER_TEMP/openapi-base.json" web/openapi/openapi.json
       # Instala exatamente a versão de .python-version, sem depender do catálogo embutido no uv.
       - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
         with:

@@ -454,6 +454,8 @@ export const TEXT = {
       heading: "Resultados",
       loading: "Carregando os resultados.",
       download: (fileName: string) => `Baixar ${fileName}`,
+      // O motivo é o texto do catálogo (`failure.problems`), que sozinho não diz que foi o download.
+      downloadFailed: (reason: string) => `Não foi possível baixar o arquivo. ${reason}`,
       otherFiles: "Arquivos avulsos",
       roles: {
         output: "arquivo processado",

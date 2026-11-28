@@ -147,8 +147,8 @@ def authenticate(request: Request, session: DbSession, now: Now) -> Principal:
     público, e a malformada ou desconhecida fica só como o 401 do evento.
 
     A ordem é: identificar (sem CSRF e sem gravar o uso da sessão), contar, conferir o CSRF e só
-    então registrar o uso da sessão. Toda requisição autenticada conta no limite por conta e
-    classe de rota (1.7), inclusive a mutação que o CSRF recusa depois; acima dele, 429
+    então registrar o uso da sessão. Toda requisição autenticada conta no limite por conta, canal
+    e classe de rota (1.7), inclusive a mutação que o CSRF recusa depois; acima dele, 429
     `RATE_LIMITED` com `Retry-After`, atribuído à conta no evento amplo. A recusa do CSRF não
     estende a sessão nem é atribuída à conta do cookie (fica na auditoria). Depois, conta do
     login sem o aceite dos termos vigentes recebe 403 `TERMS_NOT_ACCEPTED`, salvo nas rotas de
@@ -282,7 +282,7 @@ def _count_request(
         return
     try:
         with session.begin():
-            count_request(session, principal.owner_id, request_class, now)
+            count_request(session, principal.owner_id, principal.via, request_class, now)
     except RequestLimitExceededError as error:
         record_rate_limit(limited=True)
         # A recusa pelo limite é da conta, que é dona do balde, e o evento amplo a atribui a ela

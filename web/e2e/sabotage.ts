@@ -248,7 +248,7 @@ const CASES: readonly Case[] = [
     spec: ["reflow.spec.ts", "-g", "Execução"],
     assertions: ["run-name-reflow"],
     plant: (dist) => {
-      addStylesheet(dist, "main a[download] { overflow-wrap: normal; }");
+      addStylesheet(dist, 'main a[href$="/download"] { overflow-wrap: normal; }');
     },
   },
   {
