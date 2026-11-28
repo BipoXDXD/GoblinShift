@@ -24,7 +24,7 @@ from PIL import Image
 
 from goblinshift.processing import image_forge
 from goblinshift.processing.csv_janitor import Limits, params_from_mapping
-from goblinshift.processing.csv_janitor.recipe import MAX_TABLES, CsvJanitorV1
+from goblinshift.processing.csv_janitor.recipe import MAX_TABLES, CsvJanitor
 from goblinshift.processing.executor import execution
 from goblinshift.processing.executor.execution import ExitCode, main
 from goblinshift.processing.packaging import PackageLimits
@@ -601,7 +601,7 @@ class SmallTablesCsvJanitor:
     """csv-janitor com teto de tabela pequeno: os 8 MiB reais custariam caro em cada caso."""
 
     def __init__(self, table_bytes: int) -> None:
-        self._recipe = CsvJanitorV1(limits=Limits(table_bytes=table_bytes))
+        self._recipe = CsvJanitor(limits=Limits(table_bytes=table_bytes))
 
     def execute(
         self,

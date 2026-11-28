@@ -47,7 +47,7 @@ class _Bound[P]:
 
 
 _CSV_JANITOR_V1: _Bound[csv_janitor.Params] = _Bound(
-    csv_janitor.params_from_mapping, csv_janitor_recipe.CsvJanitorV1()
+    csv_janitor.params_from_mapping, csv_janitor_recipe.CsvJanitor()
 )
 _IMAGE_FORGE_V1: _Bound[image_forge.Params] = _Bound(
     image_forge.params_from_mapping, ImageForgeV1()

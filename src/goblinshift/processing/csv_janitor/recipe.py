@@ -41,7 +41,7 @@ OUTPUT_EXTENSION = ".csv"
 FALLBACK_STEM = "tabela"
 
 
-class CsvJanitorV1:
+class CsvJanitor:
     def __init__(self, limits: Limits | None = None, max_tables: int = MAX_TABLES) -> None:
         self._limits = limits or Limits()
         self._max_tables = max_tables
