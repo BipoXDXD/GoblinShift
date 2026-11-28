@@ -18,6 +18,7 @@ import {
   isRefusal,
   type SessionOptions,
 } from "./fakeAccount";
+import { RESULTS_LEFT_MS, RESULTS_URGENT_LEFT_MS, resultsExpiresAt } from "./resultsExpiry";
 
 type Schemas = components["schemas"];
 type Run = Schemas["RunResponse"];
@@ -96,6 +97,8 @@ export interface FakeApi {
   seedRun(overrides: RunOverrides, outputs?: readonly SeededOutput[]): string;
   /** O prazo das saídas acaba: o /results passa a dizer `expired`, com o vencimento passado. */
   expireResults(runId: string): void;
+  /** O prazo das saídas fica nas 6 h finais: o selo do prazo aparece no tom de aviso. */
+  expireResultsSoon(runId: string): void;
   /** Sessão, termos e chaves da conta (fakeAccount.ts). */
   readonly account: FakeAccount;
   /**
@@ -183,6 +186,7 @@ export async function installFakeApi(
     uploadName: (uploadId) => state.uploads.get(uploadId)?.name,
     seedRun: (overrides, outputs) => state.seedRun(overrides, outputs),
     expireResults: (runId) => state.runsWithExpiredOutputs.add(runId),
+    expireResultsSoon: (runId) => state.runsExpiringSoon.add(runId),
     account,
     signIn: (options) => account.signIn(new URL(E2E.baseUrl).origin, options),
   };
@@ -203,6 +207,7 @@ class FakeState {
   /** Execuções cujas saídas foram excluídas ou venceram: o /results diz a disponibilidade. */
   readonly runsWithoutOutputs = new Set<string>();
   readonly runsWithExpiredOutputs = new Set<string>();
+  readonly runsExpiringSoon = new Set<string>();
   readonly presets = new Map<string, Preset>();
   readonly deletedUploads: string[] = [];
   readonly unhandled: string[] = [];
@@ -501,10 +506,22 @@ class FakeState {
         : this.publishArtifacts(stored, availability);
     const results: Schemas["RunResultsResponse"] = {
       published: true,
-      expires_at: this.runsWithExpiredOutputs.has(id) ? NOW : LATER,
+      expires_at: this.resultsExpiry(id),
       artifacts,
     };
     await fulfillJson(route, results, { status: 200 });
+  }
+
+  /**
+   * O vencimento das saídas: o passado se venceram; senão, relativo ao relógio real, que é o que o
+   * app usa sem o `Date` da API (resultsExpiry.ts).
+   */
+  private resultsExpiry(runId: string): string {
+    if (this.runsWithExpiredOutputs.has(runId)) {
+      return NOW;
+    }
+    const left = this.runsExpiringSoon.has(runId) ? RESULTS_URGENT_LEFT_MS : RESULTS_LEFT_MS;
+    return resultsExpiresAt(Date.now(), left);
   }
 
   /** Como a API: excluídas valem mais que vencidas; as saídas de uma execução andam juntas. */
