@@ -222,4 +222,6 @@ account_quota = Table(
     Column("updated_at", DateTime(timezone=True), nullable=False, server_default=func.now()),
     CheckConstraint("runs_per_24h > 0", name="runs_per_24h"),
     CheckConstraint("input_bytes_per_24h > 0", name="input_bytes_per_24h"),
+    # Barreira contra o estouro do bigint (migrações 0032/0033); o teto de negócio é do código.
+    CheckConstraint("input_bytes_per_24h <= 1125899906842624", name="input_bytes_per_24h_ceiling"),
 )

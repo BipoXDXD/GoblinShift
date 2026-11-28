@@ -40,6 +40,9 @@ capacity_pool = Table(
     CheckConstraint("(scope = 'global') = (owner_id IS NULL)", name="owner"),
     CheckConstraint("resource IN ('storage_bytes')", name="resource"),
     CheckConstraint("reserved BETWEEN 0 AND max_amount", name="reserved"),
+    # 2^50: `reserved + amount` nunca estoura o bigint (migrações 0032/0033); o teto de negócio,
+    # mais baixo, é o do `gs-admin set-limits` (`runs.limits.MAX_STORAGE_BYTES`).
+    CheckConstraint("max_amount <= 1125899906842624", name="max_amount_ceiling"),
 )
 
 # `holder_id` não tem FK: o detentor é um upload, uma Run ou um objeto, conforme `holder_kind`.

@@ -23,6 +23,13 @@ eventos, poucos milhares de linhas numa VPS, varridos em milissegundos. O `env.p
 `make_engine`, com `lock_timeout` de 2 s: se uma transação longa segurar a tabela, a migração
 falha alto em vez de enfileirar logins atrás do `ACCESS EXCLUSIVE`, e basta rodá-la de novo.
 
+Tetos de reserva (Tarefa 10): `account_quota.input_bytes_per_24h <= 2^50` e
+`capacity_pool.max_amount <= 2^50`. São barreira contra o estouro do `bigint`: o `gs-admin
+set-limits` aceitava qualquer positivo, e um teto perto de 2^63 - 1 fazia `reserved + amount`
+(`capacity.ledger`) estourar em todo upload da conta. O teto de negócio, mais baixo, fica no código
+(`runs.limits`). As duas tabelas têm dados: os CHECKs nascem `NOT VALID` aqui, sem varrer nada e
+valendo já para linhas novas ou alteradas, e a 0033 os valida (R5, "constraints em 2 deploys").
+
 O downgrade apaga os eventos dos tipos novos, que o CHECK antigo recusaria, e a coluna `actor`,
 com quem agiu em cada evento. Se houver algum desses dados, ele só roda com
 `GS_ALLOW_LOSSY_DOWNGRADE=1`.
@@ -41,6 +48,10 @@ depends_on: str | Sequence[str] | None = None
 
 _TYPE_CHECK = "audit_event_event_type_check"
 _ACTOR_CHECK = "audit_event_actor_check"
+_INPUT_CEILING_CHECK = "account_quota_input_bytes_per_24h_ceiling_check"
+_POOL_CEILING_CHECK = "capacity_pool_max_amount_ceiling_check"
+# 2^50 bytes (1 PiB): `reserved + amount` de dois valores até aqui nunca chega perto de 2^63.
+_CEILING = 2**50
 _TYPES_0016 = (
     "'LOGIN_SUCCEEDED', 'LOGIN_FAILED', 'LOGOUT', 'LOGOUT_ALL', 'KEY_ISSUED', 'KEY_REVOKED', "
     "'REAUTH_REQUIRED', 'CSRF_FAILED', 'ACCESS_DENIED', 'ACCOUNT_DELETION_REQUESTED', "
@@ -58,6 +69,20 @@ def upgrade() -> None:
     op.create_check_constraint(
         op.f(_ACTOR_CHECK), "audit_event", "actor IN ('user', 'admin', 'system')"
     )
+    # lock-ok: NOT VALID não varre `account_quota`; só grava a regra para linhas novas/alteradas
+    op.create_check_constraint(
+        op.f(_INPUT_CEILING_CHECK),
+        "account_quota",
+        f"input_bytes_per_24h <= {_CEILING}",
+        postgresql_not_valid=True,
+    )
+    # lock-ok: NOT VALID não varre `capacity_pool`; só grava a regra para linhas novas/alteradas
+    op.create_check_constraint(
+        op.f(_POOL_CEILING_CHECK),
+        "capacity_pool",
+        f"max_amount <= {_CEILING}",
+        postgresql_not_valid=True,
+    )
 
 
 def downgrade() -> None:
@@ -67,6 +92,8 @@ def downgrade() -> None:
             "RAISE EXCEPTION 'o downgrade da 0032 apagaria quem agiu e os eventos novos da "
             "auditoria; GS_ALLOW_LOSSY_DOWNGRADE=1 aceita a perda'; END IF; END $$"
         )
+    op.drop_constraint(op.f(_POOL_CEILING_CHECK), "capacity_pool", type_="check")
+    op.drop_constraint(op.f(_INPUT_CEILING_CHECK), "account_quota", type_="check")
     op.execute(
         "DELETE FROM audit_event "
         "WHERE event_type IN ('ACCOUNT_CREATED', 'ACCOUNT_LOOKED_UP', 'ACCOUNT_APPROVED')"

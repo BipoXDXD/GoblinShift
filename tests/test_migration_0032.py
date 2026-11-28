@@ -186,3 +186,105 @@ def test_downgrade_sem_dado_novo_desce_sem_licenca(db_settings: Settings, engine
 
     assert current_revision(engine) == PREVIOUS
     assert "actor" not in audit_columns(engine)
+
+
+# --- Tetos de reserva (Tarefa 10): barreira contra o estouro do bigint -------------------------
+
+CEILING = 2**50
+
+
+def new_user(engine: Engine) -> str:
+    with engine.begin() as conn:
+        user_id: str = conn.execute(
+            text(
+                "INSERT INTO app_user (issuer, subject, display_name) "
+                "VALUES ('teste', gen_random_uuid()::text, 'Ana') RETURNING id"
+            )
+        ).scalar_one()
+    return user_id
+
+
+def new_pool(engine: Engine, max_amount: int) -> None:
+    with engine.begin() as conn:
+        conn.execute(
+            text(
+                "INSERT INTO capacity_pool (scope, owner_id, resource, max_amount) "
+                "VALUES ('account', :owner_id, 'storage_bytes', :max_amount)"
+            ),
+            {"owner_id": new_user(engine), "max_amount": max_amount},
+        )
+
+
+def new_quota(engine: Engine, input_bytes: int) -> None:
+    with engine.begin() as conn:
+        conn.execute(
+            text(
+                "INSERT INTO account_quota (owner_id, input_bytes_per_24h) "
+                "VALUES (:owner_id, :input_bytes)"
+            ),
+            {"owner_id": new_user(engine), "input_bytes": input_bytes},
+        )
+
+
+def convalidated(engine: Engine, table: str, name: str) -> bool | None:
+    with engine.connect() as conn:
+        valid: bool | None = conn.execute(
+            text(
+                "SELECT convalidated FROM pg_constraint "
+                "WHERE conrelid = CAST(:table AS regclass) AND conname = :name"
+            ),
+            {"table": table, "name": name},
+        ).scalar_one_or_none()
+    return valid
+
+
+def test_max_amount_acima_de_2_50_e_recusado(db_settings: Settings, engine: Engine) -> None:
+    run_migrations(db_settings, REVISION)
+
+    with pytest.raises(IntegrityError, match="capacity_pool_max_amount_ceiling_check"):
+        new_pool(engine, CEILING + 1)
+
+
+def test_input_bytes_acima_de_2_50_e_recusado(db_settings: Settings, engine: Engine) -> None:
+    run_migrations(db_settings, REVISION)
+
+    with pytest.raises(IntegrityError, match="account_quota_input_bytes_per_24h_ceiling_check"):
+        new_quota(engine, CEILING + 1)
+
+
+def test_tetos_exatos_sao_aceitos(db_settings: Settings, engine: Engine) -> None:
+    run_migrations(db_settings, REVISION)
+
+    new_pool(engine, CEILING)
+    new_quota(engine, CEILING)
+
+
+def test_tetos_nascem_not_valid_sem_varrer_as_tabelas(
+    db_settings: Settings, engine: Engine
+) -> None:
+    run_migrations(db_settings, REVISION)
+    downgrade_migrations(db_settings, PREVIOUS)
+    # Linha antiga acima do teto: o NOT VALID não a confere, e o upgrade não para (R5).
+    new_pool(engine, CEILING + 1)
+
+    run_migrations(db_settings, REVISION)
+
+    assert convalidated(engine, "capacity_pool", "capacity_pool_max_amount_ceiling_check") is False
+    assert (
+        convalidated(engine, "account_quota", "account_quota_input_bytes_per_24h_ceiling_check")
+        is False
+    )
+    with engine.begin() as conn:
+        conn.execute(text("DELETE FROM capacity_pool WHERE max_amount > :c"), {"c": CEILING})
+
+
+def test_downgrade_remove_os_tetos(db_settings: Settings, engine: Engine) -> None:
+    run_migrations(db_settings, REVISION)
+
+    downgrade_migrations(db_settings, PREVIOUS)
+
+    assert convalidated(engine, "capacity_pool", "capacity_pool_max_amount_ceiling_check") is None
+    assert (
+        convalidated(engine, "account_quota", "account_quota_input_bytes_per_24h_ceiling_check")
+        is None
+    )

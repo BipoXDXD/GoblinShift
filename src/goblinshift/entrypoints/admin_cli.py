@@ -31,8 +31,10 @@ identidade externa; `--pending` mostra só as contas à espera de liberação (A
 com `--user-hash -` lê o hash da entrada padrão, para ele não ficar no log do sudo.
 `set-limits` sobrepõe, para uma conta, as cotas diárias das settings (`GS_QUOTA_*`) e o teto de
 armazenamento do livro-razão (1.7); `default` volta o item ao padrão, e o que não for citado
-fica como está. Cada mudança grava `ACCOUNT_LIMITS_CHANGED` na auditoria, com os valores antigos
-e novos dos itens citados. `usage` imprime, separados por tab, o consumo das últimas 24 h
+fica como está. Cada item tem teto, e acima dele a saída é 2 sem gravar nada: execuções até
+2^31 - 1, bytes de entrada até 2^50 e armazenamento até o pool global (20 GiB). Cada mudança
+grava `ACCOUNT_LIMITS_CHANGED` na auditoria, com os valores antigos e novos dos itens citados.
+`usage` imprime, separados por tab, o consumo das últimas 24 h
 (execuções, bytes de entrada e tempo de executor), o armazenamento reservado e cada limite com a
 origem (`conta` ou `padrão`).
 `orphan-files` é um relatório só de leitura: nada é apagado nem alterado. Percorre o disco do
@@ -56,6 +58,7 @@ da falha fica gravado; `block` e `request-deletion` completam o que faltou se re
 """
 
 import argparse
+import functools
 import logging
 import math
 import re
@@ -116,7 +119,14 @@ from goblinshift.platform.telemetry import (
 )
 from goblinshift.runs.cancellation import CancelResult
 from goblinshift.runs.finished import RunFinishedReporter
-from goblinshift.runs.limits import LIMIT_ITEMS, change_account_limits
+from goblinshift.runs.limits import (
+    INPUT_BYTES_PER_24H,
+    LIMIT_ITEMS,
+    MAX_LIMITS,
+    RUNS_PER_24H,
+    STORAGE_BYTES,
+    change_account_limits,
+)
 from goblinshift.runs.purge import cancel_active_run
 from goblinshift.runs.quotas import (
     QuotaLimits,
@@ -267,13 +277,17 @@ def _argument_parser() -> argparse.ArgumentParser:
         "set-limits", help="sobrepõe as cotas e o teto de armazenamento de uma conta"
     )
     set_limits.add_argument("--user", type=UUID, required=True, help="id da conta")
-    for flag, what in (
-        ("--runs-per-24h", "execuções em 24 h"),
-        ("--input-bytes-per-24h", "bytes de entrada em 24 h"),
-        ("--storage-bytes", "teto de armazenamento, em bytes"),
+    for flag, item, what in (
+        ("--runs-per-24h", RUNS_PER_24H, "execuções em 24 h"),
+        ("--input-bytes-per-24h", INPUT_BYTES_PER_24H, "bytes de entrada em 24 h"),
+        ("--storage-bytes", STORAGE_BYTES, "teto de armazenamento, em bytes"),
     ):
+        maximum = MAX_LIMITS[item]
         set_limits.add_argument(
-            flag, type=_limit_value, default=_UNCHANGED, help=f"{what}, ou {_DEFAULT_WORD}"
+            flag,
+            type=functools.partial(_limit_value, maximum=maximum),
+            default=_UNCHANGED,
+            help=f"{what}, até {maximum}, ou {_DEFAULT_WORD}",
         )
     set_limits.set_defaults(command=_set_limits)
 
@@ -434,8 +448,12 @@ def _find_user(args: argparse.Namespace, context: _Context) -> int:
     return EXIT_OK
 
 
-def _limit_value(text: str) -> int | None:
-    """Inteiro positivo, ou `None` para `default`; o resto é erro de uso (saída 2)."""
+def _limit_value(text: str, *, maximum: int) -> int | None:
+    """Inteiro de 1 a `maximum`, ou `None` para `default`; o resto é erro de uso (saída 2).
+
+    O teto é conferido aqui, antes de abrir a transação: acima dele, o valor estouraria a coluna
+    ou o `bigint` do livro-razão (`runs.limits`).
+    """
     if text == _DEFAULT_WORD:
         return None
     try:
@@ -444,6 +462,8 @@ def _limit_value(text: str) -> int | None:
         raise argparse.ArgumentTypeError(f"use um inteiro positivo ou {_DEFAULT_WORD}") from None
     if value <= 0:
         raise argparse.ArgumentTypeError("o limite precisa ser positivo")
+    if value > maximum:
+        raise argparse.ArgumentTypeError(f"o limite passa do teto de {maximum}")
     return value
 
 

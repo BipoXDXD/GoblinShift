@@ -16,6 +16,7 @@ from sqlalchemy.engine.default import DefaultDialect
 from sqlalchemy.engine.interfaces import DBAPIConnection
 from sqlalchemy.orm import Session, sessionmaker
 
+from goblinshift import capacity
 from goblinshift.entrypoints import admin_cli
 from goblinshift.entrypoints.admin_cli import (
     EXIT_FAILURE,
@@ -933,6 +934,72 @@ def test_set_limits_recusa_valor_invalido_sem_mudar_nada(
     assert usage_error.value.code == EXIT_USAGE
     assert usage_lines(capsys, user_id) == before
     assert limits_events(factory, user_id) == []
+
+
+def stored_limits(factory: sessionmaker[Session], user_id: str) -> tuple[object, object]:
+    """O override das cotas e o teto do pool da conta, como o banco os guarda."""
+    with factory() as session:
+        return quota_override(session, UUID(user_id)), capacity.usage(session, UUID(user_id))
+
+
+@pytest.mark.parametrize(
+    "args",
+    [
+        ("--runs-per-24h", "2147483648"),
+        ("--input-bytes-per-24h", "1125899906842625"),
+        ("--storage-bytes", "21474836481"),
+        ("--storage-bytes", "9223372036854775808"),
+    ],
+    ids=[
+        "execucoes-2-31",
+        "entrada-2-50-mais-1",
+        "armazenamento-global-mais-1",
+        "armazenamento-2-63",
+    ],
+)
+def test_set_limits_acima_do_teto_sai_com_2_e_nao_grava(
+    capsys: pytest.CaptureFixture[str], factory: sessionmaker[Session], args: tuple[str, ...]
+) -> None:
+    user_id = create_user(capsys)
+    before = stored_limits(factory, user_id)
+
+    with pytest.raises(SystemExit) as usage_error:
+        main(["set-limits", "--user", user_id, *args])
+    err = capsys.readouterr().err
+
+    assert usage_error.value.code == EXIT_USAGE
+    assert "Traceback" not in err
+    assert "teto" in err
+    assert stored_limits(factory, user_id) == before
+    assert limits_events(factory, user_id) == []
+
+
+@pytest.mark.parametrize(
+    ("flag", "value", "item"),
+    [
+        ("--runs-per-24h", "2147483647", "runs_per_24h"),
+        ("--input-bytes-per-24h", "1125899906842624", "input_bytes_per_24h"),
+        ("--storage-bytes", "21474836480", "storage_bytes"),
+    ],
+)
+def test_set_limits_no_teto_exato_passa(
+    capsys: pytest.CaptureFixture[str], flag: str, value: str, item: str
+) -> None:
+    user_id = create_user(capsys)
+
+    exit_code, _, _ = run(capsys, "set-limits", "--user", user_id, flag, value)
+
+    assert exit_code == EXIT_OK
+    assert usage_lines(capsys, user_id)[item] == [value, "conta"]
+
+
+@pytest.mark.parametrize("flag", ["--runs-per-24h", "--input-bytes-per-24h", "--storage-bytes"])
+def test_default_continua_aceito(capsys: pytest.CaptureFixture[str], flag: str) -> None:
+    user_id = create_user(capsys)
+
+    exit_code, _, _ = run(capsys, "set-limits", "--user", user_id, flag, "default")
+
+    assert exit_code == EXIT_OK
 
 
 def test_set_limits_sem_nada_a_mudar_sai_com_2(capsys: pytest.CaptureFixture[str]) -> None:
