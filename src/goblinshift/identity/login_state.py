@@ -5,13 +5,17 @@ está no provedor; o cookie `__Secure-gs_login` leva só o marcador que prova qu
 mesmo navegador. O estado vive no máximo 10 minutos e é lido uma única vez: a leitura o apaga
 na mesma instrução, então um `state` repetido (ou dois callbacks simultâneos) não reaproveita o
 estado de outro.
+
+Todo início de login sem autenticação grava uma linha. Além do `limit_req` do Nginx por cliente,
+a aplicação tem um teto global de estados vivos (`MAX_LIVE_LOGIN_STATES`): muitas origens não
+enchem a tabela. O teto recusa o início novo e nunca apaga estado de quem já está no provedor.
 """
 
 from collections.abc import Callable
 from datetime import UTC, datetime, timedelta
 
 from anyio import to_thread
-from sqlalchemy import delete
+from sqlalchemy import delete, func, literal, select
 from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.orm import Session, sessionmaker
 
@@ -21,6 +25,9 @@ from goblinshift.identity.tables import login_state
 LOGIN_STATE_TTL = timedelta(minutes=10)
 # Os mesmos limites dos CHECKs de `login_state` (migração 0006).
 MAX_KEY_CHARS = 200
+# Teto global de estados vivos (D6 do plano login-e-borda): cerca de 10 MB. Global, e não por IP,
+# porque cada recusa por IP custaria uma escrita (ADR 048, alternativa B).
+MAX_LIVE_LOGIN_STATES = 20_000
 
 
 def save_state(session: Session, key: str, value: str, expires_at: datetime) -> None:
@@ -54,6 +61,31 @@ def delete_state(session: Session, key: str) -> None:
     """Apaga o estado; chave inexistente já está no estado final."""
     if _storable_key(key):
         session.execute(delete(login_state).where(login_state.c.key == key))
+
+
+def login_states_full(session: Session, now: datetime, limit: int) -> bool:
+    """Se já há `limit` estados vivos (`expires_at > now`); vencidos à espera da purga não contam.
+
+    A contagem para em `limit` (`count(*)` sobre um `SELECT ... LIMIT`) e usa o índice de
+    `expires_at`: o custo não cresce com a tabela cheia. Dois inícios simultâneos podem passar
+    juntos do teto por uma ou duas linhas; a corrida é aceita, porque o teto protege o tamanho da
+    tabela, não um número exato.
+    """
+    live = (
+        select(literal(1))
+        .select_from(login_state)
+        .where(login_state.c.expires_at > now)
+        .limit(limit)
+        .subquery()
+    )
+    count: int = session.execute(select(func.count()).select_from(live)).scalar_one()
+    return count >= limit
+
+
+def count_login_states(session: Session) -> int:
+    """Linhas da tabela, vencidas ou não: o tamanho que a métrica do ciclo de contas mede."""
+    count: int = session.execute(select(func.count()).select_from(login_state)).scalar_one()
+    return count
 
 
 def _storable_key(key: str) -> bool:

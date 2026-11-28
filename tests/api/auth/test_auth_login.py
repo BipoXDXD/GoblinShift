@@ -1,5 +1,6 @@
 """`GET /auth/login/{provider}`: pedido de autorização e cookie de login (3.6; ADRs 008, 025)."""
 
+import logging
 from pathlib import Path
 
 import pytest
@@ -8,6 +9,8 @@ from fastapi.testclient import TestClient
 from sqlalchemy import select
 from sqlalchemy.orm import Session, sessionmaker
 
+from goblinshift.entrypoints.api import auth_login
+from goblinshift.entrypoints.api.auth_login import WarningThrottle
 from goblinshift.identity.providers import GITHUB_AUTHORIZE_URL, GOOGLE_AUTHORIZE_URL
 from goblinshift.identity.tables import login_state
 from goblinshift.platform.db import unit_of_work
@@ -17,6 +20,7 @@ from tests.api.auth.support import (
     PUBLIC_ORIGIN,
     StoredSessions,
     assert_login_failed,
+    audit_events,
     authorize_query,
     browser,
     build_login_app,
@@ -216,3 +220,61 @@ def test_return_to_e_de_cada_provedor(
 def test_erro_generico_e_um_caminho_local(client: TestClient) -> None:
     assert LOGIN_FAILED_LOCATION.startswith("/?")
     assert_login_failed(client.get("/auth/callback/google"))
+
+
+# --- Teto de estados vivos (login-e-borda, Tarefa 4) -------------------------------------------
+
+
+def stored_states(factory: sessionmaker[Session]) -> list[str]:
+    with unit_of_work(factory) as session:
+        return list(session.execute(select(login_state.c.key)).scalars())
+
+
+def test_teto_de_estados_recusa_o_inicio_sem_gravar(
+    client: TestClient,
+    factory: sessionmaker[Session],
+    monkeypatch: pytest.MonkeyPatch,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    monkeypatch.setattr(auth_login, "MAX_LIVE_LOGIN_STATES", 2)
+    start_login(client, "google")
+    start_login(client, "github")
+
+    with caplog.at_level(logging.WARNING, logger=auth_login.__name__):
+        assert_login_failed(client.get("/auth/login/google"))
+
+    assert len(stored_states(factory)) == 2
+    assert audit_events(factory) == []
+    alerts = [getattr(record, "fields", {}).get("alert") for record in caplog.records]
+    assert alerts == ["login_state_cap"]
+
+
+def test_teto_de_login_state_nao_despeja_login_em_curso(
+    login_app: FastAPI,
+    fake: FakeProviders,
+    factory: sessionmaker[Session],
+    sessions: StoredSessions,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    # Review Focus 5: com o teto cheio, o início novo é recusado, e o estado já gravado de quem
+    # está no provedor continua valendo para o callback (nada é despejado para abrir vaga).
+    monkeypatch.setattr(auth_login, "MAX_LIVE_LOGIN_STATES", 1)
+    open_signup(login_app)
+    with browser(login_app) as legitimate, browser(login_app) as flood:
+        started = start_login(legitimate, "github")
+
+        assert_login_failed(flood.get("/auth/login/github"))
+        assert len(stored_states(factory)) == 1
+
+        finished = legitimate.get(fake.consent(started.headers["location"]))
+
+    assert finished.status_code == 303
+    assert finished.headers["location"] == "/"
+    assert len(sessions.started) == 1
+    assert stored_states(factory) == []
+
+
+def test_aviso_do_teto_sai_uma_vez_por_minuto() -> None:
+    throttle = WarningThrottle(60.0)
+
+    assert [throttle.ready(0.0), throttle.ready(59.9), throttle.ready(60.0)] == [True, False, True]

@@ -11,6 +11,8 @@ from sqlalchemy.orm import Session, sessionmaker
 from goblinshift.identity.login_state import (
     LOGIN_STATE_TTL,
     PostgresLoginStateCache,
+    count_login_states,
+    login_states_full,
     save_state,
     take_state,
 )
@@ -145,3 +147,41 @@ def test_duas_leituras_simultaneas_so_uma_recebe_o_estado(
         thread.join()
 
     assert sorted(results, key=str) == [None, VALUE]
+
+
+# --- Teto de estados vivos (login-e-borda, Tarefa 4) -------------------------------------------
+
+
+def save_states(factory: sessionmaker[Session], count: int, expires_at: datetime) -> None:
+    with unit_of_work(factory) as session:
+        for index in range(count):
+            key = f"_state_google_{expires_at.timestamp()}_{index}"
+            save_state(session, key, VALUE, expires_at)
+
+
+@pytest.mark.parametrize(("live", "full"), [(2, False), (3, True)], ids=["limite-1", "limite"])
+def test_login_states_full_no_limite_exato(
+    factory: sessionmaker[Session], live: int, full: bool
+) -> None:
+    save_states(factory, live, T0 + LOGIN_STATE_TTL)
+
+    with unit_of_work(factory) as session:
+        assert login_states_full(session, T0, 3) is full
+
+
+def test_estados_vencidos_nao_contam_no_teto(factory: sessionmaker[Session]) -> None:
+    # Vencidos, mas ainda não purgados pela manutenção (Review Focus 4 do plano login-e-borda).
+    save_states(factory, 3, T0 - timedelta(seconds=1))
+    save_states(factory, 2, T0 + LOGIN_STATE_TTL)
+
+    with unit_of_work(factory) as session:
+        assert login_states_full(session, T0, 3) is False
+
+
+def test_contagem_de_estados_inclui_os_vencidos(factory: sessionmaker[Session]) -> None:
+    # A métrica do ciclo de contas mede a tabela inteira: vencido também ocupa espaço.
+    save_states(factory, 3, T0 - timedelta(seconds=1))
+    save_states(factory, 2, T0 + LOGIN_STATE_TTL)
+
+    with unit_of_work(factory) as session:
+        assert count_login_states(session) == 5

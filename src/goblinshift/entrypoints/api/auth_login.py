@@ -15,10 +15,15 @@ para toda recusa; no fragmento, o navegador não o envia a servidor nenhum, nem 
 
 As rotas são `async` porque a integração Starlette do Authlib é; o banco é acessado numa thread
 do pool, em transação curta, e nunca durante uma chamada ao provedor.
+
+O início sem autenticação grava um estado em `login_state`. Com `MAX_LIVE_LOGIN_STATES` vivos, o
+início novo recebe a mesma recusa genérica, sem gravar estado nem auditoria, e o log avisa no
+máximo uma vez por minuto (`alert=login_state_cap`); o estado de quem já está no provedor fica.
 """
 
 import logging
 import re
+import time
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
 from datetime import datetime
@@ -53,7 +58,12 @@ from goblinshift.identity import (
     revoke_session,
     start_session,
 )
-from goblinshift.identity.login_state import LOGIN_STATE_TTL, PostgresLoginStateCache
+from goblinshift.identity.login_state import (
+    LOGIN_STATE_TTL,
+    MAX_LIVE_LOGIN_STATES,
+    PostgresLoginStateCache,
+    login_states_full,
+)
 from goblinshift.identity.providers import (
     GITHUB_ACCEPT,
     GITHUB_AUTHORIZE_URL,
@@ -89,6 +99,8 @@ REAUTH_PROMPT = "select_account"
 # Falhas esperadas de um provedor externo ou de um callback forjado. Qualquer outra exceção é
 # defeito nosso e segue para o handler de erro 500.
 LOGIN_ERRORS = (OAuthError, JoseError, HTTPError, ValueError)
+# Avisos de teto do login anônimo: no máximo um por intervalo, por processo.
+CAP_WARNING_INTERVAL_S = 60.0
 
 IdentityReader = Callable[[Any, Request], Awaitable[ExternalIdentity]]
 
@@ -107,10 +119,29 @@ class LoginProvider:
 LoginProviders = dict[ProviderName, LoginProvider]
 
 
+class WarningThrottle:
+    """Libera um aviso no máximo uma vez por `interval_s` (relógio monotônico de quem chama).
+
+    Numa enxurrada, cada recusa cairia no log; basta uma linha por intervalo para o alerta acender.
+    Usado só no laço de eventos, sem concorrência entre threads.
+    """
+
+    def __init__(self, interval_s: float) -> None:
+        self._interval_s = interval_s
+        self._last: float | None = None
+
+    def ready(self, monotonic_now: float) -> bool:
+        if self._last is not None and monotonic_now - self._last < self._interval_s:
+            return False
+        self._last = monotonic_now
+        return True
+
+
 def install(app: FastAPI, web: WebIdentityConfig) -> None:
     """Registra os provedores ligados na configuração em `app.state`; chamado pelo `create_app`."""
     cache = PostgresLoginStateCache(app.state.session_factory)
     app.state.login_providers = build_login_providers(web, cache)
+    app.state.login_cap_warnings = WarningThrottle(CAP_WARNING_INTERVAL_S)
 
 
 def build_login_providers(
@@ -216,12 +247,15 @@ async def start_login(
 ) -> Response:
     """Redireciona ao provedor com PKCE e `state`; só `return_to` e `reauth=1` são aceitos."""
     name = _provider_name(provider)
+    factory: sessionmaker[Session] = request.app.state.session_factory
     login_provider = _providers(request).get(name)
     if login_provider is None:
         attempt = _attempt(request, now)
-        factory: sessionmaker[Session] = request.app.state.session_factory
         await run_in_threadpool(_record_login_failure, factory, attempt)
         return _login_failed(attempt)
+    if await run_in_threadpool(_login_states_full, factory, now):
+        _warn_login_state_cap(request)
+        return _login_failed(_attempt(request, now))
     request.session[_return_to_key(name)] = _safe_return_to(return_to)
     extra = {"prompt": REAUTH_PROMPT} if reauth == "1" else {}
     response: Response = await login_provider.oauth_app.authorize_redirect(
@@ -310,6 +344,12 @@ def _revoke_previous_session(session: Session, token: str | None, now: datetime)
         revoke_session(session, previous.session_id, now)
 
 
+def _login_states_full(factory: sessionmaker[Session], now: datetime) -> bool:
+    # O teto é lido aqui, e não no import, para o teste trocá-lo com `monkeypatch`.
+    with unit_of_work(factory) as session:
+        return login_states_full(session, now, MAX_LIVE_LOGIN_STATES)
+
+
 def _record_login_failure(factory: sessionmaker[Session], attempt: LoginAttempt) -> None:
     with unit_of_work(factory) as session:
         _record(session, AuditEventType.LOGIN_FAILED, None, attempt)
@@ -379,6 +419,15 @@ def _failure_kind(exc: Exception) -> str:
     if isinstance(exc, HTTPStatusError):
         return f"{type(exc).__name__} {exc.response.status_code}"
     return type(exc).__name__
+
+
+def _warn_login_state_cap(request: Request) -> None:
+    throttle: WarningThrottle = request.app.state.login_cap_warnings
+    if throttle.ready(time.monotonic()):
+        logger.warning(
+            "login: teto de estados vivos, início recusado",
+            extra={"fields": {"alert": "login_state_cap", "limit": MAX_LIVE_LOGIN_STATES}},
+        )
 
 
 def _login_failed(attempt: LoginAttempt) -> Response:
