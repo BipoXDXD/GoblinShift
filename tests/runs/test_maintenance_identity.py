@@ -10,7 +10,6 @@ import secrets
 import uuid
 from collections.abc import Callable
 from datetime import UTC, datetime, timedelta
-from functools import partial
 from pathlib import Path
 
 import psycopg
@@ -46,7 +45,13 @@ from goblinshift.runs.maintenance import Maintenance
 from goblinshift.runs.purge import cancel_active_run
 from goblinshift.runs.tables import attempt, run
 from tests.files.support import create_intent
-from tests.runs.maintenance_support import MAX_CYCLES, count_owned, cycles_until_purged
+from tests.runs.maintenance_support import (
+    MAX_CYCLES,
+    count_owned,
+    cycles_until_purged,
+    keep_run,
+    real_canceller,
+)
 from tests.runs.worker_support import claim, coordinator, create_user, local_runner, queue_run
 
 pytestmark = pytest.mark.integration
@@ -105,18 +110,6 @@ def on_disk(storage: FileStorage, key: str) -> bool:
 def request_deletion(factory: sessionmaker[Session], owner_id: uuid.UUID) -> None:
     with unit_of_work(factory) as session:
         request_account_deletion(session, owner_id, datetime.now(UTC))
-
-
-def real_canceller(
-    factory: sessionmaker[Session], storage: FileStorage
-) -> Callable[[uuid.UUID], object]:
-    """O cancelador que `serve` passa à purga, sem o `run.finished`."""
-    return partial(cancel_active_run, factory, storage, on_finished=None)
-
-
-def keep_run(_owner_id: uuid.UUID) -> None:
-    """Cancelador que não cancela: para os testes em que a Run da conta não importa ou precisa
-    seguir ativa."""
 
 
 @pytest.fixture

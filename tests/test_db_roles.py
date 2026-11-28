@@ -10,7 +10,6 @@ dos dois altera o `audit_event`, nem o `gs_app` o apaga.
 import re
 from collections.abc import Callable, Iterator
 from datetime import UTC, datetime, timedelta
-from functools import partial
 from pathlib import Path
 from uuid import UUID
 
@@ -33,8 +32,13 @@ from goblinshift.identity import (
 from goblinshift.platform.db import make_engine, make_session_factory, unit_of_work
 from goblinshift.platform.settings import Settings
 from goblinshift.runs.maintenance import Maintenance
-from goblinshift.runs.purge import cancel_active_run
 from tests.conftest import POSTGRES_IMAGE, run_migrations
+from tests.runs.maintenance_support import (
+    MAX_CYCLES,
+    cycles_until_purged,
+    keep_run,
+    real_canceller,
+)
 from tests.runs.worker_support import (
     claim,
     coordinator,
@@ -298,8 +302,7 @@ def test_worker_e_manutencao_rodam_o_ciclo_de_uma_run_com_os_papeis_novos(
     assert run_row(app, run_id)["status"] == "succeeded"
     # Manutenção: reconciliação e retenção das Runs, contas e janelas, sem erro de permissão.
     Maintenance(maintenance, storage, runner).run_cycle()
-    canceller = partial(cancel_active_run, maintenance, storage, on_finished=None)
-    AccountJobs(maintenance, cancel_active_run=canceller).run_cycle()
+    AccountJobs(maintenance, cancel_active_run=real_canceller(maintenance, storage)).run_cycle()
 
 
 @pytest.mark.integration
@@ -314,22 +317,15 @@ def test_manutencao_cancela_e_purga_a_run_da_conta_pedida_com_o_papel_novo(
     run_id = queue_run(app, storage, user_id)
     with unit_of_work(app) as session:
         request_account_deletion(session, user_id, datetime.now(UTC))
-    canceller = partial(cancel_active_run, maintenance, storage, on_finished=None)
-    jobs = AccountJobs(maintenance, cancel_active_run=canceller)
+    jobs = AccountJobs(maintenance, cancel_active_run=real_canceller(maintenance, storage))
 
     counts = jobs.run_cycle()
 
     assert counts["accounts_cancel_failed"] == 0
     assert run_row(app, run_id)["status"] == "canceled"
     cycles = Maintenance(maintenance, storage, local_runner(tmp_path / "work"))
-    for _ in range(5):
-        cycles.run_cycle()
-        jobs.run_cycle()
-    with owner.connect() as connection:
-        remaining = connection.execute(
-            text("SELECT count(*) FROM app_user WHERE id = :id"), {"id": user_id}
-        ).scalar_one()
-    assert remaining == 0
+    # A contagem lê como dono do esquema: a prova não depende das permissões dos papéis.
+    assert cycles_until_purged(make_session_factory(owner), cycles, jobs, user_id) <= MAX_CYCLES
 
 
 @pytest.mark.integration
@@ -347,7 +343,7 @@ def test_manutencao_apaga_o_audit_event_vencido_e_a_conta_pedida(
 
     jobs = AccountJobs(
         runtime_factory("gs_maintenance"),
-        cancel_active_run=lambda _owner_id: None,
+        cancel_active_run=keep_run,
         clock=lambda: later,
     )
     counts = jobs.run_cycle()

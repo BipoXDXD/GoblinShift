@@ -1,15 +1,19 @@
-"""Apoio dos testes da purga de contas: o que a conta ainda tem no banco e quantos ciclos a
-manutenção leva para purgá-la."""
+"""Apoio dos testes da purga de contas: o que a conta ainda tem no banco, quantos ciclos a
+manutenção leva para purgá-la e os canceladores que a purga recebe."""
 
 import uuid
+from collections.abc import Callable
+from functools import partial
 
 from sqlalchemy import Table, func, select
 from sqlalchemy.orm import Session, sessionmaker
 
 from goblinshift.entrypoints.maintenance import AccountJobs
+from goblinshift.files.storage import FileStorage
 from goblinshift.files.tables import artifact, stored_object, transfer_slot, upload
 from goblinshift.identity.tables import api_key, app_user, request_window, web_session
 from goblinshift.runs.maintenance import Maintenance
+from goblinshift.runs.purge import cancel_active_run
 from goblinshift.runs.tables import idempotency_record, run, run_input, run_output
 
 MAX_CYCLES = 10
@@ -52,3 +56,15 @@ def cycles_until_purged(
         if count_owned(factory, owner_id)["app_user"] == 0:
             return cycle
     raise AssertionError("a conta não foi purgada")
+
+
+def real_canceller(
+    factory: sessionmaker[Session], storage: FileStorage
+) -> Callable[[uuid.UUID], object]:
+    """O cancelador que `serve` passa à purga, sem o `run.finished`."""
+    return partial(cancel_active_run, factory, storage, on_finished=None)
+
+
+def keep_run(_owner_id: uuid.UUID) -> None:
+    """Cancelador que não cancela: para os testes em que a Run da conta não importa ou precisa
+    seguir ativa."""
