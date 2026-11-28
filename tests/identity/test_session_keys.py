@@ -44,12 +44,17 @@ def issue(
     now: datetime = NOW,
     *,
     session_id: UUID | None = None,
+    days: int = 30,
 ) -> IssuedKey:
-    """Emite pela sessão `session_id`, ou por uma sessão nova da conta."""
-    web = session_id or new_web_session(factory, owner_id, now=NOW)
+    """Emite em `now` pela sessão `session_id`, ou por uma sessão nova da conta aberta em `now`.
+
+    A sessão nova nunca nasce depois da emissão: a chave "vencida" é emitida no passado, por uma
+    sessão que já existia então.
+    """
+    web = session_id or new_web_session(factory, owner_id, now=now)
     with unit_of_work(factory) as session:
         return issue_key_for_session(
-            session, owner_id=owner_id, session_id=web, scopes=READ, days=30, now=now
+            session, owner_id=owner_id, session_id=web, scopes=READ, days=days, now=now
         )
 
 
@@ -139,16 +144,8 @@ def test_chave_revogada_ou_vencida_libera_vaga(factory: sessionmaker[Session]) -
     owner = new_user(factory)
     for _ in range(MAX_ACTIVE_KEYS - 1):
         issue(factory, owner)
-    # Uma vencida (emitida há 31 dias com validade de 30) e uma revogada não contam.
-    with unit_of_work(factory) as session:
-        issue_key_for_session(
-            session,
-            owner_id=owner,
-            session_id=new_web_session(factory, owner, now=NOW),
-            scopes=READ,
-            days=30,
-            now=NOW - timedelta(days=30),
-        )
+    # Uma vencida (emitida há 30 dias com validade de 30) e uma revogada não contam.
+    issue(factory, owner, NOW - timedelta(days=30))
     revoked = issue(factory, owner)
     with unit_of_work(factory) as session:
         [summary] = [k for k in list_keys(session, owner, NOW) if k.public_id == revoked.public_id]
@@ -161,15 +158,7 @@ def test_vencida_no_instante_exato_nao_conta(factory: sessionmaker[Session]) -> 
     owner = new_user(factory)
     for _ in range(MAX_ACTIVE_KEYS - 1):
         issue(factory, owner)
-    with unit_of_work(factory) as session:
-        issue_key_for_session(
-            session,
-            owner_id=owner,
-            session_id=new_web_session(factory, owner, now=NOW),
-            scopes=READ,
-            days=1,
-            now=NOW - timedelta(days=1),
-        )
+    issue(factory, owner, NOW - timedelta(days=1), days=1)
 
     issue(factory, owner)
 
@@ -178,15 +167,7 @@ def test_um_segundo_antes_de_vencer_ainda_conta(factory: sessionmaker[Session]) 
     owner = new_user(factory)
     for _ in range(MAX_ACTIVE_KEYS - 1):
         issue(factory, owner)
-    with unit_of_work(factory) as session:
-        issue_key_for_session(
-            session,
-            owner_id=owner,
-            session_id=new_web_session(factory, owner, now=NOW),
-            scopes=READ,
-            days=1,
-            now=NOW - timedelta(days=1) + timedelta(seconds=1),
-        )
+    issue(factory, owner, NOW - timedelta(days=1) + timedelta(seconds=1), days=1)
 
     with pytest.raises(ActiveKeyLimitError):
         issue(factory, owner)
@@ -406,15 +387,7 @@ def test_listagem_poe_as_ativas_antes_das_vencidas_e_revogadas(
 ) -> None:
     owner = new_user(factory)
     active = issue(factory, owner, NOW - timedelta(days=10))
-    with unit_of_work(factory) as session:
-        expired = issue_key_for_session(
-            session,
-            owner_id=owner,
-            session_id=new_web_session(factory, owner, now=NOW),
-            scopes=READ,
-            days=1,
-            now=NOW - timedelta(days=5),
-        )
+    expired = issue(factory, owner, NOW - timedelta(days=5), days=1)
     revoked = issue(factory, owner, NOW - timedelta(days=1))
     with unit_of_work(factory) as session:
         session.execute(update(api_key).where(api_key.c.id == revoked.id).values(revoked_at=NOW))
