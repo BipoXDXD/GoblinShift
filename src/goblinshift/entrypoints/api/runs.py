@@ -32,11 +32,11 @@ from goblinshift.entrypoints.api.catalog import (
 )
 from goblinshift.entrypoints.api.dependencies import DbSession, Now, require_scope
 from goblinshift.entrypoints.api.idempotency import (
-    IDEMPOTENCY_KEY_HEADER,
     REPLAYED_HEADER,
     idempotency_key_parameter,
     in_progress_problem,
     key_invalid_problem,
+    parse_idempotency_header,
 )
 from goblinshift.entrypoints.api.json_command import (
     JSON_MEDIA_TYPE,
@@ -69,7 +69,6 @@ from goblinshift.runs.acceptance import (
     RunCommand,
     accept_run,
     find_replay,
-    parse_idempotency_key,
     preset_run_hash,
     validate_run,
 )
@@ -385,10 +384,10 @@ def create_run(
         parameters=command.parameters,
     )
     # Lida à mão e publicada em `_create_run_openapi` (motivo em `idempotency`).
-    idempotency_key = request.headers.get(IDEMPOTENCY_KEY_HEADER)
+    idempotency_key = parse_idempotency_header(request)
     if validate_only:
         response.status_code = 200
-        validated = _validate(run_command, idempotency_key)
+        validated = _validate(run_command)
         _add_deprecation_headers(response, validated.recipe_id, validated.recipe_version)
         return validated
     return _accept(principal.owner_id, run_command, idempotency_key, session, request, response)
@@ -447,7 +446,7 @@ def create_run_from_preset(
     Exige também `presets:read`, porque a configuração do preset passa a aparecer na execução.
     A Run guarda o `preset_id`; editar ou excluir o preset depois não a altera.
     """
-    idempotency_key = request.headers.get(IDEMPOTENCY_KEY_HEADER)
+    idempotency_key = parse_idempotency_header(request)
     inputs = tuple(command.input_upload_ids)
     try:
         # O replay vem antes de ler o preset: editado ou excluído depois da primeira chamada, o
@@ -659,11 +658,9 @@ def _in_utc(name: str, moment: datetime | None) -> datetime | None:
         ) from None
 
 
-def _validate(command: RunCommand, idempotency_key: str | None) -> ValidatedRunResponse:
-    """Sem chave é permitido; enviada, a chave tem de estar no formato publicado."""
+def _validate(command: RunCommand) -> ValidatedRunResponse:
+    """Sem chave é permitido; enviada, `parse_idempotency_header` já conferiu o formato."""
     try:
-        if idempotency_key is not None:
-            parse_idempotency_key(idempotency_key)
         validated = validate_run(command)
     except _REFUSALS as error:
         raise _refusal_problem(error) from None

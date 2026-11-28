@@ -2,6 +2,7 @@ import { z } from "zod";
 
 import type { ApiClient } from "../api/client";
 import type { operations } from "../api/schema";
+import { PROVIDERS } from "./signIn";
 
 // Espelhos em runtime dos schemas da conta na spec; api.test.ts trava a igualdade com os tipos
 // gerados. As rotas de /auth ficam fora do OpenAPI (auth_session.py) e respondem 204 sem corpo.
@@ -18,6 +19,7 @@ const instant = z.iso.datetime({ offset: true });
 const meSchema = z.object({
   id: z.uuid(),
   display_name: z.string(),
+  provider: z.enum(PROVIDERS).nullable(),
   scopes: z.array(z.enum(SCOPES)),
   via: z.enum(["session", "api_key"]),
   limits: z.object({

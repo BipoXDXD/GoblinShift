@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { z } from "zod";
 
-import { createApiClient } from "./client";
+import { createApiClient, type ApiClient } from "./client";
 import { ApiError, type ApiFailure } from "./response";
 import { CrossOriginUrlError } from "./sameOrigin";
 
@@ -404,5 +404,70 @@ describe("createApiClient: corpo em texto", () => {
       CrossOriginUrlError,
     );
     expect(fetchMock).not.toHaveBeenCalled();
+  });
+});
+
+describe("createApiClient: relógio do servidor", () => {
+  const SERVER_DATE = "Wed, 14 Oct 2026 15:00:00 GMT";
+  const calls = {
+    request: (client: ApiClient) =>
+      client.request({ method: "GET", path: "/api/v1/coisas/a", schema: z.unknown() }),
+    requestText: (client: ApiClient) => client.requestText({ path: "/api/v1/artifacts/a/preview" }),
+  };
+
+  it.each([
+    ["request", 200],
+    ["request", 503],
+    ["requestText", 200],
+    ["requestText", 503],
+  ] as const)("%s entrega o Date de toda resposta (%i) ao relógio", async (method, status) => {
+    const observeServerDate = vi.fn<(dateHeader: string | null) => void>();
+    const client = createApiClient({
+      fetch: () => Promise.resolve(new Response("{}", { status, headers: { Date: SERVER_DATE } })),
+      csrfToken: () => null,
+      now: () => NOW_MS,
+      observeServerDate,
+    });
+
+    await calls[method](client).catch(() => undefined);
+
+    expect(observeServerDate).toHaveBeenCalledExactlyOnceWith(SERVER_DATE);
+  });
+
+  it.each(["request", "requestText"] as const)(
+    "%s entrega o Date mesmo quando a leitura do corpo falha",
+    async (method) => {
+      const observeServerDate = vi.fn<(dateHeader: string | null) => void>();
+      const brokenBody = new ReadableStream<Uint8Array>({
+        start(controller) {
+          controller.error(new Error("conexão caiu no meio do corpo"));
+        },
+      });
+      const client = createApiClient({
+        fetch: () => Promise.resolve(new Response(brokenBody, { headers: { Date: SERVER_DATE } })),
+        csrfToken: () => null,
+        now: () => NOW_MS,
+        observeServerDate,
+      });
+
+      const failure = await failureOf(calls[method](client));
+
+      expect(failure).toEqual({ kind: "network" });
+      expect(observeServerDate).toHaveBeenCalledExactlyOnceWith(SERVER_DATE);
+    },
+  );
+
+  it("entrega null quando a resposta vem sem Date", async () => {
+    const observeServerDate = vi.fn<(dateHeader: string | null) => void>();
+    const client = createApiClient({
+      fetch: () => Promise.resolve(new Response("{}")),
+      csrfToken: () => null,
+      now: () => NOW_MS,
+      observeServerDate,
+    });
+
+    await calls.request(client);
+
+    expect(observeServerDate).toHaveBeenCalledExactlyOnceWith(null);
   });
 });

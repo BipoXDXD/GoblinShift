@@ -775,8 +775,9 @@ describe("Acesso: chave nova", () => {
     expect(document.body.innerHTML).not.toContain(CANARY);
   });
 
-  it("sem login recente, pede para entrar de novo e voltar ao Acesso", async () => {
+  it("sem login recente, pede para entrar de novo pelo provedor da sessão e voltar ao Acesso", async () => {
     const { user } = setup({
+      "GET /api/v1/me": () => jsonResponse(meBody({ provider: "github" })),
       "POST /api/v1/api-keys": () => problemResponse(401, "REAUTH_REQUIRED"),
     });
     const form = await openForm(user);
@@ -788,6 +789,7 @@ describe("Acesso: chave nova", () => {
       "href",
       "/auth/login/github?return_to=%2Facesso&reauth=1",
     );
+    expect(within(prompt).queryByRole("link", { name: "Entrar com Google" })).toBeNull();
   });
 
   it("no teto de chaves (409), cita os dois limites", async () => {
