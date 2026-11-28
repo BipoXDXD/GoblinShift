@@ -32,7 +32,12 @@ from goblinshift.files import purge as files_purge
 from goblinshift.files.storage import FileStorage
 from goblinshift.identity import purge as identity_purge
 from goblinshift.identity import rate_limit
-from goblinshift.platform.db import make_engine, make_session_factory, unit_of_work
+from goblinshift.platform.db import (
+    is_lock_contention,
+    make_engine,
+    make_session_factory,
+    unit_of_work,
+)
 from goblinshift.platform.settings import (
     EXIT_CONFIGURATION,
     ExecutorConfigError,
@@ -213,10 +218,11 @@ class AccountJobs:
     `account_steps_failed`, e os outros seguem, inclusive o alerta da exclusão atrasada; as
     contagens do passo que falhou ficam fora do evento. Na purga, a falha de uma conta conta em
     `accounts_purge_failed` e não impede as seguintes: cada ciclo marca a tentativa nas contas
-    que pega, e a fila segue pela tentativa mais antiga (#442). O cancelamento que falha sem perda
-    de conexão (o `lock_timeout` com o worker segurando a Run, por exemplo) conta só em
-    `accounts_cancel_failed`, fora de `account_steps_failed`, e a conta volta num ciclo seguinte,
-    quando chegar a vez dela na fila.
+    que pega, e a fila segue pela tentativa mais antiga (#442). O cancelamento que falha conta em
+    `accounts_cancel_failed`, e a conta volta num ciclo seguinte, quando chegar a vez dela na
+    fila. Só a disputa com o worker segurando a Run (`lock_timeout` ou `statement_timeout`) fica
+    fora de `account_steps_failed`; qualquer outra falha (permissão, bug, storage) põe a volta no
+    alerta, como a purga que falha.
     Perda de conexão derruba o ciclo inteiro, como antes: com o banco fora, cada passo seguinte só
     esperaria o `connect_timeout` de novo.
     """
@@ -247,10 +253,9 @@ class AccountJobs:
                 # Fronteira do passo: o seguinte recomeça do banco, sem estado em memória.
                 log_step_failure(name, error)
                 failed += 1
-        # A purga que falhou numa conta também põe a volta no alerta, mesmo com as outras purgadas.
-        # O cancelamento que falhou não: com o worker segurando a Run, desistir no `lock_timeout`
-        # é esperado e se resolve num ciclo seguinte; fica só em `accounts_cancel_failed`.
-        counts[ACCOUNT_STEPS_FAILED] = failed + int(counts.get(ACCOUNTS_PURGE_FAILED, 0) > 0)
+        # A purga diz se ela mesma conta como passo falho (`purge_accounts`), mesmo com as outras
+        # contas purgadas; se levantou exceção, já está em `failed`.
+        counts[ACCOUNT_STEPS_FAILED] = failed + counts.get(ACCOUNT_STEPS_FAILED, 0)
         overdue = counts.get("accounts_deletion_overdue", 0)
         if overdue:
             # Alerta de causa: o prazo de 24 h da exclusão (1.8) está perto de vencer.
@@ -305,13 +310,20 @@ class AccountJobs:
         return key, lambda: {key: self._in_transaction(work)}
 
     def purge_accounts(self) -> dict[str, int]:
-        """Avança a purga das contas em exclusão: quantas terminaram e quantas falharam no ciclo."""
+        """Avança a purga das contas em exclusão: quantas terminaram e quantas falharam no ciclo.
+
+        `account_steps_failed` é `1` quando a purga põe a volta no alerta: falhou em alguma conta
+        ou num cancelamento que não foi disputa com o worker. Desistir da trava (55P03) ou do
+        `statement_timeout` (57014) com o worker segurando a Run é esperado e se resolve num ciclo
+        seguinte; fica só em `accounts_cancel_failed`.
+        """
         owners = self._in_transaction(
             lambda s: identity_purge.claim_accounts_for_purge(s, self._config.accounts_per_cycle)
         )
         purged = 0
         failed = 0
         cancel_failed = 0
+        cancel_broken = 0
         for owner_id in owners:
             try:
                 outcome = self._purge_account(owner_id)
@@ -322,14 +334,18 @@ class AccountJobs:
                 _log_purge_failure(owner_id, error)
                 failed += 1
                 continue
-            if outcome == _Purge.DONE:
+            if outcome is _Purge.DONE:
                 purged += 1
-            elif outcome == _Purge.CANCEL_FAILED:
+            elif outcome is _Purge.CANCEL_CONTENDED:
                 cancel_failed += 1
+            elif outcome is _Purge.CANCEL_FAILED:
+                cancel_failed += 1
+                cancel_broken += 1
         return {
             "accounts_purged": purged,
             ACCOUNTS_PURGE_FAILED: failed,
             ACCOUNTS_CANCEL_FAILED: cancel_failed,
+            ACCOUNT_STEPS_FAILED: int(failed > 0 or cancel_broken > 0),
         }
 
     def _purge_account(self, owner_id: UUID) -> _Purge:
@@ -355,7 +371,7 @@ class AccountJobs:
             if is_connection_error(error):
                 raise
             _log_purge_failure(owner_id, error, message="purga: cancelamento falhou")
-            return _Purge.CANCEL_FAILED
+            return _Purge.CANCEL_CONTENDED if is_lock_contention(error) else _Purge.CANCEL_FAILED
         return _Purge.PENDING
 
     def _in_transaction[T](self, work: Callable[[Session], T]) -> T:
@@ -368,6 +384,9 @@ class _Purge(Enum):
 
     DONE = auto()
     PENDING = auto()
+    # O cancelamento desistiu da Run que o worker segura (55P03 ou 57014): fora do alerta.
+    CANCEL_CONTENDED = auto()
+    # O cancelamento falhou por outro motivo (permissão, bug, storage): põe a volta no alerta.
     CANCEL_FAILED = auto()
 
 

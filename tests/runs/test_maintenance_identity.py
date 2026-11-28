@@ -60,6 +60,8 @@ pytestmark = pytest.mark.integration
 QUERY_CANCELED = "57014"
 # Trava que o worker segura além do `lock_timeout` da conexão.
 LOCK_NOT_AVAILABLE = "55P03"
+# Falha que não é disputa com o worker: o papel sem a permissão.
+INSUFFICIENT_PRIVILEGE = "42501"
 # Curto para o teste não esperar os 2 s do `db_lock_timeout_ms` padrão.
 LOCK_TIMEOUT_MS = 100
 MAINTENANCE_LOG = "goblinshift.maintenance"
@@ -566,6 +568,37 @@ def test_cancelamento_falho_na_purga_conta_e_fica_no_log_sem_por_a_volta_no_aler
         "error_type": "OperationalError",
         "sqlstate": QUERY_CANCELED,
     }
+
+
+def insufficient_privilege() -> Exception:
+    driver_error = psycopg_errors.lookup(INSUFFICIENT_PRIVILEGE)("permission denied for table run")
+    return DBAPIError.instance("UPDATE run", {}, driver_error, psycopg.Error)
+
+
+@pytest.mark.parametrize(
+    "error",
+    [RuntimeError("bug no cancelamento"), insufficient_privilege()],
+    ids=["bug", "sem-permissao"],
+)
+def test_cancelamento_falho_sem_disputa_de_trava_poe_a_volta_no_alerta(
+    error: Exception,
+    factory: sessionmaker[Session],
+    storage: FileStorage,
+    maintenance: Maintenance,
+) -> None:
+    """#442: só a disputa com o worker (55P03, 57014) fica fora do alerta. Um bug ou um `42501`
+    no cancelamento conta em `accounts_cancel_failed` e também em `account_steps_failed`."""
+    owner = create_user(factory, "ana")
+    queue_run(factory, storage, owner)
+    request_deletion(factory, owner)
+
+    def broken(_owner_id: uuid.UUID) -> object:
+        raise error
+
+    maintenance.run_cycle()
+    counts = AccountJobs(factory, cancel_active_run=broken).run_cycle()
+
+    assert (counts["accounts_cancel_failed"], counts["account_steps_failed"]) == (1, 1)
 
 
 def test_cancelamento_falho_na_purga_tenta_de_novo_no_ciclo_seguinte(
