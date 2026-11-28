@@ -253,7 +253,7 @@ rate_limits() {
   echo "Os timeouts das specs são só o sintoma. Caminhos e origem (upstream vazio: limit_req do Nginx):" >&2
   grep '"status":429' "$log" |
     sed -E 's/.*"path":"([^"]*)".*"upstream_status":"([^"]*)".*/\1 upstream=\2/' |
-    sort | uniq -c | sort -rn | head -20 >&2
+    sort | uniq -c | sort -rn | sed -n 1,20p >&2
   return 1
 }
 
