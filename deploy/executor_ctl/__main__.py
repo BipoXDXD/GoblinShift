@@ -95,15 +95,45 @@ def _work_area_ready(work_area: Path, read_mountinfo: Callable[[], str]) -> bool
     return True
 
 
-def _io_device_ready(config: Config) -> bool:
-    # Com teto e sem nó utilizável, todo start falharia no Docker: melhor não subir (D13).
+def io_device_problem(config: Config) -> str | None:
+    """Por que o teto não cabe neste host, ou None se não há teto ou o nó serve no Docker.
+
+    O caminho do bloco não está na configuração: `disk_throttle` tira o nó real do `st_dev`
+    da área. `PrivateDevices` esconde `/dev/block`; a unit o monta só para leitura.
+    """
+    if config.io_limits is None:
+        return None
     try:
         disk_throttle(config.work_area, config.io_limits)
-    except UnusableDiskDeviceError as error:
+    except (UnusableDiskDeviceError, OSError) as error:
+        return str(error)
+    return None
+
+
+def _io_device_ready(config: Config) -> bool:
+    # Com teto e sem nó utilizável, todo start falharia no Docker: melhor não subir (D13).
+    if config.io_limits is None:
+        _log.warning(
+            "executor sem teto de I/O",
+            extra={"detail": "io_limits desligado: um executor pode saturar o disco da área"},
+        )
+        return True
+    problem = io_device_problem(config)
+    if problem is not None:
         _log.error(
-            "dispositivo da área sem nó utilizável para o teto de I/O", extra={"detail": str(error)}
+            "dispositivo da área sem nó utilizável para o teto de I/O", extra={"detail": problem}
         )
         return False
+    limits = config.io_limits
+    _log.info(
+        "teto de I/O da área",
+        extra={
+            "detail": (
+                f"read_bps={limits.read_bps} write_bps={limits.write_bps} "
+                f"read_iops={limits.read_iops} write_iops={limits.write_iops}"
+            )
+        },
+    )
     return True
 
 

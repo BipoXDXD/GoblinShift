@@ -4,7 +4,11 @@
 #
 # Executor (fatia 4): o worker e a manutenção falam com o executor-ctl do host pelo socket em
 # /run/goblinshift (grupo gs-exec, GID 61001) e preparam a área de trabalho no filesystem de
-# tamanho fixo /srv/goblinshift/exec-work. Nenhum serviço monta o socket do Docker. A imagem do
+# tamanho fixo /srv/goblinshift/exec-work. Nenhum serviço monta o socket do Docker. O teto de
+# I/O do container gs-exec não cabe neste arquivo: ele não é um serviço daqui, e o nó de bloco
+# é do host (o ctl resolve /dev/block/<major>:<minor> até /dev/loopN na subida). Sai de
+# io_limits em /etc/goblinshift/executor-ctl.json: sem a chave vale o teto sugerido; false
+# desliga de propósito (deploy/executor-ctl/README.md). A imagem do
 # executor (por digest) é a mesma para a API, que a fixa na Run; na produção, quem a define é a
 # release do Coolify (deploy/coolify/release/receiver.py).
 # Sem o ambiente, a aplicação cairia no padrão `development` e pularia as validações de produção

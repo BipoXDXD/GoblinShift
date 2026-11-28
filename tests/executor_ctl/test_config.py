@@ -7,7 +7,7 @@ from typing import Any
 import pytest
 
 from executor_ctl.config import Config, ConfigError, load_config
-from executor_ctl.profile import IoLimits
+from executor_ctl.profile import SUGGESTED_IO_LIMITS, IoLimits
 
 pytestmark = [pytest.mark.host_python, pytest.mark.usefixtures("synthetic_policy_metadata")]
 
@@ -38,6 +38,7 @@ def test_configuracao_valida_vira_config_com_montagem_exigida(tmp_path: Path) ->
         runtime="runsc",
         images_file=Path("/var/lib/coolify-release/goblinshift/executor-images.json"),
         require_mount=True,
+        io_limits=SUGGESTED_IO_LIMITS,
     )
 
 
@@ -188,8 +189,25 @@ def test_config_por_symlink_e_recusada(tmp_path: Path) -> None:
 IO_LIMITS = {"read_bps": 104857600, "write_bps": 52428800, "read_iops": 2000, "write_iops": 1000}
 
 
-def test_sem_io_limits_a_config_fica_sem_teto(tmp_path: Path) -> None:
-    assert load_config(write_config(tmp_path, VALID)).io_limits is None
+def test_io_limits_ausente_recebe_o_teto_sugerido(tmp_path: Path) -> None:
+    # Arquivo antigo, sem a chave, não pode subir ilimitado. Os números são os do README.
+    config = load_config(write_config(tmp_path, VALID))
+
+    assert config.io_limits == SUGGESTED_IO_LIMITS
+    assert config.io_limits == IoLimits(
+        read_bps=104857600, write_bps=52428800, read_iops=2000, write_iops=1000
+    )
+
+
+def test_teto_sugerido_passa_da_sonda_de_6_gib_em_900_s() -> None:
+    # A sonda escreve 6 GiB com prazo de 900 s. No limite exato o prazo estoura.
+    assert SUGGESTED_IO_LIMITS.write_bps * 900 > 6 * 1024**3
+
+
+def test_io_limits_false_desliga_o_teto(tmp_path: Path) -> None:
+    config = load_config(write_config(tmp_path, {**VALID, "io_limits": False}))
+
+    assert config.io_limits is None
 
 
 def test_io_limits_valido_vira_os_quatro_tetos(tmp_path: Path) -> None:
@@ -212,6 +230,7 @@ def test_io_limits_valido_vira_os_quatro_tetos(tmp_path: Path) -> None:
         {**IO_LIMITS, "read_latency": 1},
         [104857600, 52428800, 2000, 1000],
         None,
+        True,
     ],
     ids=[
         "zero",
@@ -223,6 +242,7 @@ def test_io_limits_valido_vira_os_quatro_tetos(tmp_path: Path) -> None:
         "chave-desconhecida",
         "lista",
         "nulo",
+        "true",
     ],
 )
 def test_io_limits_com_valor_zero_ou_negativo_e_recusado(tmp_path: Path, io_limits: object) -> None:

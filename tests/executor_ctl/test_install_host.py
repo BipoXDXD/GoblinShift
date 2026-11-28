@@ -28,8 +28,10 @@ CONFIG_CONTENT = json.dumps(
         "work_area": "/srv/goblinshift/exec-work",
         "runtime": "runsc",
         "images_file": POLICY,
-        # O container não tem o filesystem da área: o preflight não confere a montagem.
+        # O container não tem o filesystem da área nem o loop dela: sem montagem exigida e
+        # sem teto de I/O. Com o teto ligado o preflight recusaria o nó de bloco.
         "require_mount": False,
+        "io_limits": False,
     }
 )
 

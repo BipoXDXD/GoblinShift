@@ -108,6 +108,8 @@ write_executor_policy() {
   sudo install -d -m 755 -o root -g root /etc/goblinshift /var/lib/coolify-release "$images_dir"
   printf '{"allowed": ["%s"]}\n' "$image" | sudo tee "$images_dir/executor-images.json" >/dev/null
   sudo chmod 600 "$images_dir/executor-images.json"
+  # Os mesmos números de SUGGESTED_IO_LIMITS. O loop da área resolve /dev/loopN na subida;
+  # o caminho do bloco não entra neste JSON.
   sudo tee /etc/goblinshift/executor-ctl.json >/dev/null <<EOF
 {
   "socket": "/run/goblinshift/executor-ctl.sock",
@@ -115,7 +117,8 @@ write_executor_policy() {
   "socket_group": "gs-ctl",
   "work_area": "$WORK_ROOT/exec-work",
   "runtime": "$RUNSC",
-  "images_file": "$images_dir/executor-images.json"
+  "images_file": "$images_dir/executor-images.json",
+  "io_limits": {"read_bps": 104857600, "write_bps": 52428800, "read_iops": 2000, "write_iops": 1000}
 }
 EOF
 }

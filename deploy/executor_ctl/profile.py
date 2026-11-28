@@ -47,6 +47,18 @@ class IoLimits:
     write_iops: int
 
 
+# Ponto de partida quando o arquivo omite `io_limits` (deploy/executor-ctl/README.md). Não é a
+# vazão medida do host: o operador troca pelos números medidos, ou grava false para desligar.
+# write_bps fica acima do piso da sonda de aceitação (6 GiB em 900 s). O nó do disco não entra
+# aqui: sai do st_dev da área na hora do start.
+SUGGESTED_IO_LIMITS = IoLimits(
+    read_bps=100 * 1024 * 1024,
+    write_bps=50 * 1024 * 1024,
+    read_iops=2000,
+    write_iops=1000,
+)
+
+
 @dataclass(frozen=True)
 class DiskThrottle:
     """O teto e o dispositivo de bloco em que o Docker o aplica (o loop device da área)."""

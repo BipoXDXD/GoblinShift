@@ -924,6 +924,7 @@ Chaves são enviadas em `Authorization: Bearer`, nunca na URL. API key não é I
 
 **Disco com limite efetivo.** O Docker só aplica `--storage-opt size` em XFS com `pquota`, e um tmpfs com teto consumiria a RAM do próprio executor. Por isso a área de trabalho (temporários + saídas) é um filesystem ext4 com o tamanho fixado em 1.7, criado como imagem e montado por loop no host em `/srv/goblinshift/exec-work`.
 - Como só existe uma tentativa física por vez, o filesystem inteiro é a cota da tentativa: encher o disco falha com `ENOSPC` dentro do sandbox, sem afetar banco, storage ou sistema.
+- A cota de 6 GiB não limita a vazão. `io_limits` no `executor-ctl` limita o I/O do container no disco da área (o mesmo do banco). Sem a chave vale o teto sugerido; `false` desliga de propósito. O nó de bloco não entra na configuração: o ctl resolve `/dev/block/<major>:<minor>` até o nó real na subida.
 - O `executor-ctl` recusa `start` se a área não estiver vazia; ela só é limpa depois de a coleta ser persistida (3.4).
 - Dentro do container, `RLIMIT_FSIZE` limita o tamanho de cada arquivo.
 
