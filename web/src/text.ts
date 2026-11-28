@@ -433,6 +433,28 @@ export const TEXT = {
       alreadyFinished: "A execução já tinha terminado; não havia o que cancelar.",
     },
     backToWorkbench: (recipe: string) => `Bancada da ${recipe}`,
+    // Aviso de término com a aba escondida (D3); a cancelada não avisa: foi a pessoa que cancelou.
+    completion: {
+      title: {
+        succeeded: "✓ Concluída",
+        succeeded_with_warnings: "! Concluída com avisos",
+        failed: "✕ Falhou",
+      },
+      toggleOff: "Avisar quando terminar",
+      toggleOn: "Aviso ligado",
+      blocked:
+        "O navegador bloqueou os avisos deste site. O título da aba ainda muda quando a execução terminar.",
+      // Aparece na tela bloqueada: o corpo nunca leva nome de arquivo.
+      notification: {
+        title: {
+          succeeded: "Execução concluída",
+          succeeded_with_warnings: "Execução concluída com avisos",
+          failed: "Execução falhou",
+        },
+        body: (recipe: string, count: number) =>
+          `${recipe} · ${String(count)} ${count === 1 ? "arquivo" : "arquivos"}`,
+      },
+    },
     flavor: {
       queued: "As goblins pegam este lote assim que uma bancada vagar.",
       succeeded: "Pronto! As goblins terminaram o lote.",

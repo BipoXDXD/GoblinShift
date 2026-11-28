@@ -13,6 +13,7 @@ import {
   RUN_ID,
   screenRequests,
 } from "../test/fakeApi";
+import { installFakeNotification } from "../test/fakeNotification";
 import { expectHeadingFocused } from "../test/focus";
 import { currentUrl, renderRoutes } from "../test/renderRoutes";
 import { TEXT } from "../text";
@@ -498,6 +499,36 @@ describe("Execução: falha do polling sem anúncio repetido", () => {
       }
     },
   );
+
+  it("o Avisar quando terminar fica ao lado do Cancelar e some no término", async () => {
+    installFakeNotification("default");
+    const { queryClient } = setup(
+      inSequence(running, () => jsonResponse(runBody({ status: "succeeded" }))),
+    );
+    expect(await screen.findByRole("button", { name: "Cancelar execução" })).toBeVisible();
+    expect(screen.getByRole("button", { name: "Avisar quando terminar" })).toBeVisible();
+
+    await nextPoll(queryClient);
+
+    expect(await screen.findByText("Concluída")).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Avisar quando terminar" })).toBeNull();
+  });
+
+  it("o Avisar quando terminar que some com o foco devolve o foco ao título", async () => {
+    installFakeNotification("default");
+    const { queryClient } = setup(
+      inSequence(running, () => jsonResponse(runBody({ status: "succeeded" }))),
+    );
+    const toggle = await screen.findByRole("button", { name: "Avisar quando terminar" });
+    act(() => {
+      toggle.focus();
+    });
+
+    await nextPoll(queryClient);
+
+    expect(await screen.findByText("Concluída")).toBeInTheDocument();
+    await expectHeadingFocused("Execução");
+  });
 
   it("com o convite na tela, o Cancelar some e os dados já carregados ficam", async () => {
     const { queryClient } = setup(
