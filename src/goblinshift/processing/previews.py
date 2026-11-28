@@ -4,13 +4,27 @@ São opcionais: a receita guarda os bytes em memória enquanto processa e os gra
 o conteúdo, só enquanto cabem nos tetos de 1.7 (220 arquivos e 480 MiB somados) e no teto do
 formato, que a coleta do worker também confere. O conteúdo nunca perde espaço para um preview, e
 faltar espaço nunca falha a execução: o preview só não existe.
+
+O módulo também guarda o laço por item das receitas (`process_each`) e o relatório que grava e
+anexa os previews depois dele (`report_with_previews`).
 """
 
-from collections.abc import Iterable, Mapping, Sequence
+from collections.abc import Callable, Iterable, Mapping, Sequence
 from dataclasses import dataclass, replace
 from pathlib import PurePosixPath
 
-from goblinshift.processing.recipe import ItemOk, OutputDir, OutputGroup, OutputRole, Preview
+from goblinshift.processing.recipe import (
+    DetailValue,
+    InputFile,
+    ItemOk,
+    ItemRejected,
+    OutputDir,
+    OutputGroup,
+    OutputRole,
+    Preview,
+    Progress,
+    Report,
+)
 
 # Tetos por formato (2.2), pela extensão do nome: a amostra CSV e o mapa de páginas (JSON) têm no
 # máximo 64 KiB; o JPEG, 512 KiB. A coleta do worker recusa a execução acima deles.
@@ -30,6 +44,40 @@ class PendingPreview:
     of: str
     logical_name: str
     content: bytes
+
+
+# Processa uma entrada e acrescenta à lista os previews pendentes dela.
+type ProcessOne = Callable[[InputFile, list[PendingPreview]], ItemOk | ItemRejected]
+
+
+@dataclass(frozen=True)
+class Processed:
+    """Saída do laço por item: um item por entrada, na ordem, e os previews ainda não gravados."""
+
+    items: list[ItemOk | ItemRejected]
+    pending: list[PendingPreview]
+
+
+def process_each(
+    inputs: Sequence[InputFile], process_one: ProcessOne, progress: Progress
+) -> Processed:
+    """Laço por item das receitas (CSV, Image Forge, Media Mill): processa cada entrada na ordem e
+    avisa o progresso logo depois dela. A exceção de um item sobe como veio, sem progresso dele nem
+    preview gravado; o teto de entradas fica com cada receita, antes do laço."""
+    items: list[ItemOk | ItemRejected] = []
+    pending: list[PendingPreview] = []
+    for source in inputs:
+        items.append(process_one(source, pending))
+        progress.item_done(source.position)
+    return Processed(items, pending)
+
+
+def report_with_previews(
+    processed: Processed, out: OutputDir, *, details: Mapping[str, DetailValue] | None = None
+) -> Report:
+    """Grava os previews pendentes depois de todo o conteúdo e os anexa aos itens por posição."""
+    items = attach_previews(processed.items, write_previews(out, processed.pending))
+    return Report(items, details=details or {})
 
 
 def write_previews(

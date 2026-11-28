@@ -8,7 +8,9 @@ from pathlib import Path
 import pytest
 
 from goblinshift.processing.csv_janitor import FormulaGuard, Limits, Params
+from goblinshift.processing.csv_janitor.janitor import clean_table
 from goblinshift.processing.csv_janitor.recipe import MAX_TABLES, RECIPE_ID, CsvJanitorV1
+from goblinshift.processing.csv_janitor.results import TableCleaned, TableRejected
 from goblinshift.processing.output_dir import FileSystemOutputDir
 from goblinshift.processing.recipe import (
     InputContractError,
@@ -297,3 +299,52 @@ def test_tabela_que_cresce_alem_do_limite_na_saida_vira_item_rejeitado(work: Wor
     assert rejected.code == "FIELD_LIMIT_EXCEEDED"
     assert isinstance(ok, ItemOk)
     assert work.output_names() == ["ok.csv"]
+
+
+def test_previews_vem_depois_de_todas_as_saidas(work: Workspace) -> None:
+    work.add("a.csv", VALID)
+    work.add("b.csv", VALID)
+    out = FileSystemOutputDir(work.out_dir)
+
+    CsvJanitorV1().run(Params(), work.inputs, out, work.progress)
+
+    assert [name for name, _role in out.created] == [
+        "a.csv",
+        "b.csv",
+        "previews/a.csv",
+        "previews/b.csv",
+    ]
+
+
+def test_erro_numa_tabela_no_meio_do_lote_sobe_sem_progresso_nem_preview(
+    work: Workspace, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # A primeira tabela sai inteira (conteúdo gravado e preview pendente); a segunda levanta.
+    boom = RuntimeError("falha inesperada na segunda tabela")
+    contents = {name: f"nome\r\n{name}\r\n" for name in ("a", "b", "c")}
+    calls: list[str] = []
+
+    def clean_table_that_fails_second(
+        data: bytes, params: Params, limits: Limits
+    ) -> TableCleaned | TableRejected:
+        name = next(name for name, content in contents.items() if content.encode() == data)
+        calls.append(name)
+        if name == "b":
+            raise boom
+        return clean_table(data, params, limits)
+
+    monkeypatch.setattr(
+        "goblinshift.processing.csv_janitor.recipe.clean_table", clean_table_that_fails_second
+    )
+    for name, content in contents.items():
+        work.add(f"{name}.csv", content)
+    out = FileSystemOutputDir(work.out_dir)
+
+    with pytest.raises(RuntimeError) as raised:
+        CsvJanitorV1().run(Params(), work.inputs, out, work.progress)
+
+    assert raised.value is boom
+    assert calls == ["a", "b"]
+    assert work.progress.done == [0]
+    assert [name for name, _role in out.created] == ["a.csv"]
+    assert not (work.out_dir / "previews").exists()

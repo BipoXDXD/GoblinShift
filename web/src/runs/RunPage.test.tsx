@@ -14,11 +14,13 @@ import {
   screenRequests,
 } from "../test/fakeApi";
 import { expectHeadingFocused } from "../test/focus";
-import { renderRoutes } from "../test/renderRoutes";
+import { currentUrl, renderRoutes } from "../test/renderRoutes";
+import { TEXT } from "../text";
 
 await preloadRoutes(`/execucoes/${RUN_ID}`, "/termos");
 
 const ARTIFACT_ID = "7d3c2a1e-0000-4000-8000-0000000000aa";
+const PACKAGE_ID = "7d3c2a1e-0000-4000-8000-0000000000ab";
 
 const publishedResults = {
   published: true,
@@ -97,7 +99,6 @@ describe("Execução", () => {
 
     const link = await screen.findByRole("link", { name: "Baixar clientes.csv" });
     expect(link).toHaveAttribute("href", `/api/v1/artifacts/${ARTIFACT_ID}/download`);
-    expect(link).toHaveAttribute("download", "clientes.csv");
     expect(link).toHaveClass("min-h-11");
     const results = screen.getByRole("region", { name: "Resultados" });
     expect(within(results).getByText(/arquivo processado/)).toBeInTheDocument();
@@ -126,7 +127,7 @@ describe("Execução", () => {
       await screen.findByRole("link", {
         name: "Baixar resultado.zip (pacote com todos os arquivos)",
       }),
-    ).toHaveAttribute("download", "resultado.zip");
+    ).toBeVisible();
   });
 
   it("concluída sem arquivos publicados mostra o estado vazio", async () => {
@@ -544,6 +545,112 @@ describe("Execução: falha do polling sem anúncio repetido", () => {
   });
 });
 
+describe("falha do download que volta à tela", () => {
+  function setupSucceeded(path: string) {
+    return setup(
+      () => jsonResponse(runBody({ status: "succeeded" })),
+      () => jsonResponse(publishedResults),
+      path,
+    );
+  }
+
+  it.each([
+    ["RATE_LIMITED", TEXT.failure.problems.RATE_LIMITED],
+    ["GONE", TEXT.failure.problems.GONE],
+  ])("com ?falha=%s mostra a falha do download no texto do catálogo", async (code, reason) => {
+    setupSucceeded(`/execucoes/${RUN_ID}?falha=${code}`);
+
+    const results = await screen.findByRole("region", { name: "Resultados" });
+    expect(await within(results).findByRole("alert")).toHaveTextContent(
+      TEXT.run.results.downloadFailed(reason),
+    );
+  });
+
+  it("com ?falha=AUTHENTICATION_REQUIRED mostra o convite para entrar", async () => {
+    setupSucceeded(`/execucoes/${RUN_ID}?falha=AUTHENTICATION_REQUIRED`);
+
+    const results = await screen.findByRole("region", { name: "Resultados" });
+    expect(
+      await within(results).findByRole("heading", { level: 3, name: "Entre para continuar" }),
+    ).toBeVisible();
+    expect(screen.queryByRole("alert")).toBeNull();
+  });
+
+  it("com ?falha=TERMS_NOT_ACCEPTED mostra o caminho para aceitar", async () => {
+    setupSucceeded(`/execucoes/${RUN_ID}?falha=TERMS_NOT_ACCEPTED`);
+
+    const results = await screen.findByRole("region", { name: "Resultados" });
+    expect(
+      await within(results).findByRole("heading", { level: 3, name: TEXT.terms.requiredTitle }),
+    ).toBeVisible();
+    expect(within(results).getByRole("link", { name: TEXT.terms.goToAccept })).toBeVisible();
+    expect(screen.queryByRole("alert")).toBeNull();
+  });
+
+  it("ignora ?falha= fora do catálogo", async () => {
+    setupSucceeded(`/execucoes/${RUN_ID}?falha=gone`);
+
+    expect(await screen.findByRole("link", { name: "Baixar clientes.csv" })).toBeVisible();
+    expect(screen.queryByRole("alert")).toBeNull();
+  });
+
+  it("tira ?falha= da URL e mantém o aviso", async () => {
+    const { router } = setupSucceeded(`/execucoes/${RUN_ID}?falha=GONE`);
+
+    expect(await screen.findByRole("alert")).toBeVisible();
+    expect(currentUrl(router)).toBe(`/execucoes/${RUN_ID}`);
+  });
+
+  it("o aviso da falha some ao clicar em Baixar", async () => {
+    setupSucceeded(`/execucoes/${RUN_ID}?falha=GONE`);
+
+    await screen.findByRole("alert");
+    // O jsdom não navega: o clique só precisa chegar ao React, sem tentar sair da página.
+    const blockNavigation = (event: Event) => {
+      event.preventDefault();
+    };
+    document.addEventListener("click", blockNavigation);
+    try {
+      fireEvent.click(screen.getByRole("link", { name: "Baixar clientes.csv" }));
+    } finally {
+      document.removeEventListener("click", blockNavigation);
+    }
+    expect(screen.queryByRole("alert")).toBeNull();
+  });
+
+  it("os links de download navegam sem o atributo download", async () => {
+    setup(
+      () => jsonResponse(runBody({ status: "succeeded" })),
+      () =>
+        jsonResponse({
+          ...publishedResults,
+          artifacts: [
+            {
+              artifact_id: PACKAGE_ID,
+              logical_name: "pacote",
+              role: "package",
+              file_name: "resultado.zip",
+              availability: "available",
+              source_artifact_id: null,
+            },
+            ...publishedResults.artifacts,
+          ],
+        }),
+    );
+
+    // O `attachment` da API decide o nome, e a navegação que falha volta com `?falha=`.
+    const links = await screen.findAllByRole("link", { name: /^Baixar / });
+    expect(links.map((link) => link.hasAttribute("download"))).toEqual([false, false]);
+  });
+
+  it("não tem violações do axe com o aviso", async () => {
+    const { container } = setupSucceeded(`/execucoes/${RUN_ID}?falha=GONE`);
+
+    await screen.findByRole("alert");
+    expect(await axeViolations(container)).toEqual([]);
+  });
+});
+
 describe("Execução do Media Mill: miniaturas pelo preview genérico", () => {
   const THUMB_10 = "7d3c2a1e-0000-4000-8000-0000000000b1";
   const THUMB_90 = "7d3c2a1e-0000-4000-8000-0000000000b2";
@@ -768,6 +875,60 @@ describe("pré-visualização dos resultados", () => {
         .map((th) => th.textContent),
     ).toEqual(["nome", "email"]);
     expect(within(table).getByRole("cell", { name: "ana@example.com" })).toBeInTheDocument();
+  });
+
+  it("CSV: rotula as colunas sem nome do cabeçalho da prévia", async () => {
+    setupPreview({ fileName: "clientes.csv", previewName: "clientes.csv" }, () =>
+      bytes("nome,, \nAna,1,2,extra\n"),
+    );
+
+    const table = await screen.findByRole("table", { name: "Amostra de clientes.csv: 1 registro" });
+    expect(
+      within(table)
+        .getAllByRole("columnheader")
+        .map((th) => th.textContent),
+    ).toEqual(["nome", "Coluna 2", "Coluna 3", "Coluna 4"]);
+    expect(within(table).getByRole("cell", { name: "extra" })).toBeInTheDocument();
+    // `empty-table-header` é best-practice: o axe do navegador (contrast.spec.ts) roda só as
+    // regras WCAG e não o vê; aqui o axe roda as regras padrão.
+    expect(await axeViolations(table)).toEqual([]);
+  });
+
+  it("CSV: cabeçalho vazio rotula todas as colunas pela posição", async () => {
+    setupPreview({ fileName: "clientes.csv", previewName: "clientes.csv" }, () => bytes("\n1,2\n"));
+
+    const table = await screen.findByRole("table", { name: "Amostra de clientes.csv: 1 registro" });
+    expect(
+      within(table)
+        .getAllByRole("columnheader")
+        .map((th) => th.textContent),
+    ).toEqual(["Coluna 1", "Coluna 2"]);
+  });
+
+  it("CSV: o rótulo da coluna sem nome não repete um cabeçalho real", async () => {
+    setupPreview({ fileName: "clientes.csv", previewName: "clientes.csv" }, () =>
+      bytes("Coluna 2,,\nAna,1,2\n"),
+    );
+
+    const table = await screen.findByRole("table", { name: "Amostra de clientes.csv: 1 registro" });
+    expect(
+      within(table)
+        .getAllByRole("columnheader")
+        .map((th) => th.textContent),
+    ).toEqual(["Coluna 2", "Coluna 2 (2)", "Coluna 3"]);
+  });
+
+  it("CSV: o sufixo do rótulo também não repete um cabeçalho real", async () => {
+    setupPreview({ fileName: "clientes.csv", previewName: "clientes.csv" }, () =>
+      bytes("Coluna 2 (2),,Coluna 2\nAna,1,2\n"),
+    );
+
+    const table = await screen.findByRole("table", { name: "Amostra de clientes.csv: 1 registro" });
+    expect(
+      within(table)
+        .getAllByRole("columnheader")
+        .map((th) => th.textContent),
+    ).toEqual(["Coluna 2 (2)", "Coluna 2 (3)", "Coluna 2"]);
   });
 
   it("CSV: a caixa rolável da amostra recebe foco e tem o nome da legenda", async () => {

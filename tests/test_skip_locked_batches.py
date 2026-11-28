@@ -71,6 +71,11 @@ BATCHES: dict[str, tuple[Callable[[Session], object], str]] = {
         lambda s: delete_ended_web_sessions(s, NOW, LIMIT),
         "DELETE FROM web_session",
     ),
+    "identity.channel_request_window": (
+        lambda s: delete_expired_windows(s, NOW, LIMIT),
+        "DELETE FROM channel_request_window",
+    ),
+    # A tabela sem canal da 0007, até o PR que a apaga (preflight R4).
     "identity.request_window": (
         lambda s: delete_expired_windows(s, NOW, LIMIT),
         "DELETE FROM request_window",

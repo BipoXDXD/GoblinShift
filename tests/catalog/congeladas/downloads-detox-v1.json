@@ -1,0 +1,62 @@
+{
+  "defaults": {
+    "deduplicate": true,
+    "group_by": "kind",
+    "name_mode": "preserve",
+    "name_prefix": "file"
+  },
+  "variant_schema": {
+    "properties": {
+      "parameters": {
+        "additionalProperties": false,
+        "properties": {
+          "deduplicate": {
+            "default": true,
+            "title": "Deduplicate",
+            "type": "boolean"
+          },
+          "group_by": {
+            "default": "kind",
+            "enum": [
+              "kind",
+              "none"
+            ],
+            "title": "GroupBy",
+            "type": "string"
+          },
+          "name_mode": {
+            "default": "preserve",
+            "enum": [
+              "preserve",
+              "indexed"
+            ],
+            "title": "NameMode",
+            "type": "string"
+          },
+          "name_prefix": {
+            "default": "file",
+            "maxLength": 40,
+            "minLength": 1,
+            "title": "Name Prefix",
+            "type": "string"
+          }
+        },
+        "title": "DownloadsDetoxV1Parameters",
+        "type": "object"
+      },
+      "recipe_id": {
+        "const": "downloads-detox"
+      },
+      "recipe_version": {
+        "const": 1
+      }
+    },
+    "required": [
+      "recipe_id",
+      "recipe_version",
+      "parameters"
+    ],
+    "title": "downloads-detox v1",
+    "type": "object"
+  }
+}

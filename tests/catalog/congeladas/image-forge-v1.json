@@ -1,0 +1,74 @@
+{
+  "defaults": {
+    "jpeg_background": "#FFFFFF",
+    "jpeg_quality": 85,
+    "make_thumbnails": false,
+    "max_height": 1600,
+    "max_width": 1600,
+    "output_format": "preserve"
+  },
+  "variant_schema": {
+    "properties": {
+      "parameters": {
+        "additionalProperties": false,
+        "properties": {
+          "jpeg_background": {
+            "default": "#FFFFFF",
+            "pattern": "^#[0-9A-Fa-f]{6}$",
+            "title": "Jpeg Background",
+            "type": "string"
+          },
+          "jpeg_quality": {
+            "default": 85,
+            "maximum": 95,
+            "minimum": 60,
+            "title": "Jpeg Quality",
+            "type": "integer"
+          },
+          "make_thumbnails": {
+            "default": false,
+            "title": "Make Thumbnails",
+            "type": "boolean"
+          },
+          "max_height": {
+            "default": 1600,
+            "maximum": 4096,
+            "minimum": 16,
+            "type": "integer"
+          },
+          "max_width": {
+            "default": 1600,
+            "maximum": 4096,
+            "minimum": 16,
+            "type": "integer"
+          },
+          "output_format": {
+            "default": "preserve",
+            "enum": [
+              "preserve",
+              "jpeg",
+              "png"
+            ],
+            "title": "OutputFormat",
+            "type": "string"
+          }
+        },
+        "title": "ImageForgeV1Parameters",
+        "type": "object"
+      },
+      "recipe_id": {
+        "const": "image-forge"
+      },
+      "recipe_version": {
+        "const": 1
+      }
+    },
+    "required": [
+      "recipe_id",
+      "recipe_version",
+      "parameters"
+    ],
+    "title": "image-forge v1",
+    "type": "object"
+  }
+}

@@ -2,8 +2,7 @@
 // página e fica no lugar sem WebGL acelerado, com movimento reduzido ou se a cena falhar; com GPU,
 // a cena chega depois do `load`, sem CDN, sem violar a CSP e com a entrada parando em até 5 s.
 // Trocar de goblin no seletor baixa só o GLB dela; mouse, setas e os botões mexem a vista.
-import AxeBuilder from "@axe-core/playwright";
-
+import { expectNoWcagViolations } from "../support/axe";
 import { E2E } from "../support/env";
 import {
   HERO,
@@ -24,7 +23,7 @@ import {
   prepareGpu,
 } from "../support/oficina3d";
 import { expectFitsDeviceWidth } from "../support/reflow";
-import { expect, test } from "../support/test";
+import { expect, test, THEMES, useTheme } from "../support/test";
 
 /** Celular estreito, abaixo do `sm` (640 px), onde os botões de passo viram grade 2×2. */
 const PHONE_360 = { width: 360, height: 740 };
@@ -504,26 +503,29 @@ test.describe("com GPU", () => {
     expect(await gpuMemory()).toEqual(withRubia);
   });
 
-  test("com a cena montada, o canvas fica fora do leitor de tela, o palco entra no Tab com nome, e o axe passa", async ({
-    page,
-  }) => {
-    await page.goto("/");
-    const hero = page.locator(HERO);
-    await expect(hero).toHaveAttribute("data-oficina-3d", "pronto", { timeout: SCENE_READY_MS });
+  // Nos dois temas, como as telas de contrast.spec.ts: a moldura e os controles da cena mudam de
+  // cor com o tema, e a cena montada só existe nesta fase.
+  for (const theme of THEMES) {
+    test(`com a cena montada, tema ${theme}: o canvas fica fora do leitor de tela, o palco entra no Tab com nome, e o axe passa`, async ({
+      page,
+    }) => {
+      await useTheme(page, theme);
+      await page.goto("/");
+      await expect(page.locator("html")).toHaveAttribute("data-theme", theme);
+      const hero = page.locator(HERO);
+      await expect(hero).toHaveAttribute("data-oficina-3d", "pronto", { timeout: SCENE_READY_MS });
 
-    const canvas = hero.locator("canvas");
-    await expect(canvas.locator("xpath=..")).toHaveAttribute("aria-hidden", "true");
-    expect(await canvas.evaluate((element) => element.tabIndex)).toBe(-1);
-    await expect(hero).toHaveAttribute("role", "application");
-    await expect(hero).toHaveAttribute("tabindex", "0");
-    await expect(hero).toHaveAccessibleName("Rúbia em 3D");
-    await expect(heroImage(page)).toBeAttached();
+      const canvas = hero.locator("canvas");
+      await expect(canvas.locator("xpath=..")).toHaveAttribute("aria-hidden", "true");
+      expect(await canvas.evaluate((element) => element.tabIndex)).toBe(-1);
+      await expect(hero).toHaveAttribute("role", "application");
+      await expect(hero).toHaveAttribute("tabindex", "0");
+      await expect(hero).toHaveAccessibleName("Rúbia em 3D");
+      await expect(heroImage(page)).toBeAttached();
 
-    const results = await new AxeBuilder({ page })
-      .withTags(["wcag2a", "wcag2aa", "wcag21a", "wcag21aa", "wcag22aa"])
-      .analyze();
-    expect(results.violations.map((violation) => violation.id)).toEqual([]);
-  });
+      await expectNoWcagViolations(page, `contrast-3d-${theme}`);
+    });
+  }
 
   test("se o modelo não vier, fica a imagem", async ({ page }) => {
     await page.route(/\.glb(\?|$)/, (route) => route.fulfill({ status: 404, body: "" }));
