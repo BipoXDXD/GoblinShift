@@ -15,6 +15,8 @@ pytestmark = pytest.mark.integration
 # O controlador renumera no merge (R1 do preflight): os testes citam só estas constantes.
 REVISION = "0033"
 PREVIOUS = "0032"
+# Abaixo da 0032, que cria os tetos: descer só até a 0032 deixaria os já validados pela 0033.
+BEFORE_CEILINGS = "0030"
 CHECKS = (
     ("capacity_pool", "capacity_pool_max_amount_ceiling_check"),
     ("account_quota", "account_quota_input_bytes_per_24h_ceiling_check"),
@@ -44,7 +46,8 @@ def validity(engine: Engine) -> list[bool | None]:
 
 
 def test_valida_os_tetos(db_settings: Settings, engine: Engine) -> None:
-    at_revision(db_settings, PREVIOUS)
+    at_revision(db_settings, BEFORE_CEILINGS)
+    run_migrations(db_settings, PREVIOUS)
     assert validity(engine) == [False, False]
 
     run_migrations(db_settings, REVISION)
