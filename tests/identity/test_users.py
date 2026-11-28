@@ -127,6 +127,39 @@ def test_login_atualiza_o_nome_de_exibicao(factory: sessionmaker[Session]) -> No
     assert account_row(factory, GITHUB)["display_name"] == "octocat-novo"
 
 
+@pytest.mark.parametrize(
+    ("values", "reason"),
+    [
+        pytest.param(
+            {"deletion_requested_at": NOW}, LoginRefused.DELETION_REQUESTED, id="exclusao-pedida"
+        ),
+        pytest.param(
+            {"status": "blocked", "awaiting_approval": False},
+            LoginRefused.BLOCKED,
+            id="bloqueada-por-abuso",
+        ),
+        pytest.param(
+            {"status": "blocked", "awaiting_approval": True},
+            LoginRefused.PENDING_APPROVAL,
+            id="pendente",
+        ),
+    ],
+)
+def test_login_de_conta_indisponivel_nao_muda_o_nome(
+    factory: sessionmaker[Session], values: dict[str, object], reason: LoginRefused
+) -> None:
+    user_id = active_account(factory, GITHUB)
+    set_account(factory, user_id, **values)
+    renamed = ExternalIdentity(GITHUB.issuer, GITHUB.subject, "nome-do-provedor")
+
+    result = resolve(factory, renamed, signup_open=True)
+
+    assert refused(result) is reason
+    assert isinstance(result, LoginRefusal)
+    assert result.account_id == user_id
+    assert account_row(factory, GITHUB)["display_name"] == "octocat"
+
+
 def test_pendente_que_tenta_de_novo_continua_pendente(factory: sessionmaker[Session]) -> None:
     resolve(factory, GOOGLE, signup_open=False)
 

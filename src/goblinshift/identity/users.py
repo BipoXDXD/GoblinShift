@@ -11,7 +11,7 @@ from datetime import datetime
 from enum import Enum, auto
 from uuid import UUID
 
-from sqlalchemy import select
+from sqlalchemy import and_, select
 from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.orm import Session
 
@@ -67,7 +67,17 @@ def resolve_login(
     "consultar e depois inserir": dois callbacks simultâneos da mesma identidade chegam à mesma
     linha. A conta nova nasce `active` só com o cadastro aberto (ADR 023); o cadastro aberto não
     reativa uma conta que já existe bloqueada.
+
+    O nome só é regravado em conta ativa e sem exclusão pedida: a conta recusada não grava dado do
+    provedor. Aí o `RETURNING` volta vazio, e as mesmas colunas são lidas da linha, que o
+    `ON CONFLICT` já travou nesta transação.
     """
+    columns = (
+        app_user.c.id,
+        app_user.c.status,
+        app_user.c.awaiting_approval,
+        app_user.c.deletion_requested_at,
+    )
     statement = (
         insert(app_user)
         .values(
@@ -81,15 +91,19 @@ def resolve_login(
         .on_conflict_do_update(
             index_elements=[app_user.c.issuer, app_user.c.subject],
             set_={"display_name": identity.display_name},
+            where=and_(
+                app_user.c.status == ACTIVE_STATUS, app_user.c.deletion_requested_at.is_(None)
+            ),
         )
-        .returning(
-            app_user.c.id,
-            app_user.c.status,
-            app_user.c.awaiting_approval,
-            app_user.c.deletion_requested_at,
-        )
+        .returning(*columns)
     )
-    account = session.execute(statement).one()
+    account = session.execute(statement).one_or_none()
+    if account is None:
+        account = session.execute(
+            select(*columns).where(
+                app_user.c.issuer == identity.issuer, app_user.c.subject == identity.subject
+            )
+        ).one()
     user_id: UUID = account.id
     if account.deletion_requested_at is not None:
         return LoginRefusal(user_id, LoginRefused.DELETION_REQUESTED)
