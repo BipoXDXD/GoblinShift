@@ -15,6 +15,7 @@ import { SiteNoticeBanner } from "../notice/SiteNoticeBanner";
 import { TEXT } from "../text";
 import { ThemeSwitcher } from "../theme/ThemeSwitcher";
 import { BrandLink } from "./BrandLink";
+import { ConnectionNotice } from "./ConnectionNotice";
 import { documentTitle, pageTitleOf } from "./pageTitle";
 import { acceptTermsPath, PATHS, signInPath, withoutTrailingSlash } from "./paths";
 
@@ -87,6 +88,7 @@ export function Layout({ now, notice }: LayoutProps): ReactElement {
           </div>
         </div>
       </header>
+      <ConnectionNotice />
       {/* Vem do bundle, não da rede: sai na primeira pintura, sem empurrar o conteúdo (CLS). */}
       <SiteNoticeBanner
         notice={notice}

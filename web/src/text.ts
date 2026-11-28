@@ -116,6 +116,13 @@ export const TEXT = {
     // para o leitor de tela, e o nome "Fechar aviso" contém o rótulo visível (WCAG 2.5.3).
     dismiss: { visible: "Fechar", screenReaderOnly: "aviso" },
   },
+  connection: {
+    // Texto pendente do OK do dono (#442, plano de front de 28/11).
+    offline: "Sem conexão.",
+    offlineDetail:
+      "A página continua quando a internet voltar. Envios interrompidos podem ser enviados de novo.",
+    back: "Conexão de volta.",
+  },
   home: {
     title: "Arquivos em lote, limpos pelas goblins da oficina.",
     lead: "Escolha uma receita para começar.",
