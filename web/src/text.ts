@@ -1077,6 +1077,7 @@ export const TEXT = {
   legal: {
     termsTitle: "Termos de Uso",
     privacyTitle: "Aviso de Privacidade",
+    accessibilityTitle: "Acessibilidade",
     outlineTitle: "Sumário",
     /** Legenda de tabela sem título acima: as próprias colunas dizem do que ela trata. */
     tableOfColumns: (columns: readonly string[]) => {

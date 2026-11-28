@@ -20,8 +20,8 @@ const NAV_LINK =
 /** Valor exato com que o servidor volta de um login recusado (auth_login.py). */
 const LOGIN_FAILED = "failed";
 /**
- * Telas abertas a quem ainda não aceitou os termos vigentes: ler e aceitar os textos, ver o estado
- * do serviço e, como na API (ADR 029), reduzir o próprio acesso pelo Acesso (sair, revogar chaves,
+ * Telas abertas a quem ainda não aceitou os termos vigentes: ler e aceitar os textos, ler a declaração de
+ * acessibilidade, ver o estado do serviço e, como na API (ADR 029), reduzir o próprio acesso pelo Acesso (sair, revogar chaves,
  * excluir a conta).
  */
 const TERMS_EXEMPT_PATHS: ReadonlySet<string> = new Set([
@@ -29,16 +29,18 @@ const TERMS_EXEMPT_PATHS: ReadonlySet<string> = new Set([
   PATHS.terms,
   PATHS.privacy,
   PATHS.credits,
+  PATHS.accessibility,
   PATHS.status,
   PATHS.access,
   PATHS.signIn,
   PATHS.accountDeleted,
 ]);
 
-/** Textos legais, créditos e o estado do serviço, disponíveis em toda tela. */
+/** Textos legais, acessibilidade, créditos e o estado do serviço, disponíveis em toda tela. */
 const FOOTER_LINKS = [
   { to: PATHS.terms, label: TEXT.legal.termsTitle },
   { to: PATHS.privacy, label: TEXT.legal.privacyTitle },
+  { to: PATHS.accessibility, label: TEXT.legal.accessibilityTitle },
   { to: PATHS.credits, label: T.creditsLink },
   { to: PATHS.status, label: TEXT.status.footerLink },
 ] as const;

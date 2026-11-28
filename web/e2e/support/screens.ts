@@ -384,6 +384,18 @@ export const SCREENS: readonly Screen[] = [
     },
   },
   {
+    name: "Acessibilidade",
+    open: async (page: Page): Promise<void> => {
+      await page.goto("/acessibilidade");
+      await expect(
+        page.getByRole("heading", {
+          level: 1,
+          name: "Declaração de Acessibilidade do GoblinShift",
+        }),
+      ).toBeVisible();
+    },
+  },
+  {
     name: "Estado: tudo normal",
     open: async (page: Page): Promise<void> => {
       await routeServiceStatus(page, {

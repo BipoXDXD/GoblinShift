@@ -21,9 +21,10 @@ export default defineConfig({
         ? []
         : [{ find: /^\.\/notice\.json$/, replacement: resolve(noticeFile) }],
   },
-  // Os textos legais vêm de docs/legal/ (fonte única, fora de web/); o servidor de dev só serve o
-  // que está na allowlist.
-  server: { fs: { allow: [".", "../docs/legal"] } },
+  // Os textos legais vêm de docs/legal/ e a declaração de acessibilidade de docs/ (fonte única,
+  // fora de web/); o servidor de dev só serve o que está na allowlist. Arquivo solto não serve: o
+  // Vite confere o id com o `?raw`, que só casa com pasta.
+  server: { fs: { allow: [".", "../docs"] } },
   build: {
     // Sem source map no bundle publicado: o fonte embutido vazaria comentários (ETS item 73).
     sourcemap: false,

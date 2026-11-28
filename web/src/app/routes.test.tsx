@@ -23,6 +23,7 @@ await preloadRoutes(
   "/termos",
   "/privacidade",
   "/creditos",
+  "/acessibilidade",
   "/estado",
 );
 
@@ -66,6 +67,7 @@ describe("título da aba e indexação", () => {
     ["/termos", "Termos de Uso · GoblinShift"],
     ["/privacidade", "Aviso de Privacidade · GoblinShift"],
     ["/creditos", "Créditos · GoblinShift"],
+    ["/acessibilidade", "Acessibilidade · GoblinShift"],
     ["/estado", "Estado do serviço · GoblinShift"],
     ["/termos/aceitar", "Aceite dos termos · GoblinShift"],
     ["/conta-excluida", "Exclusão pedida · GoblinShift"],

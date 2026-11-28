@@ -109,6 +109,14 @@ export function createRoutes({ uploadServices, now, notice }: AppServices): Rout
           },
         },
         {
+          path: PATHS.accessibility,
+          handle: titled(TEXT.legal.accessibilityTitle),
+          lazy: async () => {
+            const { AccessibilityPage } = await import("../legal/AccessibilityPage");
+            return { Component: AccessibilityPage };
+          },
+        },
+        {
           path: PATHS.credits,
           handle: titled(TEXT.credits.title),
           lazy: async () => {
