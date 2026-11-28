@@ -271,7 +271,7 @@ def _known_scopes(stored: Iterable[str]) -> frozenset[Scope]:
 # --- Fatia 6: conta e chaves pela sessão web --------------------------------------------------
 # Contrato fixado na Fase 0; os corpos são da Frente C.
 
-# Teto de chaves ativas por conta, garantido com a linha da conta travada (`FOR UPDATE`).
+# Teto de chaves ativas por conta, garantido com a linha da conta travada (`FOR NO KEY UPDATE`).
 MAX_ACTIVE_KEYS = 5
 # Teto de chaves guardadas (ativas, revogadas e vencidas) por conta, sob a mesma trava: sem ele,
 # emitir e revogar em laço enche a tabela, porque a revogada só sai `KEY_RETENTION` depois do fim.
@@ -380,9 +380,10 @@ def issue_key_for_session(
 ) -> IssuedKey:
     """Emite chave pela sessão web `session_id`, dentro dos dois tetos da conta.
 
-    A linha da conta fica travada (`FOR UPDATE`) da reconferência até o INSERT. A mesma trava
-    enfileira a emissão atrás de um bloqueio, pedido de exclusão ou `logout-all`
-    (`sessions.revoke_all_credentials`), que a recusam: conta inativa, ou sessão que não existe,
+    A linha da conta fica travada (`FOR NO KEY UPDATE`) da reconferência até o INSERT. A mesma
+    trava enfileira a emissão atrás de um bloqueio, pedido de exclusão ou `logout-all`
+    (`sessions.revoke_all_credentials`), que a recusam; o `FOR KEY SHARE` das FKs para a conta
+    (login, criação de Run, auditoria) não espera por ela: conta inativa, ou sessão que não existe,
     é de outra conta, foi revogada ou venceu, levantam `UnknownAccountError`. A `idem_key` e os
     tetos ficam em `_issue_locked`.
     """
@@ -393,7 +394,7 @@ def issue_key_for_session(
             app_user.c.status == ACTIVE_STATUS,
             app_user.c.deletion_requested_at.is_(None),
         )
-        .with_for_update()
+        .with_for_update(key_share=True)
     ).first()
     if account is None:
         raise UnknownAccountError(f"conta {owner_id} não existe ou não está ativa")

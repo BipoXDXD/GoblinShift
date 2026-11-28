@@ -8,9 +8,12 @@ regra já vale. As hipóteses:
 - (c) `authenticate_api_key` e `authenticate_session` divergem sobre status e exclusão;
 - (d) bloqueio concorrente com um login em andamento deixa uma sessão viva;
 - (e) `revoke_key` (por `public_id`, sem dono) alcançável fora da CLI do administrador;
-- (f) emissão com o Principal lido antes do `logout-all` sobrevive com chave ativa (#442, 49b).
+- (f) emissão com o Principal lido antes do `logout-all` sobrevive com chave ativa (#442, 49b);
+- (g) a trava da conta na emissão e no `logout-all` segura o login da mesma conta (#555).
 """
 
+import hashlib
+import secrets
 import threading
 import time
 from collections.abc import Callable
@@ -19,7 +22,7 @@ from pathlib import Path
 from uuid import UUID
 
 import pytest
-from sqlalchemy import func, select, text, update
+from sqlalchemy import func, insert, select, text, update
 from sqlalchemy.orm import Session, sessionmaker
 
 from goblinshift.identity import (
@@ -43,6 +46,7 @@ from goblinshift.identity.tables import api_key, app_user, web_session
 from goblinshift.platform.db import unit_of_work
 from tests.identity.support import HASHER, new_key, new_user, new_web_session
 from tests.lock_support import in_thread, wait_until_someone_waits_for_a_lock
+from tests.sql_capture import captured_sql
 
 pytestmark = pytest.mark.integration
 
@@ -361,3 +365,73 @@ def test_emissao_com_sessao_vencida_e_recusada(factory: sessionmaker[Session]) -
         _issue(factory, user_id, web, NOW + timedelta(minutes=30))
 
     assert _active_keys(factory, user_id) == 0
+
+
+# --- (g) trava da conta: FOR NO KEY UPDATE -----------------------------------------------------
+# A emissão e o `logout-all` se enfileiram pela linha da conta, mas não mudam a chave dela. Com
+# `FOR NO KEY UPDATE`, o `FOR KEY SHARE` das FKs (sessão nova no login, Run, auditoria) não espera.
+
+
+def _account_locks(statements: list[str]) -> list[str]:
+    return [sql for sql in statements if "FROM app_user" in sql and " FOR " in sql]
+
+
+def test_emissao_trava_a_conta_com_for_no_key_update(factory: sessionmaker[Session]) -> None:
+    user_id = new_user(factory)
+    web = new_web_session(factory, user_id, now=NOW)
+
+    with unit_of_work(factory) as session, captured_sql(session) as statements:
+        issue_key_for_session(
+            session,
+            owner_id=user_id,
+            session_id=web,
+            scopes=frozenset({Scope.RUNS_READ}),
+            days=30,
+            now=NOW,
+        )
+
+    [lock] = _account_locks(statements)
+    assert lock.endswith("FOR NO KEY UPDATE")
+
+
+def test_logout_all_trava_a_conta_com_for_no_key_update(factory: sessionmaker[Session]) -> None:
+    user_id = new_user(factory)
+
+    with unit_of_work(factory) as session, captured_sql(session) as statements:
+        revoke_all_credentials(session, user_id, NOW)
+
+    [lock] = _account_locks(statements)
+    assert lock.endswith("FOR NO KEY UPDATE")
+
+
+def test_logout_all_em_andamento_nao_segura_o_login_da_mesma_conta(
+    factory: sessionmaker[Session],
+) -> None:
+    user_id = new_user(factory)
+
+    with unit_of_work(factory) as logout:
+        revoke_all_credentials(logout, user_id, NOW)
+        # A FK da sessão nova pega `FOR KEY SHARE` na conta; com `FOR UPDATE` ela esperaria o
+        # `logout-all` e o `lock_timeout` estouraria.
+        with unit_of_work(factory) as login:
+            login.execute(text("SET LOCAL lock_timeout = '1s'"))
+            new_session = new_web_session_in(login, user_id)
+
+    assert new_session is not None
+
+
+def new_web_session_in(session: Session, user_id: UUID) -> UUID:
+    """Linha de sessão gravada direto, sem `start_session`: só a FK para a conta trava."""
+    session_id: UUID = session.execute(
+        insert(web_session)
+        .values(
+            user_id=user_id,
+            secret_hash=hashlib.sha256(secrets.token_bytes(32)).digest(),
+            authenticated_at=NOW,
+            last_seen_at=NOW,
+            idle_expires_at=NOW + timedelta(minutes=30),
+            absolute_expires_at=NOW + timedelta(hours=8),
+        )
+        .returning(web_session.c.id)
+    ).scalar_one()
+    return session_id

@@ -176,7 +176,7 @@ def session_still_valid(
     """A sessão existe, é da conta, não foi revogada e não venceu em `now`.
 
     Reconfere, na transação de quem chama, um Principal lido noutra transação. Só vale sob a trava
-    da conta (`FOR UPDATE` em `app_user`), a mesma de `revoke_all_credentials`: sem ela, um
+    da conta (`FOR NO KEY UPDATE` em `app_user`), a mesma de `revoke_all_credentials`: sem ela, um
     `logout-all` confirmado logo depois desta leitura não seria visto.
     """
     found = session.execute(
@@ -196,9 +196,12 @@ def revoke_all_credentials(session: Session, owner_id: UUID, now: datetime) -> N
 
     Trava a conta antes de revogar: a emissão de chave (`accounts.issue_key_for_session`) trava a
     mesma linha, então ou termina antes e a chave dela é revogada aqui, ou espera e encontra a
-    sessão já revogada.
+    sessão já revogada. A trava é `FOR NO KEY UPDATE`: as duas continuam se enfileirando, mas o
+    `FOR KEY SHARE` das FKs para a conta (login, criação de Run, auditoria) não espera por ela.
     """
-    session.execute(select(app_user.c.id).where(app_user.c.id == owner_id).with_for_update())
+    session.execute(
+        select(app_user.c.id).where(app_user.c.id == owner_id).with_for_update(key_share=True)
+    )
     session.execute(
         update(web_session)
         .where(web_session.c.user_id == owner_id, web_session.c.revoked_at.is_(None))
