@@ -1,7 +1,7 @@
 """Auditoria do `gs-admin`: quem agiu (`audit_event.actor`) e os eventos novos da CLI (#442, 50c).
 
 Revision ID: 0032
-Revises: 0030
+Revises: 0031
 Create Date: 2026-11-27 21:00:00.000000
 
 Lembrete (docs/GoblinShiftPlan.md, 3.8): expand/contract. A coluna nova é anulável e sem default:
@@ -42,7 +42,7 @@ import sqlalchemy as sa
 from alembic import op
 
 revision: str = "0032"
-down_revision: str | Sequence[str] | None = "0030"
+down_revision: str | Sequence[str] | None = "0031"
 branch_labels: str | Sequence[str] | None = None
 depends_on: str | Sequence[str] | None = None
 

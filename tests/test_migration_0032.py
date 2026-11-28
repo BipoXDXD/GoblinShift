@@ -25,7 +25,7 @@ pytestmark = pytest.mark.integration
 
 # O controlador renumera no merge (R1 do preflight): os testes citam só estas constantes.
 REVISION = "0032"
-PREVIOUS = "0030"
+PREVIOUS = "0031"
 NEW_TYPES = ("ACCOUNT_CREATED", "ACCOUNT_LOOKED_UP", "ACCOUNT_APPROVED")
 
 

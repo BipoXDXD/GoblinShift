@@ -16,7 +16,7 @@ pytestmark = pytest.mark.integration
 REVISION = "0033"
 PREVIOUS = "0032"
 # Abaixo da 0032, que cria os tetos: descer só até a 0032 deixaria os já validados pela 0033.
-BEFORE_CEILINGS = "0030"
+BEFORE_CEILINGS = "0031"
 CHECKS = (
     ("capacity_pool", "capacity_pool_max_amount_ceiling_check"),
     ("account_quota", "account_quota_input_bytes_per_24h_ceiling_check"),
