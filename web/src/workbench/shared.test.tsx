@@ -6,7 +6,8 @@ import { peekSharedNames, SHARE_TTL_MS } from "../share/inbox";
 import { appRoutes, preloadRoutes } from "../test/appRoutes";
 import { catalogHandler } from "../test/catalog";
 import { fakeApi, problemResponse, uploadIdFor, uploadIntentsHandler } from "../test/fakeApi";
-import { renderRoutes } from "../test/renderRoutes";
+import { fakeSampleFetch } from "../test/fakeSample";
+import { currentUrl, renderRoutes } from "../test/renderRoutes";
 import { fakeCacheStorage, seedShared } from "../test/shareInbox";
 
 await preloadRoutes("/bancada/csv-janitor");
@@ -25,7 +26,15 @@ function csv(name: string): File {
   return new File(["a,b\n1,2\n"], name, { type: "text/csv" });
 }
 
-function render(catalog: () => Response = catalogHandler()) {
+interface RenderOptions {
+  readonly path?: string;
+  readonly fetchSample?: typeof fetch;
+}
+
+function render(
+  catalog: () => Response = catalogHandler(),
+  { path = PATH, fetchSample }: RenderOptions = {},
+) {
   const deletions = Object.fromEntries(
     [1, 2].map((sequence) => [
       `DELETE /api/v1/uploads/${uploadIdFor(sequence)}`,
@@ -38,7 +47,11 @@ function render(catalog: () => Response = catalogHandler()) {
     "POST /api/v1/uploads": uploadIntentsHandler(),
   });
   return {
-    ...renderRoutes({ routes: appRoutes(api.client), path: PATH, client: api.client }),
+    ...renderRoutes({
+      routes: appRoutes(api.client, fetchSample === undefined ? {} : { fetchSample }),
+      path,
+      client: api.client,
+    }),
     api,
   };
 }
@@ -110,6 +123,28 @@ describe("Bancada aberta pelo compartilhamento", () => {
     expect(
       await screen.findByRole("button", { name: "Testar com arquivo de exemplo" }),
     ).toBeVisible();
+  });
+
+  it("não oferece o exemplo enquanto a caixa de entrada ainda está sendo lida", async () => {
+    // A leitura nunca termina: o botão não pode aparecer antes de se saber o que chegou.
+    vi.stubGlobal("caches", { open: () => new Promise<never>(() => undefined) });
+    render();
+
+    await screen.findByLabelText("Escolher arquivos");
+    expect(screen.queryByRole("button", { name: "Testar com arquivo de exemplo" })).toBeNull();
+  });
+
+  it("ignora o ?exemplo=1 quando a Bancada vem do compartilhamento e limpa o pedido", async () => {
+    await seedShared(caches, [csv("clientes.csv")], { id: SHARE_ID });
+    const { fetchSample, requested } = fakeSampleFetch({ body: "nome\nAna\n" });
+
+    const { router } = render(catalogHandler(), { path: `${PATH}&exemplo=1`, fetchSample });
+
+    await screen.findByRole("region", { name: "Arquivos recebidos" });
+    await waitFor(() => {
+      expect(currentUrl(router)).toBe(PATH);
+    });
+    expect(requested).toEqual([]);
   });
 
   it("entra com os arquivos compartilhados depois do clique em enviar", async () => {
