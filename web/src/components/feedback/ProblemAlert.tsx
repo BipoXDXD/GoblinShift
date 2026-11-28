@@ -1,10 +1,10 @@
-import { CircleAlert } from "lucide-react";
 import type { ReactElement } from "react";
 
 import type { ApiProblem } from "../../api/problem";
 import type { ApiFailure } from "../../api/response";
 import { MAX_RETRY_AFTER_MS } from "../../api/retryAfter";
 import { TEXT } from "../../text";
+import { DangerAlert } from "./DangerAlert";
 
 /** Falha a mostrar: da API, ou `internal` para um defeito da própria interface. */
 export type DisplayableFailure = ApiFailure | { kind: "internal" };
@@ -84,11 +84,7 @@ interface ProblemAlertProps {
 export function ProblemAlert({ failure, messages }: ProblemAlertProps): ReactElement {
   const { message, requestId } = describeFailure(failure, messages);
   return (
-    <div
-      role="alert"
-      className="flex gap-3 rounded-lg border-l-4 border-danger-accent bg-danger-bg p-4 text-danger-fg"
-    >
-      <CircleAlert aria-hidden="true" className="mt-1 size-4 flex-none" />
+    <DangerAlert>
       <div className="flex flex-col gap-1">
         <p className="font-semibold">{message}</p>
         {requestId !== null && (
@@ -105,6 +101,6 @@ export function ProblemAlert({ failure, messages }: ProblemAlertProps): ReactEle
           </>
         )}
       </div>
-    </div>
+    </DangerAlert>
   );
 }

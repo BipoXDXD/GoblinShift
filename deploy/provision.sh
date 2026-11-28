@@ -55,7 +55,7 @@ fi
 # /etc/docker/daemon.json vale para todos os projetos da VPS e não é alterado aqui.
 
 note "SSH só por chave e sem root (só altera se ainda não estiver assim)"
-if sshd -T | grep -qx 'permitrootlogin no' && sshd -T | grep -qx 'passwordauthentication no'; then
+if grep -qx 'permitrootlogin no' <<<"$(sshd -T)" && grep -qx 'passwordauthentication no' <<<"$(sshd -T)"; then
   echo "   já endurecido; nada alterado."
 else
   cat > /etc/ssh/sshd_config.d/10-hardening.conf <<'EOF'
@@ -72,7 +72,7 @@ note "Firewall (regras acrescentadas)"
 ufw allow OpenSSH >/dev/null
 ufw allow 80/tcp >/dev/null
 ufw allow 443/tcp >/dev/null
-if ufw status | grep -q '^Status: inactive'; then
+if grep -q '^Status: inactive' <<<"$(ufw status)"; then
   ufw default deny incoming >/dev/null
   ufw default allow outgoing >/dev/null
   ufw --force enable

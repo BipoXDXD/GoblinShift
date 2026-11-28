@@ -8,7 +8,9 @@ Só sessão com autenticação recente (`RecentSessionPrincipal`) e CSRF; respon
 2. Outra cancela a execução não terminal, se houver.
 3. A manutenção purga os dados em lotes em até 24 h.
 
-Repetir é seguro: responde 202 de novo, mantém o primeiro pedido e completa o que faltou.
+Repetir com a mesma sessão responde 401: o passo 1 a revogou. O cancelamento que falhar depois do
+commit (resposta 500) a manutenção completa: a purga cancela a execução que encontrar não terminal.
+O `gs-admin request-deletion` também completa o que faltou, mantendo o primeiro pedido.
 """
 
 from fastapi import APIRouter, Request, Response

@@ -5,13 +5,15 @@ Ver docs/GoblinShiftPlan.md, 1.6 e 3.6.
 
 - `POST`: corpo estrito (`scopes`, `days`); o segredo aparece só nesta resposta, com
   `Cache-Control: no-store`. Com `MAX_ACTIVE_KEYS` ativas, ou `MAX_STORED_KEYS` guardadas
-  contando revogadas e vencidas, → 409, cada um com a sua mensagem.
+  contando revogadas e vencidas, → 409, cada um com a sua mensagem. `Idempotency-Key` opcional
+  (#442, 57b): repetida na mesma conta, → 409 com o id da chave que ela já emitiu, mesmo revogada;
+  o segredo não volta, porque não é guardado.
 - `GET`: metadados, nunca o segredo nem o hash.
 - `DELETE`: chave de outra conta ou inexistente → o mesmo 404; revogar de novo → 204.
 """
 
 from datetime import datetime
-from typing import Annotated
+from typing import Annotated, Any
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, Request, Response
@@ -23,6 +25,10 @@ from goblinshift.entrypoints.api.dependencies import (
     Now,
     RecentSessionPrincipal,
     SessionPrincipal,
+)
+from goblinshift.entrypoints.api.idempotency import (
+    idempotency_key_parameter,
+    parse_idempotency_header,
 )
 from goblinshift.entrypoints.api.json_command import command_openapi, json_command
 from goblinshift.entrypoints.api.problems import ApiProblem, ProblemCode, problem_responses
@@ -36,8 +42,10 @@ from goblinshift.identity import (
     AuditActor,
     AuditEventType,
     AuditOutcome,
+    KeyAlreadyIssuedError,
     KeySummary,
     Scope,
+    SessionNoLongerValidError,
     StoredKeyLimitError,
     UnknownAccountError,
     issue_key_for_session,
@@ -87,11 +95,22 @@ def list_api_keys(principal: SessionPrincipal, session: DbSession, now: Now) -> 
     return ApiKeyList(data=[_key_response(key) for key in keys])
 
 
+def _create_api_key_openapi() -> dict[str, Any]:
+    idempotency_key = idempotency_key_parameter(
+        required=False,
+        description=(
+            "Opcional. Repetida na mesma conta, responde 409 com o id da chave que ela já emitiu;"
+            " o segredo só aparece na primeira resposta."
+        ),
+    )
+    return {**command_openapi(CreateApiKey), "parameters": [idempotency_key]}
+
+
 @router.post(
     "/api-keys",
     operation_id="createApiKey",
     status_code=201,
-    openapi_extra=command_openapi(CreateApiKey),
+    openapi_extra=_create_api_key_openapi(),
     responses=problem_responses(400, 409, 413, 415),
 )
 def create_api_key(
@@ -102,13 +121,29 @@ def create_api_key(
     request: Request,
     response: Response,
 ) -> CreatedApiKey:
+    if principal.session_id is None:
+        raise RuntimeError("Principal de sessão sem session_id")
+    # Lida à mão e publicada em `_create_api_key_openapi` (motivo em `idempotency`).
+    idem_key = parse_idempotency_header(request)
     scopes = frozenset(command.scopes)
     try:
         with session.begin():
             issued = issue_key_for_session(
-                session, owner_id=principal.owner_id, scopes=scopes, days=command.days, now=now
+                session,
+                owner_id=principal.owner_id,
+                session_id=principal.session_id,
+                scopes=scopes,
+                days=command.days,
+                now=now,
+                idem_key=idem_key,
             )
             _audit(session, AuditEventType.KEY_ISSUED, principal.owner_id, request, now)
+    except KeyAlreadyIssuedError as error:
+        raise ApiProblem(
+            ProblemCode.STATE_CONFLICT,
+            f"Esta Idempotency-Key já emitiu a chave {error.public_id} (id {error.key_id}); o"
+            " segredo só aparece na primeira resposta. Revogue-a se ele se perdeu.",
+        ) from None
     except ActiveKeyLimitError:
         raise ApiProblem(
             ProblemCode.STATE_CONFLICT,
@@ -121,8 +156,8 @@ def create_api_key(
             f"A conta já tem {MAX_STORED_KEYS} chaves guardadas, contando as revogadas e vencidas;"
             f" elas saem {KEY_RETENTION.days} dias depois do fim, e então dá para criar outra.",
         ) from None
-    except UnknownAccountError:
-        # Bloqueio ou exclusão chegou depois da autenticação: a credencial deixou de valer.
+    except UnknownAccountError, SessionNoLongerValidError:
+        # Bloqueio, exclusão ou logout chegou depois da autenticação: a credencial deixou de valer.
         raise ApiProblem(
             ProblemCode.AUTHENTICATION_REQUIRED, "A sessão não vale mais para esta conta."
         ) from None

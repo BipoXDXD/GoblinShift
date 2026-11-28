@@ -1,6 +1,6 @@
 """Auditoria de eventos de segurança (docs/GoblinShiftPlan.md, 1.8 e 3.6; ADR 026)."""
 
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from ipaddress import ip_network
 from uuid import UUID
 
@@ -14,6 +14,7 @@ from goblinshift.identity.audit import (
     AuditEventType,
     AuditOutcome,
     record,
+    record_csrf_failure,
     truncate_ip,
 )
 from goblinshift.identity.tables import audit_event
@@ -21,6 +22,7 @@ from goblinshift.platform.db import unit_of_work
 
 AGORA = datetime(2026, 10, 14, 12, 0, tzinfo=UTC)
 CONTA = UUID("00000000-0000-7000-8000-0000000000bb")
+OUTRA_CONTA = UUID("00000000-0000-7000-8000-0000000000cc")
 
 
 # --- truncate_ip (unit) -----------------------------------------------------------------------
@@ -133,3 +135,77 @@ def test_actor_fora_da_lista_e_recusado_pelo_banco(factory: sessionmaker[Session
                 "VALUES ('LOGOUT', 'success', 'root')"
             )
         )
+
+
+# --- record_csrf_failure (integração) ---------------------------------------------------------
+
+
+def _csrf_failure(factory: sessionmaker[Session], user_id: UUID, now: datetime) -> bool:
+    with unit_of_work(factory) as session:
+        return record_csrf_failure(session, user_id=user_id, ip="203.0.113.7", now=now)
+
+
+def _csrf_failed_rows(factory: sessionmaker[Session]) -> list[tuple[UUID, datetime]]:
+    with unit_of_work(factory) as session:
+        rows = session.execute(
+            select(audit_event.c.user_id, audit_event.c.occurred_at)
+            .where(audit_event.c.event_type == "CSRF_FAILED")
+            .order_by(audit_event.c.id)
+        ).all()
+    return [(row.user_id, row.occurred_at) for row in rows]
+
+
+@pytest.mark.integration
+def test_csrf_failed_grava_uma_vez_por_minuto(factory: sessionmaker[Session]) -> None:
+    gravou = [
+        _csrf_failure(factory, CONTA, AGORA + timedelta(seconds=seconds)) for seconds in (0, 30, 59)
+    ]
+
+    assert gravou == [True, False, False]
+    assert _csrf_failed_rows(factory) == [(CONTA, AGORA)]
+
+
+@pytest.mark.integration
+def test_csrf_failed_com_um_minuto_exato_grava_de_novo(factory: sessionmaker[Session]) -> None:
+    # A janela é `occurred_at > now - 1 min`: no minuto exato, a anterior já ficou de fora.
+    _csrf_failure(factory, CONTA, AGORA)
+
+    assert _csrf_failure(factory, CONTA, AGORA + timedelta(minutes=1)) is True
+    assert _csrf_failed_rows(factory) == [(CONTA, AGORA), (CONTA, AGORA + timedelta(minutes=1))]
+
+
+@pytest.mark.integration
+def test_agregacao_do_csrf_failed_e_por_conta(factory: sessionmaker[Session]) -> None:
+    _csrf_failure(factory, CONTA, AGORA)
+
+    assert _csrf_failure(factory, OUTRA_CONTA, AGORA + timedelta(seconds=1)) is True
+    assert _csrf_failed_rows(factory) == [
+        (CONTA, AGORA),
+        (OUTRA_CONTA, AGORA + timedelta(seconds=1)),
+    ]
+
+
+@pytest.mark.integration
+def test_csrf_failed_agregado_grava_as_mesmas_colunas_do_record(
+    factory: sessionmaker[Session],
+) -> None:
+    _csrf_failure(factory, CONTA, AGORA)
+
+    with unit_of_work(factory) as session:
+        row = session.execute(select(audit_event).where(audit_event.c.user_id == CONTA)).one()
+
+    assert (
+        row.event_type,
+        row.outcome,
+        row.ip_prefix,
+        row.actor,
+        row.request_id,
+        row.details,
+    ) == (
+        "CSRF_FAILED",
+        "failure",
+        ip_network("203.0.113.0/24"),
+        "user",
+        None,
+        None,
+    )

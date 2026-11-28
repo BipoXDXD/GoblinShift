@@ -10,6 +10,7 @@ from fastapi.testclient import TestClient
 from sqlalchemy import func, select, update
 from sqlalchemy.orm import Session, sessionmaker
 
+from goblinshift.entrypoints.api import api_keys as api_keys_route
 from goblinshift.identity import (
     MAX_ACTIVE_KEYS,
     MAX_KEY_DAYS,
@@ -17,6 +18,8 @@ from goblinshift.identity import (
     Scope,
     authenticate_api_key,
     issue_key_for_admin,
+    issue_key_for_session,
+    revoke_session,
 )
 from goblinshift.identity.keys import MIN_KEY_DAYS
 from goblinshift.identity.tables import api_key, app_user, audit_event
@@ -43,7 +46,7 @@ SUMMARY_KEYS = {
 
 @pytest.fixture
 def sessions(app: FastAPI) -> SimulatedSessions:
-    return SimulatedSessions(app, NOW)
+    return SimulatedSessions(app, NOW, persisted=True)
 
 
 def create_key(client: TestClient, body: object = VALID) -> dict[str, Any]:
@@ -297,6 +300,158 @@ def test_conta_bloqueada_depois_da_autenticacao_nao_emite(
 
     assert_problem(response, 401, "AUTHENTICATION_REQUIRED")
     assert key_count(factory, owner) == 0
+
+
+def test_post_api_keys_com_sessao_revogada_no_meio_401(
+    client: TestClient,
+    factory: sessionmaker[Session],
+    sessions: SimulatedSessions,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    # O `logout` (ou o `logout-all`) confirma entre a autenticação e a emissão: o Principal já foi
+    # lido, então só a reconferência da sessão sob a trava da conta impede a chave.
+    owner = new_user(factory)
+    sessions.sign_in(owner)
+
+    def revoke_then_issue(session: Session, **kwargs: Any) -> object:
+        with unit_of_work(factory) as other:
+            revoke_session(other, sessions.session_id, NOW)
+        return issue_key_for_session(session, **kwargs)
+
+    monkeypatch.setattr(api_keys_route, "issue_key_for_session", revoke_then_issue)
+
+    response = client.post(KEYS, json=VALID)
+
+    assert_problem(response, 401, "AUTHENTICATION_REQUIRED")
+    assert key_count(factory, owner) == 0
+
+
+# --- Idempotency-Key -------------------------------------------------------------------------
+
+IDEM = "repeticao-do-cliente-0001"
+
+
+def post_with_key(client: TestClient, idem_key: str, body: object = VALID) -> Any:
+    return client.post(KEYS, json=body, headers={"Idempotency-Key": idem_key})
+
+
+def test_repeticao_com_a_mesma_chave_409_com_o_id_e_sem_segunda_linha(
+    client: TestClient, factory: sessionmaker[Session], sessions: SimulatedSessions
+) -> None:
+    # O cliente repete o POST depois de um timeout: a primeira chave existe, o segredo se perdeu.
+    owner = new_user(factory)
+    sessions.sign_in(owner)
+    first = post_with_key(client, IDEM)
+    assert first.status_code == 201, first.text
+
+    repeated = post_with_key(client, IDEM)
+
+    body = assert_problem(repeated, 409, "STATE_CONFLICT")
+    created = first.json()
+    assert created["public_id"] in body["detail"]
+    assert created["id"] in body["detail"]
+    assert created["token"].split("_", 2)[2] not in repeated.text
+    assert key_count(factory, owner) == 1
+    assert audit_events(factory, owner) == [("KEY_ISSUED", "success")]
+
+
+def test_repeticao_depois_da_revogacao_continua_409(
+    client: TestClient, factory: sessionmaker[Session], sessions: SimulatedSessions
+) -> None:
+    owner = new_user(factory)
+    sessions.sign_in(owner)
+    created = post_with_key(client, IDEM).json()
+    assert client.delete(f"{KEYS}/{created['id']}").status_code == 204
+
+    repeated = post_with_key(client, IDEM)
+
+    body = assert_problem(repeated, 409, "STATE_CONFLICT")
+    assert created["id"] in body["detail"]
+    assert key_count(factory, owner) == 1
+
+
+@pytest.mark.parametrize("full", ["ativas", "guardadas"])
+def test_repeticao_com_o_teto_cheio_responde_a_repeticao(
+    client: TestClient, factory: sessionmaker[Session], sessions: SimulatedSessions, full: str
+) -> None:
+    # A busca pela Idempotency-Key vem antes dos tetos: a repetição não vira o 409 de teto.
+    owner = new_user(factory)
+    sessions.sign_in(owner)
+    with unit_of_work(factory) as session:
+        if full == "ativas":
+            for _ in range(MAX_ACTIVE_KEYS - 1):
+                issue_key_for_admin(
+                    session, owner_id=owner, scopes=frozenset({Scope.FILES_READ}), days=30, now=NOW
+                )
+        else:
+            # Revogada logo depois de emitida, para não esbarrar no teto de ativas.
+            for _ in range(MAX_STORED_KEYS - 1):
+                issue_key_for_admin(
+                    session, owner_id=owner, scopes=frozenset({Scope.FILES_READ}), days=30, now=NOW
+                )
+                session.execute(
+                    update(api_key).where(api_key.c.owner_id == owner).values(revoked_at=NOW)
+                )
+    created = post_with_key(client, IDEM).json()
+
+    repeated = post_with_key(client, IDEM)
+
+    body = assert_problem(repeated, 409, "STATE_CONFLICT")
+    assert created["public_id"] in body["detail"]
+
+
+def test_mesma_chave_em_outra_conta_emite(
+    client: TestClient, factory: sessionmaker[Session], sessions: SimulatedSessions
+) -> None:
+    owner, other = new_user(factory), new_user(factory)
+    sessions.sign_in(owner)
+    assert post_with_key(client, IDEM).status_code == 201
+    sessions.sign_in(other)
+
+    response = post_with_key(client, IDEM)
+
+    assert response.status_code == 201, response.text
+    assert key_count(factory, other) == 1
+
+
+def test_sem_idempotency_key_duas_emissoes(
+    client: TestClient, factory: sessionmaker[Session], sessions: SimulatedSessions
+) -> None:
+    owner = new_user(factory)
+    sessions.sign_in(owner)
+
+    first, second = create_key(client), create_key(client)
+
+    assert first["id"] != second["id"]
+    assert key_count(factory, owner) == 2
+
+
+@pytest.mark.parametrize(
+    "idem_key", ["a" * 15, "a" * 65, "a" * 16 + "\x00"], ids=["15", "65", "nul"]
+)
+def test_idempotency_key_malformada_400(
+    client: TestClient, factory: sessionmaker[Session], sessions: SimulatedSessions, idem_key: str
+) -> None:
+    owner = new_user(factory)
+    sessions.sign_in(owner)
+
+    response = post_with_key(client, idem_key)
+
+    assert_problem(response, 400, "IDEMPOTENCY_KEY_INVALID")
+    assert key_count(factory, owner) == 0
+
+
+@pytest.mark.parametrize("idem_key", ["a" * 16, "Z9_-" * 16], ids=["16", "64"])
+def test_idempotency_key_nas_bordas_emite(
+    client: TestClient, factory: sessionmaker[Session], sessions: SimulatedSessions, idem_key: str
+) -> None:
+    owner = new_user(factory)
+    sessions.sign_in(owner)
+
+    response = post_with_key(client, idem_key)
+
+    assert response.status_code == 201, response.text
+    assert key_count(factory, owner) == 1
 
 
 # --- Listagem ---------------------------------------------------------------------------------

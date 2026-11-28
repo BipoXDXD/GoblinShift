@@ -291,6 +291,22 @@ def test_rota_inexistente_traz_not_found_sem_classe_de_taxa(traced: Traced) -> N
     assert "rate_limit.class" not in event
 
 
+def test_download_que_volta_para_a_execucao_traz_o_codigo_da_recusa(traced: Traced) -> None:
+    # O 303 do download por navegação (64a) registra o código como o problem+json registraria.
+    _, auth = new_account(traced.factory)
+    traced.clear()
+    run_page = f"http://testserver/execucoes/{uuid.uuid4()}"
+
+    response = traced.client.get(
+        f"/api/v1/artifacts/{uuid.uuid4()}/download",
+        headers={**auth, "Accept": "text/html", "Referer": run_page},
+        follow_redirects=False,
+    )
+
+    assert response.status_code == 303
+    assert traced.main_event()["error.code"] == "NOT_FOUND"
+
+
 def test_validacao_traz_validation_failed(traced: Traced) -> None:
     traced.client.post(ECHO, json={"text": 1})
 
@@ -431,6 +447,23 @@ def test_requisicao_recusada_pelo_limite_traz_rate_limit_limited_e_o_codigo(
     assert event["rate_limit.limited"] is True
     assert event["rate_limit.class"] == "run_create"
     assert event["error.code"] == "RATE_LIMITED"
+
+
+def test_recusa_pelo_limite_vinda_pela_sessao_e_atribuida_a_conta(traced: Traced) -> None:
+    traced.app.dependency_overrides[current_time] = lambda: FROZEN_NOW
+    user_id = new_user(traced.factory)
+    issued = open_session(traced.app, user_id)
+    headers = {**session_headers(traced.app, issued), "Idempotency-Key": str(uuid.uuid4())}
+    for _ in range(10):
+        traced.client.post(f"{RUNS}?validate_only=true", json={}, headers=headers)
+    traced.clear()
+
+    response = traced.client.post(f"{RUNS}?validate_only=true", json={}, headers=headers)
+
+    assert response.status_code == 429
+    event = traced.main_event()
+    assert event["auth.via"] == "session"
+    assert event["user.hash"] == UserHasher(traced.app.state.settings.user_hash_key()).hash(user_id)
 
 
 def test_requisicao_sem_credencial_nao_traz_rate_limit_limited(traced: Traced) -> None:

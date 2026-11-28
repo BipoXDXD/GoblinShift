@@ -47,3 +47,23 @@ Alternativas consideradas:
 - `tests/api/test_wide_event.py`: `rate_limit.limited` é falso na requisição atendida, verdadeiro com `error.code = RATE_LIMITED` na recusada, e ausente sem credencial.
 - `tests/runs/test_maintenance_identity.py`: o ciclo de contas remove as janelas velhas e registra o tamanho; a purga da conta não deixa janela para trás.
 - `tests/test_schema_constraints.py`: a migração 0007 bate com o modelo e é reversível.
+
+## Atualização de 2026-11-27 (#442)
+
+A mutação recusada pelo CSRF passou a contar no limite (item 46b): a contagem veio para antes do CSRF. `authenticate` identifica a credencial sem conferir o CSRF e sem gravar o uso da sessão, conta a requisição na classe da rota, confere o CSRF na mutação pela sessão e só então registra o uso da sessão (`record_session_use`). Antes, o CSRF vinha primeiro e a recusa não contava: uma página de outro site, ou um subdomínio irmão (`Sec-Fetch-Site: same-site`), podia mandar o navegador repetir mutações sem limite, e cada recusa estendia a inatividade da sessão.
+
+- A mutação com CSRF inválido conta como `COMMAND` (ou `RUN_CREATE`). Depois do limite, a resposta é `429 RATE_LIMITED`, não mais `403 CSRF_FAILED`.
+- Um site hostil consegue gastar o limite de comandos da conta durante um minuto. O custo é o mesmo de quem tem a credencial, e o limite existe para proteger a VPS. A recusa não estende a sessão e não chega aos serviços.
+- Assimetria no evento amplo: o `429` que vem pela sessão é atribuído à conta (`record_principal`), porque o balde é dela; o `403 CSRF_FAILED` não, porque o pedido forjado só leva o cookie da vítima e não prova que veio dela. A recusa do CSRF fica na auditoria.
+- Risco aceito: um site irmão same-site consegue esgotar o balde `COMMAND` da vítima com POSTs forjados, já que a recusa do CSRF conta no limite. A vítima fica sem mutações até o fim da janela de um minuto. O risco é baixo enquanto não houver subdomínios de terceiros sob o mesmo site registrável; se passar a haver, revisar esta decisão.
+- Verificação: `tests/api/test_csrf.py::test_mutacao_com_csrf_invalido_conta_no_limite_de_comandos` (o 61º POST sem CSRF válido recebe 429) e `::test_post_same_site_recusado_nao_estende_a_sessao`.
+
+## Adendo (issue #442, item 49a): janela por canal
+
+O balde passou a ser por conta, **canal** e classe de rota. O canal é o `Principal.via`: `session` (a sessão web) ou `api_key` (todas as chaves da conta juntas). Antes, uma chave com `files:write` esgotava `COMMAND` com `DELETE /uploads/{id}` e `READ` com `GET /catalog`, e o titular recebia 429 pela sessão em `GET /api-keys`, `DELETE /api-keys/{id}` e `POST /auth/logout-all`: só o `gs-admin` conseguia revogar a chave. Decisão D1 = (C) do plano `sessao-auth-chaves`, aceita pelo dono.
+
+- **Tabela nova `channel_request_window`** (migração 0031), com a chave primária `(owner_id, channel, request_class, window_start)` e um `CHECK` com os dois canais. Não foi `channel` na `request_window` com a PK recriada: a réplica anterior segue servindo depois do `migrate`, e o `INSERT … ON CONFLICT (owner_id, request_class, window_start)` dela feriria o `NOT NULL` e perderia o índice único, um 500 em toda requisição autenticada durante o deploy. Com duas tabelas, cada versão grava na sua; a contagem em curso se perde na troca, o que a janela de um minuto torna irrelevante.
+- **Contract adiado**: a `request_window` da 0007 fica, sem escrita do código novo. A limpeza da manutenção esvazia as duas, com um lote só para as duas juntas, e `request_windows` soma as duas. O `DROP TABLE request_window` vem num PR seguinte, depois do deploy.
+- **Teto**: o teto da conta no máximo dobra (um balde por canal), qualquer que seja o número de chaves ou sessões. As 5 chaves continuam dividindo um balde, e as sessões da conta também. O limite por credencial (opção A) multiplicaria o teto pelo número de sessões, que não tem limite.
+- **Downgrade**: apaga a tabela nova; com janelas gravadas, só roda com `GS_ALLOW_LOSSY_DOWNGRADE=1`.
+- Verificação: `tests/api/test_rate_limit.py::test_chave_que_esgota_a_conta_nao_tranca_a_sessao`, `::test_chave_esgotada_nao_bloqueia_a_sessao_da_mesma_conta`, `::test_sessao_esgotada_nao_bloqueia_a_chave`, `::test_sessao_continua_limitada_no_proprio_canal`, `::test_cinco_chaves_dividem_o_mesmo_balde`; `tests/identity/test_rate_limit.py::test_janelas_de_canais_diferentes_sao_independentes` e `::test_limpeza_esvazia_tambem_a_tabela_sem_canal_da_0007`; `tests/test_migration_0031.py::test_insert_da_replica_anterior_continua_valendo_na_tabela_antiga` e `::test_upgrade_downgrade_upgrade_com_a_guarda_das_janelas_por_canal`.

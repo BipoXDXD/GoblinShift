@@ -69,6 +69,8 @@ class WebIdentityConfig:
     csrf_key: bytes = field(repr=False)
     # Assina o cookie `__Secure-gs_login`, que leva só o marcador do estado do login (ADR 025).
     login_cookie_key: bytes = field(repr=False)
+    # Chave anterior do CSRF, só durante a troca do segredo (ADR 025); fora dela, None.
+    csrf_previous_key: bytes | None = field(default=None, repr=False)
 
 
 class Settings(BaseSettings):
@@ -157,6 +159,8 @@ class Settings(BaseSettings):
     github_client_id: str | None = None
     github_client_secret_file: Path | None = None
     csrf_secret_file: Path | None = None
+    # Só durante a troca do segredo do CSRF, por até 8 h, e opcional também em produção (ADR 025).
+    csrf_secret_previous_file: Path | None = None
     login_cookie_secret_file: Path | None = None
     # Teto de cada chamada ao Google e ao GitHub (3.2, "Timeouts em toda integração").
     oauth_http_timeout_s: float = Field(default=5.0, gt=0)
@@ -202,7 +206,14 @@ class Settings(BaseSettings):
                 self.login_cookie_secret_file,
                 _DEV_LOGIN_COOKIE_KEY,
             ),
+            csrf_previous_key=self._previous_csrf_key(),
         )
+
+    def _previous_csrf_key(self) -> bytes | None:
+        """Chave anterior do CSRF, com as regras da atual; sem o arquivo, None em todo ambiente."""
+        if self.csrf_secret_previous_file is None:
+            return None
+        return _read_server_key("GS_CSRF_SECRET_PREVIOUS_FILE", self.csrf_secret_previous_file)
 
     def checked_public_origin(self) -> str:
         """A origem pública validada: a do login e a da URL nos eventos da API (3.6, 3.7)."""
@@ -240,10 +251,7 @@ class Settings(BaseSettings):
             if production:
                 raise MissingSecretError(f"{name} é obrigatório em produção")
             return dev.encode()
-        key = _read_secret(name, secret_file)
-        if len(key) < MIN_SECRET_CHARS:
-            raise WebConfigError(f"{name} precisa de pelo menos {MIN_SECRET_CHARS} caracteres")
-        return key.encode()
+        return _read_server_key(name, secret_file)
 
     def cursor_signing_key(self) -> bytes:
         return self._secret_or_dev_default(self.cursor_secret, "GS_CURSOR_SECRET", _DEV_CURSOR_KEY)
@@ -292,6 +300,14 @@ class Settings(BaseSettings):
             port=self.db_port,
             database=self.db_name,
         )
+
+
+def _read_server_key(name: str, path: Path) -> bytes:
+    """Chave do servidor lida do arquivo; menos de `MIN_SECRET_CHARS` caracteres impede a subida."""
+    key = _read_secret(name, path)
+    if len(key) < MIN_SECRET_CHARS:
+        raise WebConfigError(f"{name} precisa de pelo menos {MIN_SECRET_CHARS} caracteres")
+    return key.encode()
 
 
 def _read_secret(name: str, path: Path) -> str:

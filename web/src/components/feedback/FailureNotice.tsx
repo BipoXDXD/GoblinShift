@@ -4,6 +4,7 @@ import { Link, useLocation } from "react-router";
 
 import { safeReturnTo } from "../../account/signIn";
 import { SignInPrompt } from "../../account/SignInPrompt";
+import type { ApiProblem } from "../../api/problem";
 import { ApiError } from "../../api/response";
 import { acceptTermsPath } from "../../app/paths";
 import { TEXT } from "../../text";
@@ -31,11 +32,8 @@ export function FailureNotice({
     return <ProblemAlert failure={{ kind: "internal" }} />;
   }
   const code = guidanceCode(error);
-  if (code === "AUTHENTICATION_REQUIRED" || code === "REAUTH_REQUIRED") {
-    return <SignInPrompt reauth={code === "REAUTH_REQUIRED"} headingLevel={headingLevel} />;
-  }
-  if (code === "TERMS_NOT_ACCEPTED") {
-    return <TermsRequiredNotice headingLevel={headingLevel} />;
+  if (code !== null) {
+    return <GuidanceNotice code={code} headingLevel={headingLevel} />;
   }
   return <ProblemAlert failure={error.failure} {...(messages === undefined ? {} : { messages })} />;
 }
@@ -47,6 +45,24 @@ const GUIDANCE_CODES = [
   "TERMS_NOT_ACCEPTED",
 ] as const;
 type GuidanceCode = (typeof GUIDANCE_CODES)[number];
+
+/** O código, se ele vira um caminho (entrar, entrar de novo, aceitar); `null` se vira alerta. */
+export function asGuidanceCode(code: ApiProblem["code"]): GuidanceCode | null {
+  return GUIDANCE_CODES.find((guidance) => guidance === code) ?? null;
+}
+
+interface GuidanceNoticeProps {
+  readonly code: GuidanceCode;
+  readonly headingLevel: HeadingLevel;
+}
+
+/** O caminho de um código de orientação: entrar, entrar de novo ou aceitar os termos. */
+export function GuidanceNotice({ code, headingLevel }: GuidanceNoticeProps): ReactElement {
+  if (code === "TERMS_NOT_ACCEPTED") {
+    return <TermsRequiredNotice headingLevel={headingLevel} />;
+  }
+  return <SignInPrompt reauth={code === "REAUTH_REQUIRED"} headingLevel={headingLevel} />;
+}
 
 /** Se o FailureNotice mostra um caminho (entrar, entrar de novo, aceitar) em vez do alerta. */
 export function isGuidance(error: Error): boolean {
@@ -67,8 +83,7 @@ function guidanceCode(error: Error): GuidanceCode | null {
   if (!(error instanceof ApiError) || error.failure.kind !== "problem") {
     return null;
   }
-  const { code } = error.failure.problem;
-  return GUIDANCE_CODES.find((guidance) => guidance === code) ?? null;
+  return asGuidanceCode(error.failure.problem.code);
 }
 
 /** A conta precisa aceitar a versão nova dos termos; o link volta para esta tela depois. */

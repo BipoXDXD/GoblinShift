@@ -6,7 +6,7 @@ from datetime import UTC, datetime, timedelta
 from uuid import UUID, uuid7
 
 import pytest
-from sqlalchemy import Table, func, insert, select, update
+from sqlalchemy import Table, func, insert, select, text, update
 from sqlalchemy.orm import Session, sessionmaker
 
 from goblinshift.identity import AuditActor, AuditEventType, AuditOutcome, record_audit_event
@@ -16,11 +16,13 @@ from goblinshift.identity.purge import (
     WEB_SESSION_RETENTION,
     AccountNotMarkedForDeletionError,
     claim_accounts_for_purge,
+    count_overdue_audit_events,
     count_overdue_deletions,
     delete_ended_web_sessions,
     delete_expired_login_states,
     delete_inactive_api_keys,
     delete_old_audit_events,
+    estimate_audit_events,
     purge_owner,
 )
 from goblinshift.identity.tables import api_key, app_user, audit_event, login_state, web_session
@@ -363,6 +365,49 @@ def test_auditoria_sai_depois_de_90_dias(factory: sessionmaker[Session]) -> None
     # "Mais de 90 dias": o evento de exatamente 90 dias ainda fica.
     assert removed == 1
     assert rows(factory, audit_event) == 2
+
+
+def _audit_at(factory: sessionmaker[Session], *occurred_at: datetime) -> None:
+    with unit_of_work(factory) as session:
+        for moment in occurred_at:
+            record_audit_event(
+                session,
+                event=AuditEventType.LOGOUT,
+                user_id=uuid7(),
+                ip=None,
+                outcome=AuditOutcome.SUCCESS,
+                now=moment,
+                actor=AuditActor.USER,
+            )
+
+
+@pytest.mark.parametrize(
+    ("age", "overdue"),
+    [
+        (AUDIT_RETENTION + timedelta(days=1), 0),
+        (AUDIT_RETENTION + timedelta(days=1, seconds=1), 1),
+    ],
+    ids=["91_dias", "91_dias_e_1_s"],
+)
+def test_atraso_da_auditoria_comeca_depois_de_91_dias(
+    factory: sessionmaker[Session], age: timedelta, overdue: int
+) -> None:
+    # Atraso é passar mais de um dia da retenção de 90: 91 dias ainda não, 91 dias e 1 s sim.
+    _audit_at(factory, NOW - age)
+
+    with factory() as session:
+        assert count_overdue_audit_events(session, NOW) == overdue
+
+
+def test_estimativa_da_auditoria_le_as_estatisticas_sem_varrer(
+    factory: sessionmaker[Session],
+) -> None:
+    _audit_at(factory, NOW, NOW, NOW)
+    with factory() as session:
+        session.execute(text("ANALYZE audit_event"))
+
+    with factory() as session:
+        assert estimate_audit_events(session) == 3
 
 
 def test_retencao_respeita_o_tamanho_do_lote(factory: sessionmaker[Session]) -> None:

@@ -298,14 +298,21 @@ Prova, dentro do executor sob gVisor e com os limites do plano (1.7), que não h
 ```bash
 sudo bash "$gs_tmp/repo/deploy/gvisor.sh"                 # instala o gVisor (já incluído no provision.sh)
 sudo bash "$gs_tmp/repo/deploy/executor-ctl/install.sh"   # instala o executor-ctl (já incluído no provision.sh)
-cd "$gs_tmp/repo/deploy" && sudo python3 -B -m acceptance.run  # sai com 0 só se todos passarem; -B: sem bytecode do root
+cd "$gs_tmp/repo/deploy" &&
+  sudo flock -n /var/lib/coolify-release/goblinshift/release.lock python3 -B -m acceptance.run  # sai com 0 só se todos passarem; -B: sem bytecode do root
 ```
+
+O `flock -n` toma a trava da publicação do goblinshift durante o teste: um deploy que recriasse o worker e a manutenção no meio das sondas faria a manutenção nova apagá-las. Se o `flock` sair com 1, há uma publicação em curso; espere ela terminar e rode de novo.
 
 O teste monta o `docker run` das sondas com o perfil de produção do `executor-ctl` (`deploy/executor_ctl/profile.py`) e confere que o serviço responde no socket. Rode com o worker parado: a área de trabalho só admite uma tentativa por vez. O próprio teste para o container `maintenance` durante as sondas e o religa no fim, porque a manutenção removeria a sonda como tentativa sem registro ([ADR 017](docs/adr/017-aceitacao-suspende-a-manutencao.md)); se o teste for morto à força, ele já terá impresso o `docker start` que religa a manutenção.
 
 ### Aceitação semanal, agendada
 
-O `goblinshift-acceptance.timer` roda o mesmo teste uma vez por semana, no domingo às 07:30 UTC com até 30 min de sorteio, e pinga o check "aceitação semanal" do healthchecks.io (7 dias, tolerância de 2 h) (`/start`, sucesso ou `/fail`; tabela dos monitores em [`deploy/openobserve/README.md`](deploy/openobserve/README.md#monitores-externos)). O `deploy/acceptance/scheduled.sh` para o worker durante o teste e o religa no fim, também quando a aceitação reprova; se o worker não voltar, o resultado é `/fail` e o log traz o `docker start` que o religa. Nesses 10 a 30 minutos (ADR 017) as execuções esperam na fila.
+O `goblinshift-acceptance.timer` roda o mesmo teste uma vez por semana, no domingo às 07:30 UTC com até 30 min de sorteio, e pinga o check "aceitação semanal" do healthchecks.io (7 dias, tolerância de 3 h) (`/start`, sucesso ou `/fail`; tabela dos monitores em [`deploy/openobserve/README.md`](deploy/openobserve/README.md#monitores-externos)). O `deploy/acceptance/scheduled.sh` para o worker durante o teste e o religa no fim, também quando a aceitação reprova; se o worker não voltar, o resultado é `/fail` e o log traz o `docker start` que o religa. Nesses 10 a 30 minutos (ADR 017) as execuções esperam na fila.
+
+Antes de parar o worker, o script toma a trava da publicação do goblinshift (`/var/lib/coolify-release/goblinshift/release.lock`, a mesma do receptor em `deploy/coolify/release/receiver.py`) e a segura até o fim. Com uma publicação em curso, espera até 15 min; se ela não terminar, ou se a trava não existir, pinga `/fail` e sai com 75 sem tocar no worker, e a aceitação fica para a semana seguinte (ou para um `systemctl start` manual). O contrário também vale: **uma publicação que chegue durante a aceitação falha na hora** (o receptor toma a trava com `LOCK_NB`), o job de deploy fica vermelho com `BlockingIOError` e **a publicação recusada precisa ser refeita depois da janela** (rodar o job de deploy de novo): a janela vai de domingo às 07:30 UTC até no máximo 2 h depois (até 30 min de sorteio e até 90 min de serviço, o `TimeoutStartSec`), e `systemctl is-active goblinshift-acceptance.service` responde `activating` enquanto o teste roda. A trava é a do projeto, não a `host.lock`, para não barrar a publicação dos outros projetos do host.
+
+Como o timer tem `Persistent=true`, o teste perdido com a máquina desligada roda logo depois do boot. A menos de 30 min do boot, o script espera até 10 min o worker aparecer no `docker ps` antes de pará-lo, para que as sondas não rodem enquanto ele sobe; se ele não aparecer no prazo, o teste segue sem worker para parar e o log diz isso.
 
 ```bash
 sudo bash "$gs_tmp/repo/deploy/acceptance/install.sh"   # copia o código e cria /etc/goblinshift/acceptance.env vazio (root, 600)

@@ -5,6 +5,10 @@ constante. Expira por 30 min sem uso ou 8 h depois do login no provedor, o que v
 `last_seen_at` é gravado no máximo uma vez por minuto, e a inatividade conta a partir dele.
 Conta bloqueada ou com exclusão pedida invalida a sessão.
 
+Resolver o cookie (`resolve_session`) só identifica, sem escrita. Registrar o uso
+(`record_session_use`), que é o que estende a inatividade, fica com `authenticate_session` e, na
+API, com a dependência `authenticate`, depois do CSRF: a mutação recusada não estende a sessão.
+
 Transaction scripts com a Session direto, como `accounts`: cada função roda na transação de quem
 a chama.
 """
@@ -103,15 +107,25 @@ def start_session(
 
 
 def authenticate_session(session: Session, token: str, now: datetime) -> Principal | None:
-    """Principal com todos os escopos, ou None para token desconhecido, vencido ou revogado."""
+    """Principal com todos os escopos, ou None para token desconhecido, vencido ou revogado.
+
+    Resolve e registra o uso. Quem precisa conferir algo entre os dois (o CSRF da API) chama
+    `resolve_session` e `record_session_use` separados.
+    """
     resolved = resolve_session(session, token, now)
-    return resolved if isinstance(resolved, Principal) else None
+    if not isinstance(resolved, Principal):
+        return None
+    if resolved.session_id is None:
+        raise RuntimeError("Principal de sessão sem session_id")
+    record_session_use(session, resolved.session_id, now)
+    return resolved
 
 
 def resolve_session(session: Session, token: str, now: datetime) -> Principal | SessionRefusal:
-    """Como `authenticate_session`, mas diz por que recusou, para quem registra o motivo.
+    """Identifica a sessão sem gravar nada, ou diz por que recusou, para quem registra o motivo.
 
-    Registrar o uso faz parte de autenticar: é o que estende a inatividade.
+    Não registra o uso: quem aceita a requisição chama `record_session_use` depois das suas
+    conferências, para que uma recusa não estenda a inatividade.
     """
     if len(token) != _TOKEN_LENGTH or _TOKEN_PATTERN.fullmatch(token) is None:
         return SessionRefusal.MALFORMED
@@ -138,7 +152,6 @@ def resolve_session(session: Session, token: str, now: datetime) -> Principal | 
     refusal = _refusal(row, now)
     if refusal is not None:
         return refusal
-    _record_use(session, row.id, now)
     return Principal(
         owner_id=row.user_id,
         scopes=_SESSION_SCOPES,
@@ -157,8 +170,38 @@ def revoke_session(session: Session, session_id: UUID, now: datetime) -> None:
     )
 
 
+def session_still_valid(
+    session: Session, *, session_id: UUID, owner_id: UUID, now: datetime
+) -> bool:
+    """A sessão existe, é da conta, não foi revogada e não venceu em `now`.
+
+    Reconfere, na transação de quem chama, um Principal lido noutra transação. Só vale sob a trava
+    da conta (`FOR NO KEY UPDATE` em `app_user`), a mesma de `revoke_all_credentials`: sem ela, um
+    `logout-all` confirmado logo depois desta leitura não seria visto.
+    """
+    found = session.execute(
+        select(web_session.c.id).where(
+            web_session.c.id == session_id,
+            web_session.c.user_id == owner_id,
+            web_session.c.revoked_at.is_(None),
+            web_session.c.idle_expires_at > now,
+            web_session.c.absolute_expires_at > now,
+        )
+    ).first()
+    return found is not None
+
+
 def revoke_all_credentials(session: Session, owner_id: UUID, now: datetime) -> None:
-    """Revoga todas as sessões e todas as chaves de API da conta (`logout-all`, bloqueio)."""
+    """Revoga todas as sessões e todas as chaves de API da conta (`logout-all`, bloqueio).
+
+    Trava a conta antes de revogar: a emissão de chave (`accounts.issue_key_for_session`) trava a
+    mesma linha, então ou termina antes e a chave dela é revogada aqui, ou espera e encontra a
+    sessão já revogada. A trava é `FOR NO KEY UPDATE`: as duas continuam se enfileirando, mas o
+    `FOR KEY SHARE` das FKs para a conta (login, criação de Run, auditoria) não espera por ela.
+    """
+    session.execute(
+        select(app_user.c.id).where(app_user.c.id == owner_id).with_for_update(key_share=True)
+    )
     session.execute(
         update(web_session)
         .where(web_session.c.user_id == owner_id, web_session.c.revoked_at.is_(None))
@@ -183,9 +226,12 @@ def _refusal(row: Row[Any, *tuple[Any, ...]], now: datetime) -> SessionRefusal |
     return None
 
 
-def _record_use(session: Session, session_id: UUID, now: datetime) -> None:
-    # UPDATE condicional, como em `accounts._record_use`: no máximo uma escrita por minuto, e
-    # requisições simultâneas não gravam todas. A inatividade nunca passa do teto absoluto.
+def record_session_use(session: Session, session_id: UUID, now: datetime) -> None:
+    """Grava o uso da sessão (`last_seen_at`) e estende a inatividade, na transação de quem chama.
+
+    UPDATE condicional, como em `accounts._record_use`: no máximo uma escrita por minuto, e
+    requisições simultâneas não gravam todas. A inatividade nunca passa do teto absoluto.
+    """
     session.execute(
         update(web_session)
         .where(

@@ -1,6 +1,8 @@
 """`DELETE /api/v1/me`: pedido de exclusão da conta (docs/GoblinShiftPlan.md, 1.6 e 1.8)."""
 
 from datetime import UTC, datetime, timedelta
+from functools import partial
+from pathlib import Path
 from uuid import UUID
 
 import pytest
@@ -9,17 +11,24 @@ from fastapi.testclient import TestClient
 from sqlalchemy import select
 from sqlalchemy.orm import Session, sessionmaker
 
+from goblinshift.entrypoints.api import me_delete
+from goblinshift.entrypoints.api.dependencies import current_time
+from goblinshift.entrypoints.maintenance import AccountJobs
 from goblinshift.files.storage import FileStorage
 from goblinshift.identity import authenticate_api_key
 from goblinshift.identity.tables import app_user, audit_event
 from goblinshift.platform.db import unit_of_work
 from goblinshift.runs.lifecycle import Status
+from goblinshift.runs.maintenance import Maintenance
+from goblinshift.runs.purge import cancel_active_run
 from goblinshift.runs.tables import run
+from tests.api.session_support import open_session, session_headers
 from tests.api.simulated_session import SimulatedSessions
 from tests.api.support import assert_problem
 from tests.identity.support import HASHER, new_key, new_user, purge_account
 from tests.runs.finished_support import RecordedFinished
-from tests.runs.worker_support import queue_run
+from tests.runs.maintenance_support import cycles_until_purged
+from tests.runs.worker_support import local_runner, queue_run
 
 pytestmark = pytest.mark.integration
 
@@ -128,18 +137,64 @@ def test_delete_me_com_execucao_na_fila_emite_um_termino_cancelado(
     assert (event["run_id"], event["run.state"]) == (str(run_id), "canceled")
 
 
-def test_repetir_delete_me_202_mantem_o_primeiro_pedido(
-    client: TestClient, factory: sessionmaker[Session], sessions: SimulatedSessions
+def test_repetir_delete_me_com_sessao_real_401_e_mantem_o_primeiro_pedido(
+    app: FastAPI, client: TestClient, factory: sessionmaker[Session]
 ) -> None:
+    # Sessão real, e não a simulada: o primeiro pedido revoga a própria sessão.
     owner = new_user(factory)
-    sessions.sign_in(owner)
-    client.delete(ME)
-    sessions.now = NOW + timedelta(minutes=5)
+    headers = session_headers(app, open_session(app, owner, now=NOW))
+    app.dependency_overrides[current_time] = lambda: NOW
+    assert client.delete(ME, headers=headers).status_code == 202
+    app.dependency_overrides[current_time] = lambda: NOW + timedelta(minutes=5)
 
-    response = client.delete(ME)
+    response = client.delete(ME, headers=headers)
 
-    assert response.status_code == 202, response.text
+    assert_problem(response, 401, "AUTHENTICATION_REQUIRED")
     assert deletion_requested_at(factory, owner) == NOW
+
+
+def test_delete_me_com_cancelamento_falho_a_manutencao_cancela_e_purga(
+    app: FastAPI,
+    factory: sessionmaker[Session],
+    sessions: SimulatedSessions,
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    """#442: o cancelamento roda depois do commit do pedido; se falhar, a resposta é 500, a sessão
+    já caiu e quem completa é a purga da manutenção."""
+    finished = RecordedFinished(factory)
+    app.state.run_finished = finished.reporter
+    storage: FileStorage = app.state.storage
+    owner = new_user(factory)
+    run_id = queue_run(factory, storage, owner)
+    sessions.sign_in(owner)
+
+    def failing(*_args: object, **_kwargs: object) -> None:
+        raise RuntimeError("o cancelamento caiu depois do commit")
+
+    monkeypatch.setattr(me_delete, "cancel_active_run", failing)
+    canceller = partial(cancel_active_run, factory, storage, on_finished=finished.reporter.report)
+    maintenance = Maintenance(factory, storage, local_runner(tmp_path / "work"))
+    # Os ciclos rodam dentro do cliente: a parada do app descarta o pool de conexões no fim.
+    try:
+        with TestClient(app, raise_server_exceptions=False) as client:
+            response = client.delete(ME)
+            assert response.status_code == 500
+            assert deletion_requested_at(factory, owner) == NOW
+            with factory() as session:
+                status = session.execute(
+                    select(run.c.status).where(run.c.id == run_id)
+                ).scalar_one()
+            assert status == Status.QUEUED
+
+            jobs = AccountJobs(factory, cancel_active_run=canceller)
+            cycles_until_purged(factory, maintenance, jobs, owner)
+    finally:
+        finished.shutdown()
+
+    # A Run saiu `canceled` antes de sumir, com um término só.
+    [event] = finished.events()
+    assert (event["run_id"], event["run.state"]) == (str(run_id), "canceled")
 
 
 def test_delete_me_de_conta_purgada_depois_do_login_401_sem_limpar_o_navegador(

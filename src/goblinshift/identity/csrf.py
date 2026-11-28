@@ -32,22 +32,35 @@ def issue_csrf_token(key: bytes, session_id: UUID) -> str:
 
 
 def csrf_token_matches(
-    key: bytes, session_id: UUID, cookie: str | None, header: str | None
+    key: bytes,
+    session_id: UUID,
+    cookie: str | None,
+    header: str | None,
+    *,
+    previous_key: bytes | None = None,
 ) -> bool:
-    """True só se o header repete o cookie e o HMAC do cookie é desta sessão."""
+    """True só se o header repete o cookie e o HMAC do cookie é desta sessão.
+
+    Durante a troca do segredo, `previous_key` também assina: o cookie emitido com a chave
+    anterior não tem Max-Age e só some com a sessão (ADR 025). Com a anterior configurada, os
+    dois HMACs são sempre calculados e comparados, para que o tempo não diga qual chave assinou.
+    """
     match = _well_formed_cookie(cookie, header)
     if match is None or header is None:
         return False
     same_value = hmac.compare_digest(match.string, header)
-    signed_here = hmac.compare_digest(match["mac"], _mac(key, session_id, match["random"]))
-    return same_value and signed_here
+    signed_now = hmac.compare_digest(match["mac"], _mac(key, session_id, match["random"]))
+    signed_before = previous_key is not None and hmac.compare_digest(
+        match["mac"], _mac(previous_key, session_id, match["random"])
+    )
+    return same_value and (signed_now or signed_before)
 
 
 def csrf_pair_matches(cookie: str | None, header: str | None) -> bool:
     """True se o header repete um cookie no formato do token, sem conferir o HMAC.
 
-    Só para a mutação que não tem sessão a que ligar o token (`POST /auth/logout` com sessão já
-    expirada ou revogada): outro site não lê nem grava o cookie `__Host-`, então não monta o par.
+    Só para `POST /auth/logout`, com ou sem sessão válida: outro site não lê nem grava o cookie
+    `__Host-`, então não monta o par, e sair não pode depender do segredo do CSRF (ADR 025).
     """
     match = _well_formed_cookie(cookie, header)
     return match is not None and header is not None and hmac.compare_digest(match.string, header)

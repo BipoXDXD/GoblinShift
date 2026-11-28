@@ -28,11 +28,10 @@ from goblinshift.entrypoints.api.capacity_problems import (
 )
 from goblinshift.entrypoints.api.dependencies import DbSession, ReadFiles, Storage, WriteFiles
 from goblinshift.entrypoints.api.idempotency import (
-    IDEMPOTENCY_KEY_HEADER,
     REPLAYED_HEADER,
     idempotency_key_parameter,
     in_progress_problem,
-    key_invalid_problem,
+    parse_idempotency_header,
 )
 from goblinshift.entrypoints.api.json_command import command_openapi, json_command
 from goblinshift.entrypoints.api.problems import ApiProblem, ProblemCode, problem_responses
@@ -80,7 +79,6 @@ from goblinshift.files.uploads import (
     request_deletion,
 )
 from goblinshift.platform.db import retry_on_pool_timeout
-from goblinshift.runs.acceptance import IdempotencyKeyInvalidError, parse_idempotency_key
 
 router = APIRouter(tags=["uploads"])
 
@@ -179,7 +177,7 @@ def create_uploads(
     owner_id = principal.owner_id
     items = [(item.name, item.size) for item in command.items]
     # Lida à mão e publicada em `_create_uploads_openapi` (motivo em `idempotency`).
-    key = _idempotency_key(request)
+    key = parse_idempotency_header(request)
     try:
         with session.begin():
             views, replayed = _create_batch(session, owner_id, items, key)
@@ -295,16 +293,6 @@ def _create_batch(
     if key is None:
         return create_intents(session, owner_id, items), False
     return create_intents_once(session, owner_id, items, key)
-
-
-def _idempotency_key(request: Request) -> str | None:
-    raw = request.headers.get(IDEMPOTENCY_KEY_HEADER)
-    if raw is None:
-        return None
-    try:
-        return parse_idempotency_key(raw)
-    except IdempotencyKeyInvalidError:
-        raise key_invalid_problem() from None
 
 
 def _created(view: UploadView, request: Request) -> CreatedUpload:
