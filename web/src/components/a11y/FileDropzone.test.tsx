@@ -1,8 +1,10 @@
 import { fireEvent, render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { axeViolations } from "../../test/axe";
+import { fakeDir, fakeFile, fakeItem } from "../../test/fakeEntries";
+import type { FolderPick } from "../../upload/folderFiles";
 import { FileDropzone } from "./FileDropzone";
 
 const csv = (name: string) => new File(["a,b\n1,2\n"], name, { type: "text/csv" });
@@ -49,7 +51,9 @@ describe("FileDropzone", () => {
       throw new Error("área de soltura ausente");
     }
 
-    fireEvent.drop(area, { dataTransfer: { files: [csv("a.csv")], types: ["Files"] } });
+    fireEvent.drop(area, {
+      dataTransfer: { files: [csv("a.csv")], items: [], types: ["Files"] },
+    });
 
     expect(onFiles).toHaveBeenCalledWith([expect.objectContaining({ name: "a.csv" })]);
   });
@@ -143,5 +147,134 @@ describe("FileDropzone", () => {
     );
 
     expect(await axeViolations(container)).toEqual([]);
+  });
+
+  describe("Escolher pasta", () => {
+    /** O jsdom não tem `webkitdirectory`; o navegador de verdade, sim (menos o iOS). */
+    function withFolderSupport(): void {
+      Object.defineProperty(HTMLInputElement.prototype, "webkitdirectory", {
+        configurable: true,
+        value: false,
+        writable: true,
+      });
+    }
+
+    beforeEach(withFolderSupport);
+    afterEach(() => {
+      Reflect.deleteProperty(HTMLInputElement.prototype, "webkitdirectory");
+    });
+
+    function renderWithFolder(onPick = vi.fn<(pick: FolderPick) => void>(), onFiles = vi.fn()) {
+      const view = render(
+        <FileDropzone
+          id="arquivos"
+          label="Arquivos"
+          chosenCount={0}
+          description="CSV."
+          onFiles={onFiles}
+          folder={{ maxFiles: 5, onPick }}
+        />,
+      );
+      return { ...view, onPick, onFiles };
+    }
+
+    function dropArea(container: HTMLElement): Element {
+      const area = container.querySelector("[data-dragging]");
+      if (area === null) {
+        throw new Error("área de soltura ausente");
+      }
+      return area;
+    }
+
+    it("sem suporte a pasta, o botão não aparece", () => {
+      Reflect.deleteProperty(HTMLInputElement.prototype, "webkitdirectory");
+      renderWithFolder();
+
+      expect(screen.queryByLabelText("Escolher pasta")).not.toBeInTheDocument();
+    });
+
+    it("é um input de pasta de verdade, focável depois do de arquivos e com a mesma descrição", async () => {
+      const user = userEvent.setup();
+      renderWithFolder();
+      const folder = screen.getByLabelText<HTMLInputElement>("Escolher pasta");
+
+      expect(folder.webkitdirectory).toBe(true);
+      expect(folder).toHaveAttribute("multiple");
+      expect(folder).toHaveClass("sr-only");
+      expect(folder.closest("label")).toHaveClass("file-picker");
+      expect(folder).toHaveAccessibleDescription("CSV. Nenhum arquivo escolhido");
+      await user.tab();
+      await user.tab();
+      expect(folder).toHaveFocus();
+    });
+
+    it("entrega a pasta escolhida já filtrada e pelo teto", async () => {
+      const user = userEvent.setup();
+      const { onPick } = renderWithFolder();
+      const files = ["a.csv", ".DS_Store"].map((name) => {
+        const file = csv(name);
+        Object.defineProperty(file, "webkitRelativePath", { value: `tabelas/${name}` });
+        return file;
+      });
+
+      await user.upload(screen.getByLabelText("Escolher pasta"), files);
+
+      const pick = onPick.mock.calls[0]?.[0];
+      expect(pick?.files.map((file) => file.name)).toEqual(["a.csv"]);
+      expect(pick).toMatchObject({ skippedHidden: 1, skippedUnreadable: 0, overflow: null });
+    });
+
+    it("soltar uma pasta acima do teto entrega o estouro, sem arquivos", async () => {
+      const { container, onPick, onFiles } = renderWithFolder();
+      const many = Array.from({ length: 6 }, (_, i) => fakeFile(`${String(i)}.csv`));
+
+      fireEvent.drop(dropArea(container), {
+        dataTransfer: { files: [], items: [fakeItem(fakeDir("grande", [many]))], types: ["Files"] },
+      });
+
+      await vi.waitFor(() => {
+        expect(onPick).toHaveBeenCalledWith(
+          expect.objectContaining({ files: [], overflow: "files" }),
+        );
+      });
+      expect(onFiles).not.toHaveBeenCalled();
+    });
+
+    it("pasta que termina de ser lida depois de o poço sair não entrega nada", async () => {
+      const { container, onPick, unmount } = renderWithFolder();
+
+      fireEvent.drop(dropArea(container), {
+        dataTransfer: {
+          files: [],
+          items: [fakeItem(fakeDir("fotos", [[fakeFile("a.png")]]))],
+          types: ["Files"],
+        },
+      });
+      unmount();
+      await new Promise((resolve) => setTimeout(resolve, 0));
+
+      expect(onPick).not.toHaveBeenCalled();
+    });
+
+    it("com erro no campo, o input de pasta também fica inválido", () => {
+      render(
+        <FileDropzone
+          id="arquivos"
+          label="Arquivos"
+          chosenCount={0}
+          error="Escolha um arquivo."
+          onFiles={vi.fn()}
+          folder={{ maxFiles: 5, onPick: vi.fn() }}
+        />,
+      );
+
+      expect(screen.getByLabelText("Escolher pasta")).toHaveAttribute("aria-invalid", "true");
+    });
+
+    it("não tem violações do axe com os dois botões", async () => {
+      const { container } = renderWithFolder();
+
+      expect(await axeViolations(container)).toEqual([]);
+    });
   });
 });
