@@ -19,6 +19,7 @@ from pydantic import BaseModel
 from sqlalchemy.orm import Session, sessionmaker
 
 from goblinshift.entrypoints.api.dependencies import DbSession, ReadFiles, Storage
+from goblinshift.entrypoints.api.download_navigation import DOWNLOAD_OPERATION_ID
 from goblinshift.entrypoints.api.problems import ApiProblem, ProblemCode, problem_responses
 from goblinshift.entrypoints.api.transfers import (
     DOWNLOAD_PROTECTION_HEADERS,
@@ -89,7 +90,7 @@ def get_artifact_details(
 
 @router.get(
     "/artifacts/{artifact_id}/download",
-    operation_id="downloadArtifact",
+    operation_id=DOWNLOAD_OPERATION_ID,
     status_code=200,
     response_class=DownloadResponse,
     responses={

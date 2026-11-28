@@ -5,6 +5,7 @@ recusado, o navegador recebe um 303 para `/execucoes/<uuid>?falha=<code>`, e a t
 motivo. Clientes que não navegam (curl, clientes da API) continuam com o problem+json.
 """
 
+import json
 import uuid
 from dataclasses import dataclass
 from datetime import timedelta
@@ -16,6 +17,8 @@ from fastapi.testclient import TestClient
 from sqlalchemy import func, update
 from sqlalchemy.orm import Session, sessionmaker
 
+from goblinshift.entrypoints.api.download_navigation import DOWNLOAD_OPERATION_ID
+from goblinshift.entrypoints.openapi_export import render_openapi
 from goblinshift.files.states import TransferDirection
 from goblinshift.files.tables import artifact
 from goblinshift.platform.db import unit_of_work
@@ -223,3 +226,18 @@ def test_outra_rota_nao_redireciona_mesmo_navegando(
     )
 
     assert_problem(response, 404, "NOT_FOUND")
+
+
+def test_redirecionamento_reconhece_a_rota_real_do_download() -> None:
+    # O 303 vale para a rota com este operation_id: uma só, a do download de artefato. O percurso
+    # é pelo contrato exportado, que lista as rotas do router incluído sem abrir o banco.
+    paths = json.loads(render_openapi())["paths"]
+    download = [
+        path
+        for path, operations in paths.items()
+        if any(
+            operation["operationId"] == DOWNLOAD_OPERATION_ID for operation in operations.values()
+        )
+    ]
+
+    assert download == ["/api/v1/artifacts/{artifact_id}/download"]

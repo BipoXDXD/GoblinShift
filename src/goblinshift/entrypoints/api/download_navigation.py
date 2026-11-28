@@ -8,7 +8,7 @@ do arquivo. Por isso, só para essa navegação, a recusa vira um 303 para
 O redirecionamento só acontece quando tudo abaixo vale; em qualquer outro caso o chamador segue
 com o problem+json de sempre:
 
-- o caminho é o download de artefato;
+- a rota que atendeu é a do download de artefato (`DOWNLOAD_OPERATION_ID`, o mesmo do router);
 - é navegação do navegador (`Sec-Fetch-Mode: navigate` ou `text/html` no `Accept`);
 - o `Sec-Fetch-Site`, quando vem, é `same-origin` (um site de terceiro não forja o aviso);
 - o caminho do `Referer` é, por inteiro, a tela de uma execução.
@@ -29,14 +29,19 @@ if TYPE_CHECKING:
     # Só para a anotação: em execução, `problems.py` importa este módulo, e não o contrário.
     from goblinshift.entrypoints.api.problems import ProblemCode
 
-_DOWNLOAD_PATH = re.compile(r"/api/v1/artifacts/[^/]+/download")
+# `operation_id` da rota do download, que o decorator em `artifacts.py` usa: a rota é reconhecida
+# por ele, não por um padrão do caminho que poderia se separar do router.
+DOWNLOAD_OPERATION_ID = "downloadArtifact"
 # UUID canônico: minúsculo, com hífens, como a interface monta a rota da execução.
 _RUN_PAGE = re.compile(r"/execucoes/([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})")
 
 
 def failure_redirect(request: Request, code: ProblemCode) -> Response | None:
     """303 de volta à tela da execução, ou `None` quando a recusa segue em problem+json."""
-    if _DOWNLOAD_PATH.fullmatch(request.url.path) is None:
+    # O roteamento põe a rota casada no escopo antes das dependências e do endpoint. Sem rota no
+    # escopo, a recusa veio antes do roteamento e segue em problem+json.
+    route = request.scope.get("route")
+    if getattr(route, "operation_id", None) != DOWNLOAD_OPERATION_ID:
         return None
     if not _is_same_origin_navigation(request):
         return None
