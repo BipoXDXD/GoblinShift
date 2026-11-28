@@ -9,11 +9,10 @@ import { Card } from "../components/ui/Card";
 import { ConfirmDialog } from "../components/ui/ConfirmDialog";
 import { TEXT } from "../text";
 import { logout, logoutAll, type Me } from "./api";
+import { useCopyToClipboard } from "./useCopyToClipboard";
 import { useEndSession } from "./useEndSession";
 
 const T = TEXT.account.access;
-
-type CopyState = "idle" | "copied" | "failed";
 
 /**
  * Sessão atual (5.5): com que conta entrou e o identificador dela (pedido nos contatos com a
@@ -81,17 +80,7 @@ export function SessionSection({ me }: { readonly me: Me }): ReactElement {
 
 /** O identificador da conta, selecionável e com botão de copiar (mesmo padrão de NewKeyReveal). */
 function AccountId({ id }: { readonly id: string }): ReactElement {
-  const [copy, setCopy] = useState<CopyState>("idle");
-
-  const copyId = async (): Promise<void> => {
-    try {
-      await navigator.clipboard.writeText(id);
-      setCopy("copied");
-    } catch {
-      // Sem permissão ou sem a API de área de transferência: o texto continua selecionável.
-      setCopy("failed");
-    }
-  };
+  const { state: copy, copy: copyText } = useCopyToClipboard();
 
   return (
     <div className="flex flex-col gap-2">
@@ -103,7 +92,7 @@ function AccountId({ id }: { readonly id: string }): ReactElement {
       </dl>
       <p className="text-sm text-fg-muted">{T.accountIdHint}</p>
       <div>
-        <Button type="button" variant="tertiary" onClick={() => void copyId()}>
+        <Button type="button" variant="tertiary" onClick={() => void copyText(id)}>
           {copy === "copied" ? (
             <Check aria-hidden="true" className="size-4" />
           ) : (
@@ -112,18 +101,11 @@ function AccountId({ id }: { readonly id: string }): ReactElement {
           {T.copyAccountId}
         </Button>
       </div>
-      <LiveRegion message={copyMessage(copy)} />
+      <LiveRegion message={copy === "copied" ? T.accountIdCopied : null} />
+      <LiveRegion
+        message={copy === "failed" ? T.accountIdCopyFailed : null}
+        politeness="assertive"
+      />
     </div>
   );
-}
-
-function copyMessage(state: CopyState): string | null {
-  switch (state) {
-    case "idle":
-      return null;
-    case "copied":
-      return T.accountIdCopied;
-    case "failed":
-      return T.accountIdCopyFailed;
-  }
 }

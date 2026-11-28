@@ -50,6 +50,14 @@ async function section(name: string): Promise<HTMLElement> {
   return screen.findByRole("region", { name });
 }
 
+/**
+ * Os alertas com texto: a região assertiva da falha ao copiar (LiveRegion) fica sempre montada, vazia
+ * até a cópia falhar.
+ */
+function filledAlerts(): HTMLElement[] {
+  return screen.queryAllByRole("alert").filter((alert) => alert.textContent !== "");
+}
+
 /** O JSON.stringify de um Error dá "{}": o replacer expõe nome, mensagem e stack. */
 function errorAsJson(_key: string, value: unknown): unknown {
   return value instanceof Error
@@ -137,11 +145,13 @@ describe("Acesso: sessão", () => {
 
       await user.click(within(session).getByRole("button", { name: "Copiar identificador" }));
 
+      // A falha pede ação: sai na região assertiva (LiveRegion), não na de status.
       await waitFor(() => {
-        expect(within(session).getByRole("status")).toHaveTextContent(
+        expect(within(session).getByRole("alert")).toHaveTextContent(
           "Não foi possível copiar. Selecione o identificador e copie à mão.",
         );
       });
+      expect(within(session).getByRole("status")).toBeEmptyDOMElement();
     });
   });
 
@@ -177,7 +187,11 @@ describe("Acesso: sessão", () => {
 
     await user.click(within(await section("Sessão")).getByRole("button", { name: "Sair" }));
 
-    expect(await screen.findByRole("alert")).toHaveTextContent(/Recarregue a página/);
+    await waitFor(() => {
+      expect(filledAlerts().map((alert) => alert.textContent)).toEqual([
+        expect.stringMatching(/Recarregue a página/),
+      ]);
+    });
     expect(currentUrl(router)).toBe("/acesso");
   });
 
@@ -433,7 +447,7 @@ describe("Acesso: chaves de API", () => {
       ),
     ).toBeInTheDocument();
     expect(await screen.findByRole("heading", { name: "Nenhuma chave de API" })).toBeVisible();
-    expect(screen.queryByRole("alert")).toBeNull();
+    expect(filledAlerts()).toEqual([]);
   });
 
   // O <dialog> devolveria o foco ao Revogar, que some com a chave revogada (WCAG 2.4.3).
@@ -773,6 +787,24 @@ describe("Acesso: chave nova", () => {
     await user.click(within(reveal).getByRole("button", { name: "Copiar chave" }));
     expect(await navigator.clipboard.readText()).toBe(created.token);
     expect(within(reveal).getByRole("status")).toHaveTextContent("Chave copiada.");
+  });
+
+  it("a falha ao copiar a chave sai na região assertiva", async () => {
+    const { user } = setup({ "POST /api/v1/api-keys": () => jsonResponse(created, 201) });
+    const form = await openForm(user);
+    await user.click(within(form).getByLabelText("Ver execuções (runs:read)"));
+    await user.click(within(form).getByRole("button", { name: "Criar chave" }));
+    const reveal = await section("Chave criada: gsk_nova");
+    vi.spyOn(navigator.clipboard, "writeText").mockRejectedValue(new Error("negado"));
+
+    await user.click(within(reveal).getByRole("button", { name: "Copiar chave" }));
+
+    await waitFor(() => {
+      expect(within(reveal).getByRole("alert")).toHaveTextContent(
+        "Não foi possível copiar. Selecione o campo e copie à mão.",
+      );
+    });
+    expect(within(reveal).getByRole("status")).toBeEmptyDOMElement();
   });
 
   it("o segredo não vai para o storage nem para o console e some com Já copiei", async () => {
