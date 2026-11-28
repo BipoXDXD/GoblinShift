@@ -267,7 +267,8 @@ services:
     depends_on:
       openobserve:
         condition: service_started
-    # IP fixo (ADR 051, C1): o Nginx manda o access log por syslog para um IP, sem DNS. Igual
+    # IP fixo (ADR 051, C1), reservado para o syslog do access log do Nginx, que ainda não está
+    # ligado: hoje o access log é só local (docker/nginx/templates/default.conf.template). Igual
     # ao de deploy/coolify/infra.json. O IP só fica reservado com o Collector de pé: parado, um
     # container dinâmico pode pegá-lo, e aí o Collector não sobe (Address already in use; o
     # roteiro do deploy manda abortar).

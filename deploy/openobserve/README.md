@@ -124,7 +124,15 @@ Fora de span: a Run encerrada por `INFRA_POISON` no claim (`runs/worker/claim.py
 - **Objetos marcados missing** (`gs-causa-objetos-ausentes`). Arquivos sumiram do storage montado, abaixo do limitador. Esperado depois de restaurar o banco; fora disso, investigue o que apagou arquivos fora do expurgo. `missing` é final, e a reserva do objeto já foi liberada.
 - **Objetos ilegíveis** (`gs-causa-objetos-ilegiveis`). O `stat` falhou com erro que não é ausência; o objeto fica como está e a varredura volta nele na próxima passada. O log `objetos ilegíveis no storage` traz `errnos` (contagem por errno) e `sample` (até 5 chaves com o errno de cada). `EIO` indica o disco: veja `dmesg` e o filesystem antes de qualquer coisa, porque o storage não tem backup. `EACCES` indica dono ou permissão do caminho, quase sempre depois de mexer no filesystem à mão. Esta causa só vê erro no `stat` de objeto: sentinela ilegível derruba a varredura antes disso e aparece em `gs-causa-varredura-falhou`.
 - **Arquivos não removidos** (`gs-causa-arquivos-nao-removidos`). A remoção falhou depois do commit, e nada repete a tentativa: o objeto do expurgo já está `deleted`, e o pendente (upload incompleto ou candidato) já perdeu a linha. O arquivo fica no disco e passa da retenção prometida. Cada falha está no log `arquivo não removido do disco`, com `storage_key`, o `errno` (`EIO` é o disco, `EACCES` é permissão) e o traceback sem a mensagem. Corrija a causa (disco ou permissão) e apague cada chave à mão, conferindo antes que nenhuma linha fora de `deleted` em `stored_object` aponta para ela.
-- **Capacidade global perto do teto.** As reservas passam de 85% dos 20 GiB do ambiente. Veja as contas que mais ocupam (`gs-admin usage --user <id>`; `gs-admin set-limits` ajusta o teto de uma conta) e o disco do storage; se o uso é legítimo, suba o teto do pool global com cuidado com o disco real.
+- **Capacidade global perto do teto.** As reservas passam de 85% dos 20 GiB do ambiente. Veja as contas que mais ocupam (`gs-admin usage --user <id>`; `gs-admin set-limits` ajusta o teto de uma conta) e o disco do storage; se o uso é legítimo, suba o teto do pool global. Nunca passe do espaço real do filesystem do storage (`df -B1 /srv/goblinshift/storage`), nem desça abaixo do já reservado (o banco recusa). Confira que o comando devolveu exatamente uma linha, com o valor novo:
+
+  ```bash
+  psql_gs() { sudo docker exec -i goblinshift-postgres-1 psql -U goblinshift -d goblinshift -v ON_ERROR_STOP=1 "$@"; }
+  bytes=$((30 * 1024 * 1024 * 1024))   # teto novo, em bytes
+  psql_gs -v bytes="$bytes" <<'SQL'
+  UPDATE capacity_pool SET max_amount = :'bytes' WHERE scope = 'global' AND resource = 'storage_bytes' RETURNING max_amount;
+  SQL
+  ```
 - **Varredura falhando** (`gs-causa-varredura-falhou`). O log `varredura de ausentes falhou` traz o traceback. Erro de banco tende a passar sozinho; erro de leitura da sentinela indica o filesystem do storage, e aí vale o mesmo roteiro de objetos ilegíveis. O resto do ciclo continua rodando, exceto na perda de conexão com o banco (ADR 053): aí a volta também conta em `gs-causa-ciclos-falhando` e pula os passos de banco restantes.
 - **Temporários no storage** (`gs-causa-temporarios-no-storage`). A limpeza dos `.part` que uma queda deixou no storage falhou em três voltas ou mais. Eles ficam fora do livro-razão e do backlog de arquivos, então, sem a limpeza, o disco enche sem que nenhuma cota perceba. O log `limpeza de temporários falhou` traz o `errno` e o traceback do diretório, sem a mensagem; a falha de um arquivo sai como `temporário não removido`, com o nome em `tmp_part` e o `errno`. Veja `mountpoint /srv/goblinshift/storage`, o dono e a permissão do diretório de temporários e `dmesg` (`errno` `EIO` é o disco, `EACCES` é permissão, quase sempre depois de mexer à mão). Corrigida a causa, a volta seguinte apaga o que passou do prazo. A limpeza só usa o storage e roda mesmo com o banco inalcançável, quando os passos de banco da volta são pulados. Se for urgente liberar espaço, apague à mão só `.part` antigos: um `.part` recente pode ser upload em curso. Não há limiar sobre `maintenance.tmp_parts_bytes`, porque ele inclui esses uploads.
 - **Ciclos falhando** (`gs-causa-ciclos-falhando`). Dois logs levam a este alerta. `ciclo de manutenção falhou` traz `cycle` (`execuções` ou `contas`) e o traceback: o ciclo inteiro caiu, e as contagens dele faltam no span. `passo da manutenção falhou` traz `step` (o passo do ciclo de execuções, como `reconcile_expired_leases` ou `measure`, ou o do ciclo de contas, como `accounts_purged`), `error_type` e `sqlstate`, sem a mensagem do banco: os outros passos rodaram, e só as contagens do passo falho faltam no span (a varredura de ausentes mantém as dela mesmo na perda de conexão). `purga da conta falhou` traz `user_id`, `error_type` e `sqlstate`: as outras contas seguiram. Com o banco inalcançável, o primeiro passo que falha por conexão faz a volta pular os passos de banco restantes (log `banco inalcançável; passos de banco pulados nesta volta`, com `failed_step` e `skipped`; contagem `maintenance.steps_skipped`). Enquanto a falha durar, as causas que dependem das contagens que faltam não valem como sinal de que está tudo bem. Corrija a causa no banco ou no storage; a volta seguinte retoma sozinha. Publicar a infraestrutura com o banco fora por 90 s ou mais dispara este alerta (três voltas de 30 s): é esperado se ele parar sozinho com o banco de volta.
@@ -210,12 +218,12 @@ A tolerância de 3 h do check da aceitação cobre o sorteio de até 30 min do t
 
 ## Segredos
 
-Nada de credencial ou URL de destino na linha de comando: tudo vem de arquivos no formato `.env` com `chmod 600` (o script recusa arquivo legível por outros). `--secrets-file` é repetível; numa chave repetida, vale o último arquivo.
+Nada de credencial ou URL de destino na linha de comando: tudo vem de arquivos no formato `.env` com `chmod 600` (o script recusa arquivo legível por outros). `--secrets-file` é repetível; numa chave repetida, vale o último arquivo. A credencial do OpenObserve vive nas variáveis privadas do recurso de infraestrutura no Coolify: copie as duas para um arquivo `chmod 600` só para o provisionamento e apague-o depois.
 
 | Chave | Obrigatória | Conteúdo |
 |---|---|---|
-| `OPENOBSERVE_ROOT_EMAIL` | sim | usuário do OpenObserve; na VPS já está em `/srv/goblinshift/secrets/app.env` |
-| `OPENOBSERVE_ROOT_PASSWORD` | sim | senha dele, no mesmo arquivo |
+| `OPENOBSERVE_ROOT_EMAIL` | sim | usuário do OpenObserve; na produção é variável privada do recurso de infraestrutura no Coolify (`deploy/coolify/infra.json`) |
+| `OPENOBSERVE_ROOT_PASSWORD` | sim | senha dele, variável privada do mesmo recurso |
 | `GS_ALERT_URGENT_URL` | sim | webhook HTTPS do canal urgente |
 | `GS_ALERT_WARNING_URL` | não | webhook HTTPS dos avisos; sem ela, os avisos vão para o urgente |
 | `GS_ALERT_HEARTBEAT_URL` | sim | URL de ping de um check do healthchecks.io |
@@ -260,15 +268,18 @@ A saída lista cada template, destino e alerta criado, atualizado ou removido. A
 
 Na primeira vez num stream sem as colunas dos SLOs (antes da primeira Run terminada depois do deploy, por exemplo), o script grava um span-semente, `goblinshift.schema-seed` com `main = false`, que declara as colunas. Ele não conta em nenhum SLO, porque todas as consultas filtram `main = 'true'`; sem ele, o OpenObserve recusaria a consulta em toda avaliação.
 
-Também dá para rodar na própria VPS, sem túnel, a partir do [checkout temporário](../../README.md#checkout-temporário-na-vps) (nunca da cópia parada em `/srv/goblinshift/app`), como o usuário `goblinshift` (dono de `/srv/goblinshift/secrets`, modo 700), somando o `app.env` (credencial) a um arquivo só com as URLs, também com `chmod 600`:
+Também dá para rodar na própria VPS, sem túnel, a partir do [checkout temporário](../../README.md#checkout-temporário-na-vps) (nunca da cópia parada em `/srv/goblinshift/app`), como o usuário `goblinshift` (dono de `/srv/goblinshift/secrets`, modo 700). A credencial vem das variáveis privadas do recurso de infraestrutura no Coolify (`OPENOBSERVE_ROOT_EMAIL` e `OPENOBSERVE_ROOT_PASSWORD`), copiadas para um arquivo `chmod 600` só para o provisionamento, somado a um arquivo só com as URLs, também com `chmod 600`:
 
 ```bash
+sudo -u goblinshift install -m 600 /dev/null /srv/goblinshift/secrets/openobserve.env
+sudo -u goblinshift "$EDITOR" /srv/goblinshift/secrets/openobserve.env   # as duas chaves, copiadas do Coolify
 cd "$gs_tmp/repo/deploy"
 sudo -u goblinshift python3 -B -m openobserve provision \
-  --secrets-file /srv/goblinshift/secrets/app.env --secrets-file /srv/goblinshift/secrets/alertas.env
+  --secrets-file /srv/goblinshift/secrets/openobserve.env --secrets-file /srv/goblinshift/secrets/alertas.env
+sudo -u goblinshift rm /srv/goblinshift/secrets/openobserve.env
 ```
 
-**Disco e heartbeat.** O alerta de disco e o heartbeat leem `system_filesystem_utilization`, que o Collector produz com as montagens do `compose.prod.yaml`. O provisionamento falha enquanto esse stream não existir: confira que a publicação com o Collector novo já rodou. Depois de mudar só o `docker/otel-collector/config.yaml`, publique o recurso de infraestrutura no Coolify e rode `sudo docker restart goblinshift-otel-collector-1` na VPS.
+**Disco e heartbeat.** O alerta de disco e o heartbeat leem `system_filesystem_utilization`, que o Collector produz com as montagens de `deploy/coolify/infra.json` (`/srv/goblinshift/pg`, `/srv/goblinshift/storage` e `/srv/goblinshift/telemetry`, só leitura, em `/hostfs`). O provisionamento falha enquanto esse stream não existir: confira que a publicação com o Collector novo já rodou. Depois de mudar só o `docker/otel-collector/config.yaml`, publique o recurso de infraestrutura no Coolify e rode `sudo docker restart goblinshift-otel-collector-1` na VPS.
 
 ## Relatório do SLI e do orçamento
 
