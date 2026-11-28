@@ -104,6 +104,7 @@ def test_catalogo_tem_queima_por_slo_e_nivel_causas_e_heartbeat() -> None:
         "gs-causa-fila-cheia",
         "gs-causa-disco",
         "gs-causa-execucao-presa",
+        "gs-causa-fila-parada",
         "gs-causa-limitador-de-exclusoes",
         "gs-causa-exclusao-de-conta-atrasada",
         "gs-causa-auditoria-atrasada",
@@ -199,6 +200,7 @@ def test_descricao_cabe_no_json_do_template_sem_escape(alert: Alert) -> None:
 def test_alertas_da_manutencao_leem_o_span_do_ciclo_no_stream_de_traces() -> None:
     names = {
         "gs-causa-execucao-presa",
+        "gs-causa-fila-parada",
         "gs-causa-limitador-de-exclusoes",
         "gs-causa-exclusao-de-conta-atrasada",
         "gs-causa-auditoria-atrasada",
@@ -227,6 +229,15 @@ def test_colunas_dos_alertas_da_manutencao_sao_declaradas() -> None:
     for column in CAUSE_COLUMNS:
         assert column in TRACE_COLUMNS
     assert "maintenance_runs_stuck_stopping" in CAUSE_COLUMNS
+    assert "maintenance_queue_stalled_runs" in CAUSE_COLUMNS
+
+
+def test_fila_parada_acorda_o_destino_urgente_lendo_a_contagem_do_ciclo() -> None:
+    [alert] = [a for a in alerts(stream="s", prefix=PREFIX) if a.name == "gs-causa-fila-parada"]
+
+    assert alert.destination is DestinationKey.URGENT
+    assert (alert.period_minutes, alert.silence_minutes) == (10, 60)
+    assert "maintenance_queue_stalled_runs" in alert.sql
 
 
 @pytest.mark.parametrize("log", ["executor não iniciou", "área de trabalho falhou"])

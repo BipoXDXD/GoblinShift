@@ -127,6 +127,7 @@ DISK_STREAM = "system_filesystem_utilization"
 CAUSE_COLUMNS: tuple[str, ...] = (
     "main",
     "maintenance_runs_stuck_stopping",
+    "maintenance_queue_stalled_runs",
     "maintenance_purge_limit_reached",
     "maintenance_accounts_deletion_overdue",
     "maintenance_audit_events_overdue",
@@ -177,6 +178,15 @@ SPAN_CAUSES: tuple[_SpanCause, ...] = (
         "causa-execucao-presa",
         "Execução presa em stopping há mais de 10 min: o executor não confirmou a parada e a "
         "Run segura a vaga da tentativa. Veja o runbook em deploy/openobserve/README.md.",
+        period_minutes=10,
+        silence_minutes=60,
+        destination=DestinationKey.URGENT,
+    ),
+    _SpanCause(
+        "causa-fila-parada",
+        "Fila parada: Run elegível há mais de 10 min e nenhuma tentativa viva; o worker parece "
+        "fora. Sem ação, a Run vence em QUEUE_EXPIRED. Veja o runbook em "
+        "deploy/openobserve/README.md.",
         period_minutes=10,
         silence_minutes=60,
         destination=DestinationKey.URGENT,

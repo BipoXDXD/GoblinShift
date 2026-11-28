@@ -28,7 +28,7 @@ from dataclasses import asdict, dataclass, field
 from datetime import datetime, timedelta
 from functools import partial
 
-from sqlalchemy import ColumnElement, and_, func, select
+from sqlalchemy import ColumnElement, and_, exists, func, or_, select
 from sqlalchemy.exc import DBAPIError, OperationalError
 from sqlalchemy.exc import TimeoutError as PoolTimeoutError
 from sqlalchemy.orm import Session, sessionmaker
@@ -54,6 +54,7 @@ from goblinshift.runs.lifecycle import (
     Event,
     ExecutorStopped,
     LeaseExpired,
+    Phase,
     QueueExpired,
     Refused,
     Status,
@@ -85,6 +86,9 @@ DEFAULT_BATCH_SIZE = 50
 UNREADABLE_LOG_SAMPLE = 5
 # Alerta de causa (3.7): Run em `stopping` há mais que isto, desde o pedido, sem confirmar a parada.
 STUCK_STOPPING_AFTER = timedelta(minutes=10)
+# Alerta de causa (#442, 21a): Run elegível há mais que isto sem nenhuma tentativa viva no banco.
+# Com pouco tráfego, o SLO de execução não avalia, e a Run venceria em `QUEUE_EXPIRED` sem aviso.
+QUEUE_STALLED_AFTER = timedelta(minutes=10)
 # `run.finished` ao menos uma vez (D5 do #442): a Run terminal sem a marca de reportada é reemitida
 # passada a carência, que deixa quem a concluiu emitir primeiro; mais velha que o horizonte, não
 # volta, para uma falha que se repete não reemitir a mesma Run para sempre.
@@ -888,6 +892,7 @@ class Maintenance:
             ).scalar_one()
             storage = capacity.global_usage(session)
             return {
+                "queue_stalled_runs": _queue_stalled_runs(session, now),
                 **history_backlog(session, now),
                 **file_backlog(session, now),
                 "reservations_to_remove": capacity.released_backlog(session, now),
@@ -1047,3 +1052,23 @@ def _discard_locked(session: Session, run_id: uuid.UUID, attempt_id: uuid.UUID) 
     if load_run_any_owner(session, run_id, skip_locked=True) is None:
         return None
     return discard_candidates(session, attempt_id)
+
+
+def _queue_stalled_runs(session: Session, now: datetime) -> int:
+    """Runs elegíveis há mais de `QUEUE_STALLED_AFTER` com nenhum worker trabalhando.
+
+    Conta as que esperam claim (`queued`, ou `running` em `retry_wait`) só quando não há tentativa
+    aberta com o lease em dia: o worker ocupado numa Run longa não é fila parada, e qualquer
+    tentativa viva mostra que há worker de pé.
+    """
+    live_attempt = exists().where(attempt.c.ended_at.is_(None), attempt.c.lease_expires_at >= now)
+    waiting = or_(
+        run.c.status == Status.QUEUED,
+        and_(run.c.status == Status.RUNNING, run.c.phase == Phase.RETRY_WAIT),
+    )
+    stalled: int = session.execute(
+        select(func.count()).where(
+            waiting, run.c.eligible_at <= now - QUEUE_STALLED_AFTER, ~live_attempt
+        )
+    ).scalar_one()
+    return stalled

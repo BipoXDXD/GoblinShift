@@ -248,6 +248,64 @@ def test_run_parada_por_executor_indisponivel_conta_como_presa_pelo_pedido(
     assert counts["runs_stuck_stopping"] == stuck
 
 
+def eligible_since(factory: sessionmaker[Session], run_id: uuid.UUID, minutes: int) -> None:
+    with unit_of_work(factory) as session:
+        session.execute(
+            update(run)
+            .where(run.c.id == run_id)
+            .values(eligible_at=func.now() - timedelta(minutes=minutes))
+        )
+
+
+@pytest.mark.parametrize(("minutes_ago", "stalled"), [(11, 1), (9, 0)])
+def test_fila_sem_worker_conta_run_elegivel_ha_mais_de_10_min(
+    factory: sessionmaker[Session],
+    storage: FileStorage,
+    work_root: Path,
+    minutes_ago: int,
+    stalled: int,
+) -> None:
+    run_id = queue_run(factory, storage, create_user(factory))
+    eligible_since(factory, run_id, minutes_ago)
+
+    counts = maintenance(factory, storage, work_root).run_cycle()
+
+    assert counts["queue_stalled_runs"] == stalled
+
+
+def test_fila_com_tentativa_viva_nao_conta_como_parada(
+    factory: sessionmaker[Session], storage: FileStorage, work_root: Path
+) -> None:
+    # Worker ocupado numa Run longa (lease em dia) não é fila parada, mesmo com outra esperando.
+    queue_run(factory, storage, create_user(factory, "ana"))
+    claim(factory, storage)
+    waiting = queue_run(factory, storage, create_user(factory, "bia"))
+    eligible_since(factory, waiting, 30)
+
+    counts = maintenance(factory, storage, work_root).run_cycle()
+
+    assert counts["queue_stalled_runs"] == 0
+
+
+def test_retry_wait_vencido_sem_worker_conta(
+    factory: sessionmaker[Session], storage: FileStorage, work_root: Path
+) -> None:
+    run_id = queue_run(factory, storage, create_user(factory))
+    claimed = claim(factory, storage)
+    with unit_of_work(factory) as session:
+        session.execute(
+            update(attempt)
+            .where(attempt.c.id == claimed.attempt_id)
+            .values(ended_at=func.now(), lease_expires_at=func.now())
+        )
+        session.execute(update(run).where(run.c.id == run_id).values(phase="retry_wait"))
+    eligible_since(factory, run_id, 11)
+
+    counts = maintenance(factory, storage, work_root).run_cycle()
+
+    assert counts["queue_stalled_runs"] == 1
+
+
 def test_ciclo_mede_a_capacidade_global_e_o_limitador(
     factory: sessionmaker[Session], storage: FileStorage, work_root: Path
 ) -> None:
