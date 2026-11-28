@@ -22,13 +22,19 @@ function validationFailed(code: string): UploadFailure {
 describe("uploadFailureMessage", () => {
   it("diz que o conteúdo não parece vídeo no signature_mismatch", () => {
     expect(uploadFailureMessage(validationFailed("signature_mismatch"))).toBe(
-      "Este arquivo não parece um vídeo. Acima do tamanho comum, só vídeos são aceitos.",
+      "Arquivos grandes só são aceitos se forem vídeo, como MP4, MOV ou WebM.",
     );
   });
 
   it("pede novo envio no size_mismatch", () => {
     expect(uploadFailureMessage(validationFailed("size_mismatch"))).toBe(
       "O arquivo chegou com tamanho diferente do esperado. Envie de novo.",
+    );
+  });
+
+  it("não confunde herança do objeto com texto próprio", () => {
+    expect(uploadFailureMessage(validationFailed("toString"))).toBe(
+      TEXT.failure.problems.VALIDATION_FAILED,
     );
   });
 

@@ -228,8 +228,9 @@ export const TEXT = {
       announceFailed: (name: string) => `Falha ao enviar ${name}.`,
       // `errors[].code` do 422 do envio do conteúdo; o front não conhece o teto comum em bytes.
       contentErrors: {
+        // Formatos que `processing/media_mill/signature.py` reconhece; MKV (DocType `matroska`) não.
         signature_mismatch:
-          "Este arquivo não parece um vídeo. Acima do tamanho comum, só vídeos são aceitos.",
+          "Arquivos grandes só são aceitos se forem vídeo, como MP4, MOV ou WebM.",
         size_mismatch: "O arquivo chegou com tamanho diferente do esperado. Envie de novo.",
       },
     },

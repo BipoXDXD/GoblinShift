@@ -11,7 +11,9 @@ const CONTENT_ERRORS: Readonly<Record<string, string>> = TEXT.workbench.upload.c
 export function uploadFailureMessage(failure: UploadFailure): string {
   if (failure.kind === "problem" && failure.problem.code === "VALIDATION_FAILED") {
     for (const error of failure.problem.errors ?? []) {
-      const message = CONTENT_ERRORS[error.code];
+      const message = Object.hasOwn(CONTENT_ERRORS, error.code)
+        ? CONTENT_ERRORS[error.code]
+        : undefined;
       if (message !== undefined) {
         return message;
       }
