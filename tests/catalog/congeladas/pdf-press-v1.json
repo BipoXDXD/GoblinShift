@@ -1,0 +1,83 @@
+{
+  "defaults": {
+    "operation": "merge",
+    "pages_per_document": 1,
+    "select": null
+  },
+  "variant_schema": {
+    "properties": {
+      "parameters": {
+        "additionalProperties": false,
+        "properties": {
+          "operation": {
+            "default": "merge",
+            "enum": [
+              "merge",
+              "split",
+              "select"
+            ],
+            "title": "Operation",
+            "type": "string"
+          },
+          "pages_per_document": {
+            "default": 1,
+            "maximum": 200,
+            "minimum": 1,
+            "type": "integer"
+          },
+          "select": {
+            "anyOf": [
+              {
+                "items": {
+                  "additionalProperties": false,
+                  "description": "Uma página escolhida: o upload da execução e o número da página, a partir de 1.",
+                  "properties": {
+                    "page_number": {
+                      "maximum": 200,
+                      "minimum": 1,
+                      "type": "integer"
+                    },
+                    "upload_id": {
+                      "format": "uuid",
+                      "title": "Upload Id",
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "upload_id",
+                    "page_number"
+                  ],
+                  "title": "PageSelectionParameters",
+                  "type": "object"
+                },
+                "maxItems": 400,
+                "minItems": 1,
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Select"
+          }
+        },
+        "title": "PdfPressV1Parameters",
+        "type": "object"
+      },
+      "recipe_id": {
+        "const": "pdf-press"
+      },
+      "recipe_version": {
+        "const": 1
+      }
+    },
+    "required": [
+      "recipe_id",
+      "recipe_version",
+      "parameters"
+    ],
+    "title": "pdf-press v1",
+    "type": "object"
+  }
+}
