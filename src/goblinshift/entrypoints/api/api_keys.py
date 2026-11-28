@@ -27,9 +27,8 @@ from goblinshift.entrypoints.api.dependencies import (
     SessionPrincipal,
 )
 from goblinshift.entrypoints.api.idempotency import (
-    IDEMPOTENCY_KEY_HEADER,
     idempotency_key_parameter,
-    key_invalid_problem,
+    parse_idempotency_header,
 )
 from goblinshift.entrypoints.api.json_command import command_openapi, json_command
 from goblinshift.entrypoints.api.problems import ApiProblem, ProblemCode, problem_responses
@@ -53,7 +52,6 @@ from goblinshift.identity import (
     revoke_owned_key,
 )
 from goblinshift.identity.keys import MIN_KEY_DAYS
-from goblinshift.runs.acceptance import IdempotencyKeyInvalidError, parse_idempotency_key
 
 router = APIRouter(tags=["api-keys"])
 
@@ -123,7 +121,8 @@ def create_api_key(
 ) -> CreatedApiKey:
     if principal.session_id is None:
         raise RuntimeError("Principal de sessão sem session_id")
-    idem_key = _idempotency_key(request)
+    # Lida à mão e publicada em `_create_api_key_openapi` (motivo em `idempotency`).
+    idem_key = parse_idempotency_header(request)
     scopes = frozenset(command.scopes)
     try:
         with session.begin():
@@ -186,17 +185,6 @@ def revoke_api_key(
     if not found:
         raise ApiProblem(ProblemCode.NOT_FOUND, "Chave não encontrada.")
     return Response(status_code=204)
-
-
-def _idempotency_key(request: Request) -> str | None:
-    # Lida à mão e publicada em `_create_api_key_openapi` (motivo em `idempotency`).
-    raw = request.headers.get(IDEMPOTENCY_KEY_HEADER)
-    if raw is None:
-        return None
-    try:
-        return parse_idempotency_key(raw)
-    except IdempotencyKeyInvalidError:
-        raise key_invalid_problem() from None
 
 
 def _key_response(key: KeySummary) -> ApiKeyResponse:
