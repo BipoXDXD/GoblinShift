@@ -26,10 +26,15 @@ escolhida aqui vale para as próximas (Downloads Detox e PDF Press).
 - **Latin-1 (D4 = a).** Byte de controle C1 (0x80–0x9F) recusa o item com `UNSUPPORTED_FORMAT`
   e diz que o arquivo parece Windows-1252. BOM do UTF-8 com codificação de 8 bits também recusa.
 - **`Sunset`.** A v1 passa a `deprecated` com `sunset_at` no primeiro dia do mês seguinte a
-  (data do merge + 90 dias): 2027-03-01T00:00:00Z para o merge em 2026-11-28.
+  (data do merge + 90 dias), calculado por `sunset_after_merge` a partir de um prazo de merge
+  fixo (`CSV_JANITOR_V2_MERGE_DEADLINE`, 2026-11-30): 2027-03-01T00:00:00Z. A data não lê o
+  relógio; um merge depois do prazo move o prazo, e o Sunset segue a regra.
 - **Bancada.** O módulo da receita declara `reusableVersions: [1]`: preset ou execução da v1 abre
   no formulário da v2 com os parâmetros, sobre os defaults da v2.
-- **Presets v1** seguem rodando a v1 até a retirada, que fica para outro plano.
+- **Presets v1.** Pela API, um preset v1 continua rodando a v1 até a retirada, que fica para
+  outro plano. Pela Bancada, ele abre no formulário da v2 e roda como v2, e "Atualizar preset" o
+  grava como v2: é a migração a pedido do usuário, com a mesma semântica, porque os defaults dos
+  campos novos reproduzem a v1.
 
 ## Alternativas descartadas
 
