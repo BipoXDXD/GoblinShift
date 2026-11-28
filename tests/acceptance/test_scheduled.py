@@ -2,7 +2,8 @@
 
 O script só roda na VPS, como root. Aqui `docker`, `python3` e `curl` são falsos que registram,
 numa única lista, cada chamada na ordem em que aconteceu; o `curl` registra a URL que leu do
-stdin, que é por onde ela passa (deploy/backup/lib.sh).
+stdin, que é por onde ela passa (deploy/backup/lib.sh). A trava da publicação é um arquivo do
+tmp_path e o `flock` é o de verdade.
 """
 
 import configparser
@@ -12,6 +13,8 @@ import shutil
 import signal
 import subprocess
 import time
+from collections.abc import Iterator
+from contextlib import contextmanager
 from pathlib import Path
 
 import pytest
@@ -33,6 +36,8 @@ CHECK_URL = "https://hc-ping.com/0b1c2d3e-CANARY-aceitacao"
 WORKER = "w0rk3r"
 SCRIPT_TIMEOUT_S = 30
 SIGTERM_EXIT = 128 + signal.SIGTERM
+# EX_TEMPFAIL: a trava da publicação estava ocupada ou ausente e nada foi tocado.
+LOCK_BUSY_EXIT = 75
 
 FAKE_DOCKER = """#!/bin/sh
 echo "docker $*" >>"$FAKE_CALLS"
@@ -80,6 +85,11 @@ echo "python3 $* (em $(basename "$PWD"))" >>"$FAKE_CALLS"
 sleep "${FAKE_ACCEPTANCE_SLEEP_S:-0}"
 exit "${FAKE_ACCEPTANCE_RC:-0}"
 """
+# O python3 que confere, durante a aceitação, se a trava da publicação continua com o script.
+FAKE_PYTHON_PROBING_LOCK = """#!/bin/sh
+if flock -n "$ACCEPTANCE_RELEASE_LOCK" true; then trava=livre; else trava=ocupada; fi
+echo "python3 trava $trava" >>"$FAKE_CALLS"
+"""
 FAKE_CURL = """#!/bin/sh
 echo "curl-argv $*" >>"$FAKE_ARGV"
 echo "curl $(sed -n 's/^url = "\\(.*\\)"$/\\1/p')" >>"$FAKE_CALLS"
@@ -101,6 +111,7 @@ def fakes(tmp_path: Path) -> Path:
         command = bin_dir / name
         command.write_text(body)
         command.chmod(0o755)
+    (tmp_path / "release.lock").touch()
     return tmp_path
 
 
@@ -110,6 +121,7 @@ def script_env(fakes: Path, url: str | None, worker: str) -> dict[str, str]:
         "FAKE_CALLS": str(fakes / "calls"),
         "FAKE_ARGV": str(fakes / "argv"),
         "FAKE_WORKER": worker,
+        "ACCEPTANCE_RELEASE_LOCK": str(fakes / "release.lock"),
     }
     if url is not None:
         env["ACCEPTANCE_HEALTHCHECK_URL"] = url
@@ -122,10 +134,12 @@ def scheduled(
     url: str | None = CHECK_URL,
     worker: str = WORKER,
     running: str = "true",
+    extra_env: dict[str, str] | None = None,
     **rc: int,
 ) -> tuple[subprocess.CompletedProcess[str], list[str]]:
     env = {
         **script_env(fakes, url, worker),
+        **(extra_env or {}),
         "FAKE_RUNNING": running,
         **{f"FAKE_{name.upper()}_RC": str(code) for name, code in rc.items()},
     }
@@ -315,6 +329,75 @@ def test_lista_de_workers_ilegivel_reprova_sem_rodar_a_aceitacao(fakes: Path) ->
 
     assert result.returncode == 1
     assert calls == [f"curl {CHECK_URL}/start", worker_lookup(), f"curl {CHECK_URL}/fail"]
+
+
+@contextmanager
+def release_lock_held(path: Path) -> Iterator[None]:
+    """Segura a trava como o receptor da publicação: outro processo, `flock` exclusivo.
+
+    Um processo só (o `sleep` herda o descritor), para que matá-lo solte a trava e feche o pipe.
+    """
+    holder = subprocess.Popen(  # noqa: S603 - script fixo
+        [  # noqa: S607 - o bash e o flock do PATH, como na unit
+            "bash",
+            "-c",
+            'exec 9>>"$1" && flock 9 && echo segurando && exec sleep 60',
+            "_",
+            str(path),
+        ],
+        stdout=subprocess.PIPE,
+        text=True,
+    )
+    try:
+        assert holder.stdout is not None
+        assert holder.stdout.readline().strip() == "segurando"
+        yield
+    finally:
+        holder.kill()
+        holder.communicate(timeout=SCRIPT_TIMEOUT_S)
+
+
+def test_trava_ocupada_nao_para_o_worker(fakes: Path) -> None:
+    # Uma publicação em curso recriaria worker e manutenção no meio das sondas (D14 = b: espera
+    # até o prazo e desiste sem tocar em nada).
+    with release_lock_held(fakes / "release.lock"):
+        result, calls = scheduled(fakes, extra_env={"ACCEPTANCE_LOCK_WAIT_S": "0.5"})
+
+    assert result.returncode == LOCK_BUSY_EXIT
+    assert "publicação" in result.stderr
+    assert calls == [f"curl {CHECK_URL}/fail"]
+
+
+def test_trava_ausente_nao_para_o_worker(fakes: Path) -> None:
+    (fakes / "release.lock").unlink()
+
+    result, calls = scheduled(fakes)
+
+    assert result.returncode == LOCK_BUSY_EXIT
+    assert calls == [f"curl {CHECK_URL}/fail"]
+
+
+def test_trava_liberada_dentro_do_prazo_segue_com_o_teste(fakes: Path) -> None:
+    holder = subprocess.Popen(  # noqa: S603 - flock localizado no PATH
+        ["flock", str(fakes / "release.lock"), "sleep", "1"],  # noqa: S607
+    )
+    time.sleep(0.2)
+    try:
+        result, calls = scheduled(fakes, extra_env={"ACCEPTANCE_LOCK_WAIT_S": "20"})
+    finally:
+        holder.wait(timeout=SCRIPT_TIMEOUT_S)
+
+    assert result.returncode == 0, result.stderr
+    assert "python3 -E -s -B -m acceptance.run (em deploy)" in calls
+
+
+def test_trava_livre_e_segurada_durante_o_teste(fakes: Path) -> None:
+    (fakes / "bin" / "python3").write_text(FAKE_PYTHON_PROBING_LOCK)
+
+    result, calls = scheduled(fakes)
+
+    assert result.returncode == 0, result.stderr
+    assert "python3 trava ocupada" in calls
 
 
 def test_sem_a_url_nao_roda_nada(fakes: Path) -> None:

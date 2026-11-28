@@ -1,5 +1,6 @@
 """Real processes/flock/files, synthetic Docker/Coolify boundaries; no production access."""
 
+import fcntl
 import json
 import multiprocessing
 import os
@@ -254,6 +255,27 @@ class HostIsolationTests(unittest.TestCase):
         self.assert_refused_before_input("goblinshift")
         (self.root / "continue").touch()
         self.assertEqual(self.finish(first), 0, (self.root / "duora.log").read_text())
+        second = self.start("goblinshift")
+        self.assertEqual(self.finish(second), 0, (self.root / "goblinshift.log").read_text())
+        self.assert_preserved()
+
+    def test_receptor_recusa_publicar_durante_a_aceitacao(self) -> None:
+        # O deploy/acceptance/scheduled.sh segura a release.lock do goblinshift por um descritor
+        # somente leitura (ProtectSystem=strict). Com LOCK_NB, a publicação que chega nessa janela
+        # falha na hora, antes de qualquer escrita, e precisa ser rodada de novo depois (R15).
+        state = self.root / "state" / "goblinshift"
+        state.mkdir(parents=True)
+        lock = state / "release.lock"
+        lock.touch()
+        descriptor = os.open(lock, os.O_RDONLY)
+        try:
+            fcntl.flock(descriptor, fcntl.LOCK_EX | fcntl.LOCK_NB)
+            with self.assertRaises(BlockingIOError), r.release_locks(lock):
+                self.fail("a trava da aceitação não barrou o receptor")
+            self.assert_refused_before_input("goblinshift")
+            self.assertIn("BlockingIOError", (self.root / "goblinshift.log").read_text())
+        finally:
+            os.close(descriptor)
         second = self.start("goblinshift")
         self.assertEqual(self.finish(second), 0, (self.root / "goblinshift.log").read_text())
         self.assert_preserved()

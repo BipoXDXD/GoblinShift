@@ -92,6 +92,8 @@ install -d /tmp/fakebin
 printf '#!/bin/sh\\necho "python3 $* em $PWD" >>/tmp/calls\\n' >/tmp/fakebin/python3
 printf '#!/bin/sh\\necho "docker $*" >>/tmp/calls\\n' >/tmp/fakebin/docker
 chmod 755 /tmp/fakebin/*
+install -d -m 700 /var/lib/coolify-release/goblinshift
+: >/var/lib/coolify-release/goblinshift/release.lock
 cd / && PATH="/tmp/fakebin:$PATH" ACCEPTANCE_HEALTHCHECK_URL=https://hc-ping.com/x \
   {PREFIX}/acceptance/scheduled.sh
 cat /tmp/calls
