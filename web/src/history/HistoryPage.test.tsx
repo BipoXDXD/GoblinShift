@@ -3,6 +3,7 @@ import { act, fireEvent, screen, waitFor, within } from "@testing-library/react"
 import userEvent from "@testing-library/user-event";
 import { describe, expect, it, onTestFinished, vi } from "vitest";
 
+import { createAppQueryClient } from "../app/queryClient";
 import { ANNOUNCE_DELAY_MS } from "../components/a11y/LiveRegion";
 import { untilFakeClock, installAnnounceClock } from "../test/announceClock";
 import { appRoutes, preloadRoutes } from "../test/appRoutes";
@@ -498,6 +499,58 @@ describe("Histórico", () => {
       "/auth/login/google?return_to=%2Fhistorico%3Festado%3Dfailed",
     );
     expect(screen.queryByRole("alert")).toBeNull();
+  });
+
+  // O QueryClient do app (useMe.ts, accountCache.ts): a sessão que acaba no meio da tela leva junto
+  // as execuções da conta anterior.
+  describe("401 numa leitura com a lista na tela", () => {
+    function expireSession() {
+      let expired = false;
+      const api = fakeApi({
+        "GET /api/v1/runs": () =>
+          expired
+            ? problemResponse(401, "AUTHENTICATION_REQUIRED")
+            : page([runBody({ id: RUN_A })]),
+      });
+      const queryClient = createAppQueryClient();
+      renderRoutes({
+        routes: appRoutes(api.client),
+        path: "/historico",
+        client: api.client,
+        queryClient,
+      });
+      return {
+        api,
+        expire: async () => {
+          expired = true;
+          await act(() => queryClient.invalidateQueries({ queryKey: ["runs"] }));
+        },
+      };
+    }
+
+    it("401 numa leitura tira do DOM as execuções da conta anterior", async () => {
+      const { expire } = expireSession();
+      await screen.findByRole("link", { name: /^CSV Janitor, criada em / });
+
+      await expire();
+
+      await waitFor(() => {
+        expect(screen.queryByRole("link", { name: /^CSV Janitor, criada em / })).toBeNull();
+      });
+      expect(await screen.findByRole("region", { name: "Entre para continuar" })).toBeVisible();
+    });
+
+    it("não refaz a leitura em laço depois do 401", async () => {
+      const { api, expire } = expireSession();
+      await screen.findByRole("link", { name: /^CSV Janitor, criada em / });
+
+      await expire();
+      await screen.findByRole("region", { name: "Entre para continuar" });
+      // Dá tempo a um refetch em laço aparecer: o /me relido e o cache limpo não pedem a lista.
+      await act(() => new Promise((resolve) => setTimeout(resolve, 100)));
+
+      expect(listCalls(api.requests)).toEqual(["/api/v1/runs?limit=25", "/api/v1/runs?limit=25"]);
+    });
   });
 
   it("não tem violações do axe com lista e filtros", async () => {
