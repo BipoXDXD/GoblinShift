@@ -31,6 +31,7 @@ from goblinshift.identity import (
     LoginRefusal,
     LoginRefused,
     Scope,
+    SessionNoLongerValidError,
     UnknownAccountError,
     authenticate_api_key,
     authenticate_session,
@@ -325,7 +326,7 @@ def test_emissao_com_principal_de_antes_do_logout_all_e_recusada(
     with unit_of_work(factory) as session:
         revoke_all_credentials(session, user_id, NOW)
 
-    with pytest.raises(UnknownAccountError):
+    with pytest.raises(SessionNoLongerValidError):
         _issue(factory, user_id, web)
 
     assert _active_keys(factory, user_id) == 0
@@ -340,7 +341,7 @@ def test_emissao_espera_o_logout_all_e_e_recusada(factory: sessionmaker[Session]
         emission = in_thread(lambda: _issue(factory, user_id, web))
         wait_until_someone_waits_for_a_lock(factory, "a emissão")
 
-    with pytest.raises(UnknownAccountError):
+    with pytest.raises(SessionNoLongerValidError):
         emission.result()
     assert _active_keys(factory, user_id) == 0
 
@@ -349,7 +350,7 @@ def test_emissao_com_sessao_de_outra_conta_e_recusada(factory: sessionmaker[Sess
     user_id, other = new_user(factory), new_user(factory)
     others_session = new_web_session(factory, other, now=NOW)
 
-    with pytest.raises(UnknownAccountError):
+    with pytest.raises(SessionNoLongerValidError):
         _issue(factory, user_id, others_session)
 
     assert _active_keys(factory, user_id) == 0
@@ -361,7 +362,7 @@ def test_emissao_com_sessao_vencida_e_recusada(factory: sessionmaker[Session]) -
     user_id = new_user(factory)
     web = new_web_session(factory, user_id, now=NOW)
 
-    with pytest.raises(UnknownAccountError):
+    with pytest.raises(SessionNoLongerValidError):
         _issue(factory, user_id, web, NOW + timedelta(minutes=30))
 
     assert _active_keys(factory, user_id) == 0

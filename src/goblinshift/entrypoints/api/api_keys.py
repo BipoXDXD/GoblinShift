@@ -44,6 +44,7 @@ from goblinshift.identity import (
     KeyAlreadyIssuedError,
     KeySummary,
     Scope,
+    SessionNoLongerValidError,
     StoredKeyLimitError,
     UnknownAccountError,
     issue_key_for_session,
@@ -154,8 +155,8 @@ def create_api_key(
             f"A conta já tem {MAX_STORED_KEYS} chaves guardadas, contando as revogadas e vencidas;"
             f" elas saem {KEY_RETENTION.days} dias depois do fim, e então dá para criar outra.",
         ) from None
-    except UnknownAccountError:
-        # Bloqueio ou exclusão chegou depois da autenticação: a credencial deixou de valer.
+    except UnknownAccountError, SessionNoLongerValidError:
+        # Bloqueio, exclusão ou logout chegou depois da autenticação: a credencial deixou de valer.
         raise ApiProblem(
             ProblemCode.AUTHENTICATION_REQUIRED, "A sessão não vale mais para esta conta."
         ) from None

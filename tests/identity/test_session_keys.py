@@ -19,12 +19,14 @@ from goblinshift.identity import (
     IssuedKey,
     KeyAlreadyIssuedError,
     Scope,
+    SessionNoLongerValidError,
     UnknownAccountError,
     authenticate_api_key,
     issue_key,
     issue_key_for_session,
     list_keys,
     revoke_owned_key,
+    revoke_session,
 )
 from goblinshift.identity.accounts import MAX_LISTED_KEYS, StoredKeyLimitError
 from goblinshift.identity.tables import api_key, app_user
@@ -300,6 +302,26 @@ def test_conta_bloqueada_ou_em_exclusao_nao_emite_chave(
 def test_conta_inexistente_nao_emite_chave(factory: sessionmaker[Session]) -> None:
     with pytest.raises(UnknownAccountError):
         issue(factory, uuid7(), session_id=uuid7())
+
+
+@pytest.mark.parametrize("case", ["revogada", "inexistente"])
+def test_sessao_que_nao_vale_mais_nao_emite_chave(
+    factory: sessionmaker[Session], case: str
+) -> None:
+    # Conta ativa, sessão inválida: o erro é da sessão, não da conta. O `logout-all`, a sessão de
+    # outra conta e a vencida ficam em test_account_authorization.
+    owner = new_user(factory)
+    if case == "revogada":
+        web = new_web_session(factory, owner, now=NOW)
+        with unit_of_work(factory) as session:
+            revoke_session(session, web, NOW)
+    else:
+        web = uuid7()
+
+    with pytest.raises(SessionNoLongerValidError):
+        issue(factory, owner, session_id=web)
+
+    assert stored_count(factory, owner) == 0
 
 
 def test_sem_escopo_e_recusado(factory: sessionmaker[Session]) -> None:

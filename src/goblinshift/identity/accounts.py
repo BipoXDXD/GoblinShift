@@ -90,6 +90,10 @@ class UnknownAccountError(LookupError):
     pass
 
 
+class SessionNoLongerValidError(LookupError):
+    """A sessão que pede a chave foi revogada, venceu, é de outra conta ou não existe."""
+
+
 class InvalidDisplayNameError(ValueError):
     pass
 
@@ -383,9 +387,9 @@ def issue_key_for_session(
     A linha da conta fica travada (`FOR NO KEY UPDATE`) da reconferência até o INSERT. A mesma
     trava enfileira a emissão atrás de um bloqueio, pedido de exclusão ou `logout-all`
     (`sessions.revoke_all_credentials`), que a recusam; o `FOR KEY SHARE` das FKs para a conta
-    (login, criação de Run, auditoria) não espera por ela: conta inativa, ou sessão que não existe,
-    é de outra conta, foi revogada ou venceu, levantam `UnknownAccountError`. A `idem_key` e os
-    tetos ficam em `_issue_locked`.
+    (login, criação de Run, auditoria) não espera por ela. Conta inativa levanta
+    `UnknownAccountError`; sessão que não existe, é de outra conta, foi revogada ou venceu,
+    `SessionNoLongerValidError`. A `idem_key` e os tetos ficam em `_issue_locked`.
     """
     account = session.execute(
         select(app_user.c.id)
@@ -401,7 +405,9 @@ def issue_key_for_session(
     # O Principal foi lido noutra transação: sem reconferir aqui, a emissão que esperou o
     # `logout-all` sairia com chave ativa de uma sessão já revogada.
     if not sessions.session_still_valid(session, session_id=session_id, owner_id=owner_id, now=now):
-        raise UnknownAccountError(f"a sessão {session_id} não vale mais para a conta {owner_id}")
+        raise SessionNoLongerValidError(
+            f"a sessão {session_id} não vale mais para a conta {owner_id}"
+        )
     return _issue_locked(
         session, owner_id=owner_id, scopes=scopes, days=days, now=now, idem_key=idem_key
     )
