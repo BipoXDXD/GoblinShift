@@ -30,6 +30,8 @@ def make_engine(settings: Settings) -> Engine:
             f"-c statement_timeout={settings.db_statement_timeout_ms}",
             f"-c lock_timeout={settings.db_lock_timeout_ms}",
             f"-c idle_in_transaction_session_timeout={settings.db_idle_in_transaction_timeout_ms}",
+            # Datas saem em UTC em toda rota, qualquer que seja o fuso padrão do banco.
+            "-c timezone=UTC",
         ]
     )
     return create_engine(
