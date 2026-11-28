@@ -213,6 +213,41 @@ def test_ciclo_conta_run_presa_em_stopping_ha_mais_de_10_min(
     assert counts["runs_stuck_stopping"] == stuck
 
 
+@pytest.mark.parametrize(("minutes_ago", "stuck"), [(11, 1), (9, 0)])
+def test_run_parada_por_executor_indisponivel_conta_como_presa_pelo_pedido(
+    factory: sessionmaker[Session],
+    storage: FileStorage,
+    work_root: Path,
+    minutes_ago: int,
+    stuck: int,
+) -> None:
+    # Sem cancelamento e com o prazo daqui a 25 min: só o instante do pedido diz a idade.
+    run_id = queue_run(factory, storage, create_user(factory))
+    claimed = claim(factory, storage)
+    with unit_of_work(factory) as session:
+        session.execute(
+            update(run)
+            .where(run.c.id == run_id)
+            .values(
+                status="stopping",
+                phase=None,
+                stop_reason="EXECUTOR_UNAVAILABLE",
+                cancel_requested_at=None,
+                deadline_at=func.now() + timedelta(minutes=25),
+                stop_requested_at=func.now() - timedelta(minutes=minutes_ago),
+            )
+        )
+        session.execute(
+            update(attempt)
+            .where(attempt.c.id == claimed.attempt_id)
+            .values(lease_expires_at=func.now() + timedelta(hours=1))
+        )
+
+    counts = maintenance(factory, storage, work_root).run_cycle()
+
+    assert counts["runs_stuck_stopping"] == stuck
+
+
 def test_ciclo_mede_a_capacidade_global_e_o_limitador(
     factory: sessionmaker[Session], storage: FileStorage, work_root: Path
 ) -> None:

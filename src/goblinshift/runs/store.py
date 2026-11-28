@@ -481,6 +481,8 @@ def _update_run(
     }
     if new.cancel_requested and not old.cancel_requested:
         values["cancel_requested_at"] = func.now()
+    if new.status is Status.STOPPING and old.status is not Status.STOPPING:
+        values["stop_requested_at"] = func.now()
     if new.is_terminal:
         values["finished_at"] = func.now()
     if any(isinstance(effect, StartAttempt) for effect in transition.effects):

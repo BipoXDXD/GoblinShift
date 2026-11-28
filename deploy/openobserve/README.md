@@ -77,7 +77,7 @@ As causas da manutenção leem o span `maintenance.cycle` (`goblinshift.entrypoi
 | `maintenance.steps_skipped` | passos do ciclo de execuções e arquivos não tentados na volta: os de banco depois de uma falha de conexão (log `banco inalcançável; passos de banco pulados nesta volta`) e os que ficaram para trás com a parada pedida (log `parada pedida; passos restantes pulados`); as contagens deles ficam fora do span |
 | `maintenance.executor_image_missing` | `1` se o daemon respondeu que não tem a imagem de `GS_EXECUTOR_IMAGE`, `0` se tem ou se a sonda falhou (causa `gs-causa-imagem-executor-ausente`) |
 | `maintenance.executor_image_probe_failed` | `1` se a sonda não obteve resposta, `0` se obteve; não conta em `maintenance.failed_cycles` (causa `gs-causa-sonda-imagem-falhou`) |
-| `maintenance.runs_stuck_stopping` | Runs em `stopping` desde antes de 10 min (o primeiro entre o cancelamento e o prazo) |
+| `maintenance.runs_stuck_stopping` | Runs em `stopping` há mais de 10 min desde o pedido de parada (`run.stop_requested_at`, gravado na transição; sem ele, o primeiro entre o cancelamento e o prazo) |
 | `maintenance.purge_limit_reached` | `1` se o limitador cortou o expurgo da volta, `0` se não |
 | `maintenance.accounts_deletion_overdue` | contas com `DELETE /me` pedido há 20 h ou mais |
 | `maintenance.audit_events_removed` | eventos de auditoria com mais de 90 dias apagados na volta: lotes repetidos até um vir incompleto ou passar o prazo de 20 s, cada um na sua transação; o que sobra fica para a volta seguinte |

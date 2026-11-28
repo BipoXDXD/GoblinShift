@@ -45,6 +45,8 @@ run = Table(
     Column("queue_expires_at", DateTime(timezone=True), nullable=False),
     Column("deadline_at", DateTime(timezone=True)),
     Column("cancel_requested_at", DateTime(timezone=True)),
+    # Gravada na transição para `stopping` (migração 0032): a medição da Run presa conta dela.
+    Column("stop_requested_at", DateTime(timezone=True)),
     # A primeira razão de parada persistida decide canceled/failed (3.5).
     Column("stop_reason", Text),
     Column("error_code", Text),

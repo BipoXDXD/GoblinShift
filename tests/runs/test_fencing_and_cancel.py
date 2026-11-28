@@ -12,8 +12,21 @@ from sqlalchemy.orm import Session, sessionmaker
 from goblinshift.files.storage import FileStorage
 from goblinshift.platform.db import unit_of_work
 from goblinshift.runs.cancellation import RunNotFoundError, cancel_run
-from goblinshift.runs.lifecycle import Phase, Status
-from goblinshift.runs.store import LostFencing, release_run_holds, run_transaction
+from goblinshift.runs.lifecycle import (
+    MIN_RETRY_JITTER,
+    Phase,
+    Refused,
+    Status,
+    TransientFailure,
+    decide_transition,
+)
+from goblinshift.runs.store import (
+    LostFencing,
+    apply_transition,
+    load_run_any_owner,
+    release_run_holds,
+    run_transaction,
+)
 from goblinshift.runs.tables import attempt, run
 from goblinshift.runs.worker.collection import collect_outputs
 from tests.runs.worker_support import (
@@ -22,6 +35,7 @@ from tests.runs.worker_support import (
     coordinator,
     create_user,
     local_runner,
+    make_eligible_now,
     open_run_uses,
     queue_run,
     run_row,
@@ -184,3 +198,36 @@ def test_cancelar_execucao_de_outra_conta_nao_encontra(
     with factory() as session:
         status = session.execute(select(run.c.status).where(run.c.id == run_id)).scalar_one()
     assert status == "queued"
+
+
+def test_transicao_para_stopping_grava_o_instante_do_pedido(
+    factory: sessionmaker[Session], storage: FileStorage, work_root: Path
+) -> None:
+    run_id = queue_run(factory, storage, create_user(factory))
+    worker = coordinator(factory, storage, local_runner(work_root))
+    # Duas tentativas com o executor iniciado e falha transitória: a segunda esgota MAX_ATTEMPTS.
+    first = claim(factory, storage)
+    worker.record_start(first)
+    worker.fail_transiently(first)
+    make_eligible_now(factory, run_id)
+    second = claim(factory, storage)
+    worker.record_start(second)
+    # Direto pela store: o coordenador confirma a parada na mesma transação e esconderia o
+    # `stopping`, que é o estado que a manutenção mede quando o executor não confirma.
+    with unit_of_work(factory) as session:
+        loaded = load_run_any_owner(session, run_id)
+        assert loaded is not None
+        failure = TransientFailure(second.generation, loaded.now, MIN_RETRY_JITTER)
+        decision = decide_transition(loaded.state, failure)
+        assert not isinstance(decision, Refused)
+        apply_transition(session, loaded, decision)
+    stopping = run_row(factory, run_id)
+
+    worker.conclude_stop(second)
+
+    assert (stopping["status"], stopping["stop_reason"]) == ("stopping", "EXECUTOR_UNAVAILABLE")
+    assert stopping["stop_requested_at"] is not None
+    assert stopping["cancel_requested_at"] is None
+    finished = run_row(factory, run_id)
+    assert finished["status"] == "failed"
+    assert finished["stop_requested_at"] == stopping["stop_requested_at"]

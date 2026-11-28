@@ -83,7 +83,7 @@ DEFAULT_BATCH_SIZE = 50
 # Quantos objetos ilegíveis (ou adulterados) vão nomeados no log do lote: com o disco inteiro
 # devolvendo erro, a contagem por errno diz o resto sem uma linha por objeto a cada ciclo.
 UNREADABLE_LOG_SAMPLE = 5
-# Alerta de causa (3.7): Run em `stopping` há mais que isto sem confirmar a parada.
+# Alerta de causa (3.7): Run em `stopping` há mais que isto, desde o pedido, sem confirmar a parada.
 STUCK_STOPPING_AFTER = timedelta(minutes=10)
 # `run.finished` ao menos uma vez (D5 do #442): a Run terminal sem a marca de reportada é reemitida
 # passada a carência, que deixa quem a concluiu emitir primeiro; mais velha que o horizonte, não
@@ -878,7 +878,11 @@ class Maintenance:
             stuck: int = session.execute(
                 select(func.count()).where(
                     run.c.status == Status.STOPPING,
-                    func.least(run.c.cancel_requested_at, run.c.deadline_at)
+                    # Sem o instante, a Run foi para `stopping` pelo código anterior à 0032.
+                    func.coalesce(
+                        run.c.stop_requested_at,
+                        func.least(run.c.cancel_requested_at, run.c.deadline_at),
+                    )
                     <= now - STUCK_STOPPING_AFTER,
                 )
             ).scalar_one()
