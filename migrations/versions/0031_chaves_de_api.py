@@ -1,4 +1,4 @@
-"""Chaves de API: `Idempotency-Key` opcional na emissão pela sessão, `api_key.idem_key` (#442).
+"""Chaves de API: `Idempotency-Key` na emissão (`api_key.idem_key`) e limite por canal (#442).
 
 Revision ID: 0031
 Revises: 0030
@@ -21,8 +21,23 @@ O índice comum, na transação do Alembic, basta, como na 0026: a emissão pela
 segurar `api_key`, a migração falha alto em vez de enfileirar autenticações, e basta rodá-la de
 novo.
 
-O downgrade apaga a coluna, e com ela as `Idempotency-Key` gravadas (as chaves continuam). Se
-alguma chave tiver `idem_key`, ele só roda com `GS_ALLOW_LOSSY_DOWNGRADE=1`.
+Limite de requisições por canal (49a, D1 = C; ADR 028): a tabela nova `channel_request_window`
+conta por (conta, canal, classe, janela), com o canal `session` ou `api_key` do `Principal.via`.
+Assim nenhuma chave que esgota a conta tranca o titular fora da sessão que a revoga. Tabela nova,
+e não `channel` na `request_window` da 0007 com a PK recriada (preflight, R4): a réplica anterior
+segue servindo depois do `migrate`, e o `INSERT … ON CONFLICT (owner_id, request_class,
+window_start)` dela, sem `channel`, feriria o NOT NULL e perderia o índice único, um 500 em toda
+requisição autenticada até o deploy terminar. Com duas tabelas, cada versão grava na sua; a
+contagem em curso se perde na troca, o que a janela de um minuto torna irrelevante. A manutenção
+limpa as duas, e o DROP da `request_window` fica para um PR seguinte, depois do deploy (contract).
+
+Travas (ADR 057): o CREATE TABLE não trava tabela com dados, salvo a FK, que pega
+`SHARE ROW EXCLUSIVE` em `app_user` só pelo instante do catálogo; com o `lock_timeout` de 2 s,
+uma transação longa na conta faz a migração falhar alto, e basta rodá-la de novo.
+
+O downgrade apaga a coluna, e com ela as `Idempotency-Key` gravadas (as chaves continuam), e a
+tabela por canal com as janelas em curso. Se alguma chave tiver `idem_key`, ou se houver janela
+por canal, ele só roda com `GS_ALLOW_LOSSY_DOWNGRADE=1` (preflight, R7).
 """
 
 import os
@@ -53,6 +68,37 @@ def upgrade() -> None:
         unique=True,
         postgresql_where=sa.text("idem_key IS NOT NULL"),
     )
+    op.create_table(
+        "channel_request_window",
+        sa.Column("owner_id", sa.Uuid(), nullable=False),
+        sa.Column("channel", sa.Text(), nullable=False),
+        sa.Column("request_class", sa.Text(), nullable=False),
+        sa.Column("window_start", sa.DateTime(timezone=True), nullable=False),
+        sa.Column("request_count", sa.Integer(), nullable=False),
+        sa.CheckConstraint(
+            "channel IN ('session', 'api_key')", name=op.f("channel_request_window_channel_check")
+        ),
+        sa.CheckConstraint(
+            "request_class IN ('read', 'command', 'run_create')",
+            name=op.f("channel_request_window_request_class_check"),
+        ),
+        sa.CheckConstraint(
+            "request_count > 0", name=op.f("channel_request_window_request_count_check")
+        ),
+        sa.ForeignKeyConstraint(
+            ["owner_id"],
+            ["app_user.id"],
+            name=op.f("channel_request_window_owner_id_fkey"),
+            ondelete="CASCADE",
+        ),
+        sa.PrimaryKeyConstraint(
+            "owner_id",
+            "channel",
+            "request_class",
+            "window_start",
+            name=op.f("channel_request_window_pkey"),
+        ),
+    )
 
 
 def downgrade() -> None:
@@ -62,6 +108,12 @@ def downgrade() -> None:
             "RAISE EXCEPTION 'o downgrade da 0031 apagaria as Idempotency-Key das chaves de API; "
             "GS_ALLOW_LOSSY_DOWNGRADE=1 aceita a perda'; END IF; END $$"
         )
+        op.execute(
+            "DO $$ BEGIN IF EXISTS (SELECT FROM channel_request_window) THEN "
+            "RAISE EXCEPTION 'o downgrade da 0031 apagaria as janelas do limite por canal em "
+            "curso; GS_ALLOW_LOSSY_DOWNGRADE=1 aceita a perda'; END IF; END $$"
+        )
+    op.drop_table("channel_request_window")
     op.drop_index(op.f(_IDEM_INDEX), table_name="api_key")
     op.drop_constraint(op.f(_IDEM_CHECK), "api_key", type_="check")
     op.drop_column("api_key", "idem_key")

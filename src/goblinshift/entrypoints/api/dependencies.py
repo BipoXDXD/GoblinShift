@@ -282,7 +282,7 @@ def _count_request(
         return
     try:
         with session.begin():
-            count_request(session, principal.owner_id, request_class, now)
+            count_request(session, principal.owner_id, principal.via, request_class, now)
     except RequestLimitExceededError as error:
         record_rate_limit(limited=True)
         # A recusa pelo limite é da conta, que é dona do balde, e o evento amplo a atribui a ela

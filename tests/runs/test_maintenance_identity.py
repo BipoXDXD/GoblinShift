@@ -36,8 +36,9 @@ from goblinshift.identity.tables import (
     api_key,
     app_user,
     audit_event,
+    channel_request_window,
+    legacy_request_window,
     login_state,
-    request_window,
     web_session,
 )
 from goblinshift.platform.db import unit_of_work
@@ -70,7 +71,8 @@ OWNED_TABLES: dict[str, tuple[Table, str]] = {
     "artifact": (artifact, "owner_id"),
     "stored_object": (stored_object, "owner_id"),
     "transfer_slot": (transfer_slot, "owner_id"),
-    "request_window": (request_window, "owner_id"),
+    "channel_request_window": (channel_request_window, "owner_id"),
+    "request_window": (legacy_request_window, "owner_id"),
 }
 
 
@@ -96,7 +98,13 @@ def full_account(
     now = datetime.now(UTC)
     with unit_of_work(factory) as session:
         key = issue_key(session, owner_id=owner, scopes=frozenset(Scope), now=now)
-        count_request(session, owner, RequestClass.READ, now)
+        count_request(session, owner, "api_key", RequestClass.READ, now)
+        # A janela sem canal da 0007, que a réplica anterior ao deploy ainda grava (preflight R4).
+        session.execute(
+            insert(legacy_request_window).values(
+                owner_id=owner, request_class="read", window_start=now, request_count=1
+            )
+        )
         session.execute(
             insert(web_session).values(
                 user_id=owner,
@@ -318,8 +326,8 @@ def test_ciclo_aplica_a_retencao_da_identidade(factory: sessionmaker[Session]) -
             )
         )
 
-        count_request(session, owner, RequestClass.READ, now - timedelta(minutes=3))
-        count_request(session, owner, RequestClass.READ, now)
+        count_request(session, owner, "api_key", RequestClass.READ, now - timedelta(minutes=3))
+        count_request(session, owner, "api_key", RequestClass.READ, now)
 
     counts = AccountJobs(factory, clock=lambda: now).run_cycle()
 
@@ -558,7 +566,7 @@ def stale_identity_rows(factory: sessionmaker[Session], now: datetime) -> uuid.U
         session.execute(
             insert(login_state).values(key="k", value="{}", expires_at=now - timedelta(minutes=1))
         )
-        count_request(session, owner, RequestClass.READ, now - timedelta(minutes=3))
+        count_request(session, owner, "api_key", RequestClass.READ, now - timedelta(minutes=3))
         request_account_deletion(session, owner, now - timedelta(hours=21))
     return owner
 

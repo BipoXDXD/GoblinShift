@@ -1,10 +1,14 @@
-"""Migração 0031: `Idempotency-Key` opcional na emissão de chave (`api_key.idem_key`; #442, 57b).
+"""Migração 0031: `Idempotency-Key` na emissão de chave e janela do limite por canal (#442).
 
-Expand: coluna anulável e sem default, que o código anterior não grava; as chaves existentes ficam
-com `idem_key` nulo. Um CHECK confere o formato de `runs.acceptance`, e o índice único parcial
-`(owner_id, idem_key)` impede duas chaves da mesma conta com a mesma `Idempotency-Key`. O
-downgrade remove a coluna e, se alguma chave tiver `idem_key`, só roda com
+`api_key.idem_key` (57b). Expand: coluna anulável e sem default, que o código anterior não grava;
+as chaves existentes ficam com `idem_key` nulo. Um CHECK confere o formato de `runs.acceptance`,
+e o índice único parcial `(owner_id, idem_key)` impede duas chaves da mesma conta com a mesma
+`Idempotency-Key`. O downgrade remove a coluna e, se alguma chave tiver `idem_key`, só roda com
 `GS_ALLOW_LOSSY_DOWNGRADE=1`.
+
+`channel_request_window` (49a). Expand: tabela nova, com o canal na PK; a `request_window` da 0007
+fica intacta, e o `INSERT … ON CONFLICT` da réplica anterior continua valendo nela durante o
+deploy. O downgrade apaga a tabela nova e, se ela tiver janelas, só roda com a mesma licença.
 """
 
 from collections.abc import Iterator
@@ -80,6 +84,44 @@ def current_revision(engine: Engine) -> str:
 
 def api_key_columns(engine: Engine) -> set[str]:
     return {column["name"] for column in inspect(engine).get_columns("api_key")}
+
+
+def has_table(engine: Engine, name: str) -> bool:
+    return inspect(engine).has_table(name)
+
+
+def clear_lossy_rows(engine: Engine) -> None:
+    """O container é da sessão: outros testes podem ter deixado `idem_key` e janelas por canal."""
+    with engine.begin() as conn:
+        conn.execute(text("UPDATE api_key SET idem_key = NULL WHERE idem_key IS NOT NULL"))
+        conn.execute(text("DELETE FROM channel_request_window"))
+
+
+# O INSERT da réplica anterior à 0031 (`rate_limit.count_request` da 0007), que segue servindo
+# depois do `migrate` até o deploy terminar.
+_OLD_COUNT = text(
+    "INSERT INTO request_window (owner_id, request_class, window_start, request_count)"
+    " VALUES (:owner_id, 'read', date_trunc('minute', now()), 1)"
+    " ON CONFLICT (owner_id, request_class, window_start)"
+    " DO UPDATE SET request_count = request_window.request_count + 1"
+    " RETURNING request_count"
+)
+_NEW_COUNT = text(
+    "INSERT INTO channel_request_window"
+    " (owner_id, channel, request_class, window_start, request_count)"
+    " VALUES (:owner_id, :channel, 'read', date_trunc('minute', now()), 1)"
+    " ON CONFLICT (owner_id, channel, request_class, window_start)"
+    " DO UPDATE SET request_count = channel_request_window.request_count + 1"
+    " RETURNING request_count"
+)
+
+
+def count_new(engine: Engine, owner_id: UUID, channel: str) -> int:
+    with engine.begin() as conn:
+        counted: int = conn.execute(
+            _NEW_COUNT, {"owner_id": owner_id, "channel": channel}
+        ).scalar_one()
+    return counted
 
 
 def test_upgrade_mantem_as_chaves_existentes_com_idem_key_nulo(
@@ -171,11 +213,64 @@ def test_downgrade_com_licenca_remove_a_coluna_e_mantem_a_chave(
 
 def test_downgrade_sem_idem_key_desce_sem_licenca(db_settings: Settings, engine: Engine) -> None:
     run_migrations(db_settings, "0031")
-    # O container é da sessão: outros testes podem ter deixado chaves com `idem_key`.
-    with engine.begin() as conn:
-        conn.execute(text("UPDATE api_key SET idem_key = NULL WHERE idem_key IS NOT NULL"))
+    clear_lossy_rows(engine)
 
     downgrade_migrations(db_settings, "0030", allow_lossy=False)
 
     assert current_revision(engine) == "0030"
     assert "idem_key" not in api_key_columns(engine)
+    assert not has_table(engine, "channel_request_window")
+
+
+# --- Janela do limite por canal (49a) ---------------------------------------------------------
+
+
+def test_insert_da_replica_anterior_continua_valendo_na_tabela_antiga(
+    db_settings: Settings, engine: Engine
+) -> None:
+    run_migrations(db_settings, "0031")
+    owner_id = new_user(engine)
+
+    with engine.begin() as conn:
+        first = conn.execute(_OLD_COUNT, {"owner_id": owner_id}).scalar_one()
+        second = conn.execute(_OLD_COUNT, {"owner_id": owner_id}).scalar_one()
+
+    assert (first, second) == (1, 2)
+
+
+def test_canais_da_mesma_conta_tem_janelas_proprias(db_settings: Settings, engine: Engine) -> None:
+    run_migrations(db_settings, "0031")
+    owner_id = new_user(engine)
+
+    counts = [count_new(engine, owner_id, channel) for channel in ("api_key", "api_key", "session")]
+
+    assert counts == [1, 2, 1]
+
+
+def test_canal_desconhecido_e_recusado(db_settings: Settings, engine: Engine) -> None:
+    run_migrations(db_settings, "0031")
+
+    with pytest.raises(IntegrityError, match="channel_request_window_channel_check"):
+        count_new(engine, new_user(engine), "cookie")
+
+
+def test_upgrade_downgrade_upgrade_com_a_guarda_das_janelas_por_canal(
+    db_settings: Settings, engine: Engine
+) -> None:
+    run_migrations(db_settings, "0031")
+    clear_lossy_rows(engine)
+    owner_id = new_user(engine)
+    count_new(engine, owner_id, "api_key")
+
+    with pytest.raises(DBAPIError, match="janelas do limite por canal"):
+        downgrade_migrations(db_settings, "0030", allow_lossy=False)
+    assert current_revision(engine) == "0031"
+    assert has_table(engine, "channel_request_window")
+
+    downgrade_migrations(db_settings, "0030", allow_lossy=True)
+    assert current_revision(engine) == "0030"
+    assert not has_table(engine, "channel_request_window")
+    assert has_table(engine, "request_window")
+
+    run_migrations(db_settings, "0031")
+    assert count_new(engine, owner_id, "api_key") == 1
