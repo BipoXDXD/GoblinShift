@@ -1,4 +1,5 @@
-"""Engine, sessões e unidade de trabalho (docs/GoblinShiftPlan.md, 3.2)."""
+"""Engine, sessões, unidade de trabalho e a leitura dos erros do banco (docs/GoblinShiftPlan.md,
+3.2, 3.7)."""
 
 import time
 from collections.abc import Callable, Iterator
@@ -6,7 +7,7 @@ from contextlib import contextmanager
 
 import psycopg
 from sqlalchemy import Engine, MetaData, create_engine
-from sqlalchemy.exc import OperationalError
+from sqlalchemy.exc import DBAPIError, OperationalError
 from sqlalchemy.exc import TimeoutError as PoolTimeoutError
 from sqlalchemy.orm import Session, sessionmaker
 
@@ -25,6 +26,20 @@ metadata = MetaData(
     }
 )
 
+# SQLSTATE de conexão (classe 08) e de servidor parando (admin_shutdown, crash_shutdown,
+# cannot_connect_now): o banco não vai responder ao passo seguinte desta volta.
+_CONNECTION_EXCEPTION_CLASS = "08"
+_SERVER_STOPPING_SQLSTATES = frozenset({"57P01", "57P02", "57P03"})
+# O psycopg põe em `OperationalError` também erros de programação (55000, 3B001, 2F005, 54000...);
+# só estes SQLSTATEs dizem que repetir a requisição pode dar certo. 40001 e 40P01 desfazem a
+# transação inteira, e é a contenção que os causa: chegam aqui ao esgotar as tentativas de
+# `runs/store.py` ou em rota sem retry.
+_UNAVAILABLE_SQLSTATE_CLASSES = frozenset({"08", "53", "57"})
+_UNAVAILABLE_SQLSTATES = frozenset({"40001", "40P01", "55P03"})
+# Da classe 08, mas é parâmetro errado no SQL (`bind message supplies...`), não falha de conexão.
+_PROTOCOL_VIOLATION_SQLSTATE = "08P01"
+_SQLSTATE_CLASS_LENGTH = 2
+
 
 def is_lock_timeout(error: BaseException) -> bool:
     """O comando desistiu do lock (55P03), e não de outra coisa."""
@@ -38,6 +53,66 @@ def is_lock_contention(error: BaseException) -> bool:
     (57014) estourou. O banco respondeu e outra tentativa, mais tarde, tende a passar."""
     return is_lock_timeout(error) or (
         isinstance(error, OperationalError) and isinstance(error.orig, psycopg.errors.QueryCanceled)
+    )
+
+
+def sqlstate_of(error: BaseException) -> str | None:
+    """O código cru do erro do driver, embrulhado pelo SQLAlchemy (em `orig`) ou não.
+
+    Não percorre a cadeia nem confere o formato: esse é o papel de `telemetry.database_sqlstate`
+    no filtro de log. Só o código sai, nunca a mensagem.
+    """
+    return getattr(getattr(error, "orig", error), "sqlstate", None)
+
+
+def is_connection_lost(error: Exception) -> bool:
+    """Erro de conexão: repetir o banco noutro passo só esperaria o `connect_timeout` de novo.
+
+    Não é `is_unavailable_for_request`: aqui 08P01 (classe 08) conta como conexão perdida, e da
+    classe 57 só o servidor parando (57P01-57P03) conta; o 57014 não.
+
+    Conexão que o pool invalidou, pool esgotado (`TimeoutError` do SQLAlchemy, que não é
+    `DBAPIError`: o pool desiste antes de pedir conexão, e o passo seguinte esperaria o
+    `pool_timeout` de novo), ou `OperationalError` sem SQLSTATE (o `connect` recusado ou sem
+    resposta) ou com SQLSTATE de conexão ou de servidor parando. `statement_timeout` (57014)
+    também chega como `OperationalError`, mas o banco respondeu: os outros passos seguem.
+    """
+    if isinstance(error, PoolTimeoutError):
+        return True
+    if isinstance(error, DBAPIError) and error.connection_invalidated:
+        return True
+    if not isinstance(error, OperationalError):
+        return False
+    sqlstate = sqlstate_of(error)
+    return (
+        sqlstate is None
+        or sqlstate.startswith(_CONNECTION_EXCEPTION_CLASS)
+        or sqlstate in _SERVER_STOPPING_SQLSTATES
+    )
+
+
+def is_unavailable_for_request(error: Exception) -> bool:
+    """O banco não atende agora, e a mesma requisição, repetida depois, pode dar certo.
+
+    Não é `is_connection_lost`: aqui 08P01 é parâmetro errado no SQL, e não indisponibilidade, e
+    a classe 57 inteira conta (o 57014 também), como 53300, 55P03, 40001 e 40P01.
+    """
+    if isinstance(error, PoolTimeoutError):
+        return True
+    # A conexão perdida vale para qualquer classe do driver: 25P03 chega como `InternalError`.
+    if isinstance(error, DBAPIError) and error.connection_invalidated:
+        return True
+    if not isinstance(error, OperationalError):
+        return False
+    sqlstate = sqlstate_of(error)
+    # Sem SQLSTATE o servidor não chegou a responder: falha ao conectar ou conexão perdida.
+    if sqlstate is None:
+        return True
+    if sqlstate == _PROTOCOL_VIOLATION_SQLSTATE:
+        return False
+    return (
+        sqlstate in _UNAVAILABLE_SQLSTATES
+        or sqlstate[:_SQLSTATE_CLASS_LENGTH] in _UNAVAILABLE_SQLSTATE_CLASSES
     )
 
 

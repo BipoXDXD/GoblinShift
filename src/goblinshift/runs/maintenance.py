@@ -29,8 +29,7 @@ from datetime import datetime, timedelta
 from functools import partial
 
 from sqlalchemy import ColumnElement, and_, func, select
-from sqlalchemy.exc import DBAPIError, OperationalError
-from sqlalchemy.exc import TimeoutError as PoolTimeoutError
+from sqlalchemy.exc import DBAPIError
 from sqlalchemy.orm import Session, sessionmaker
 
 from goblinshift import capacity
@@ -46,6 +45,7 @@ from goblinshift.files.objects import holders_with_open_uses, release_expired_do
 from goblinshift.files.retention import file_backlog, remove_file_after_commit
 from goblinshift.files.states import HolderKind
 from goblinshift.files.storage import FileStorage, ObjectTamperedError
+from goblinshift.platform.db import is_connection_lost, sqlstate_of
 from goblinshift.platform.telemetry import exception_fields
 from goblinshift.runs import retention as run_retention
 from goblinshift.runs.lifecycle import (
@@ -102,10 +102,6 @@ STEPS_SKIPPED = "steps_skipped"
 # (nome anterior aos downloads, mantido com o mesmo significado) e downloads além do lease.
 RUN_HOLDS_RELEASED = "holds_released"
 DOWNLOAD_HOLDS_RELEASED = "download_holds_released"
-# SQLSTATE de conexão (classe 08) e de servidor parando (admin_shutdown, crash_shutdown,
-# cannot_connect_now): o banco não vai responder ao passo seguinte desta volta.
-_CONNECTION_EXCEPTION_CLASS = "08"
-_SERVER_STOPPING_SQLSTATES = frozenset({"57P01", "57P02", "57P03"})
 
 
 @dataclass(frozen=True)
@@ -175,7 +171,7 @@ class _CycleOutcome:
     def _record_failure(self, step: _Step, error: Exception) -> None:
         log_step_failure(step.name, error)
         self.failed += 1
-        if self.connection_lost_in is None and is_connection_error(error):
+        if self.connection_lost_in is None and is_connection_lost(error):
             self.connection_lost_in = step.name
 
     def finish(self) -> dict[str, int]:
@@ -204,29 +200,6 @@ def _log_items_left(step: str, items_left: int) -> None:
     logger.info(
         "parada pedida; itens restantes do passo pulados",
         extra={"fields": {"step": step, "items_left": items_left}},
-    )
-
-
-def is_connection_error(error: Exception) -> bool:
-    """Erro de conexão: repetir o banco noutro passo só esperaria o `connect_timeout` de novo.
-
-    Conexão que o pool invalidou, pool esgotado (`TimeoutError` do SQLAlchemy, que não é
-    `DBAPIError`: o pool desiste antes de pedir conexão, e o passo seguinte esperaria o
-    `pool_timeout` de novo), ou `OperationalError` sem SQLSTATE (o `connect` recusado ou sem
-    resposta) ou com SQLSTATE de conexão ou de servidor parando. `statement_timeout` (57014)
-    também chega como `OperationalError`, mas o banco respondeu: os outros passos seguem.
-    """
-    if isinstance(error, PoolTimeoutError):
-        return True
-    if isinstance(error, DBAPIError) and error.connection_invalidated:
-        return True
-    if not isinstance(error, OperationalError):
-        return False
-    sqlstate: str | None = getattr(error.orig, "sqlstate", None)
-    return (
-        sqlstate is None
-        or sqlstate.startswith(_CONNECTION_EXCEPTION_CLASS)
-        or sqlstate in _SERVER_STOPPING_SQLSTATES
     )
 
 
@@ -442,18 +415,18 @@ class Maintenance:
         o lote segue para a próxima tentativa. Erro de conexão sobe: o passo falha e o ciclo pula
         os passos de banco restantes, que só esperariam o `connect_timeout` de novo. O
         `TimeoutError` do pool não é `DBAPIError`, então o `except` abaixo nem o vê e ele sobe do
-        mesmo jeito, que é o que `is_connection_error` pede: não há o que isolar sem conexão.
+        mesmo jeito, que é o que `is_connection_lost` pede: não há o que isolar sem conexão.
         """
         try:
             return self._lease_still_expired(expired)
         except DBAPIError as error:
-            if is_connection_error(error):
+            if is_connection_lost(error):
                 raise
             fields = {
                 "attempt_id": str(expired.attempt_id),
                 "run_id": str(expired.run_id),
                 "error_type": type(error).__name__,
-                "sqlstate": getattr(error.orig, "sqlstate", None),
+                "sqlstate": sqlstate_of(error),
             }
             logger.warning(
                 "releitura do lease falhou; executor não é parado neste ciclo",
@@ -765,7 +738,7 @@ class Maintenance:
                 extra={"fields": {"alert": "missing_sweep_failed"}},
             )
             failed = {**_sweep_counts(MissingSweep.idle()), "missing_sweep_failed": 1}
-            if is_connection_error(error):
+            if is_connection_lost(error):
                 raise _StepFailedWithCountsError(error, failed) from error
             return failed
         self._missing_resume_after = sweep.resume_after
@@ -997,11 +970,10 @@ def log_step_failure(step: str, error: Exception) -> None:
     e o filtro do processo (`omit_exception_detail`) tira o texto dela do traceback, seja ou não
     erro de banco.
     """
-    driver_error = getattr(error, "orig", error)
     fields = {
         "step": step,
         "error_type": type(error).__name__,
-        "sqlstate": getattr(driver_error, "sqlstate", None),
+        "sqlstate": sqlstate_of(error),
     }
     logger.exception("passo da manutenção falhou", extra={"fields": fields})
 

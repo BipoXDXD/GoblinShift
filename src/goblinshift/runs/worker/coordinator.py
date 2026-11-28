@@ -63,6 +63,7 @@ from goblinshift.files.artifacts import publish_artifact
 from goblinshift.files.candidates import HeldContent, HeldContentMissingError, held_input_contents
 from goblinshift.files.errors import ObjectNotAvailableError
 from goblinshift.files.storage import FileStorage, ObjectTamperedError, StorageError
+from goblinshift.platform.db import sqlstate_of
 from goblinshift.platform.telemetry import UserHasher, exception_fields
 from goblinshift.runs.comparison import comparison_as_json
 from goblinshift.runs.lifecycle import (
@@ -629,7 +630,7 @@ class Coordinator:
             return self.renew_lease(claimed)
         except TRANSIENT_DATABASE_ERRORS as error:
             # Só o tipo e o SQLSTATE: a mensagem do banco traz host, porta e usuário.
-            sqlstate = getattr(getattr(error, "orig", None), "sqlstate", None)
+            sqlstate = sqlstate_of(error)
             fields = {**_ids(claimed), "error_type": type(error).__name__, "sqlstate": sqlstate}
             logger.warning("lease não renovado", extra={"fields": fields})
             return None
