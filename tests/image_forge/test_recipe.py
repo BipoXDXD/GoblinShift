@@ -1,9 +1,13 @@
 """Receita image-forge v1 sobre o contrato de 3.2 (docs/GoblinShiftPlan.md, 1.1, 1.2 e 1.7)."""
 
+from pathlib import Path
+
 import pytest
 from PIL import Image
 
 from goblinshift.processing.image_forge import RECIPE_ID, OutputFormat, Params
+from goblinshift.processing.image_forge.limits import Limits
+from goblinshift.processing.image_forge.preparation import Prepared, prepare
 from goblinshift.processing.image_forge.recipe import ImageForgeV1
 from goblinshift.processing.output_dir import FileSystemOutputDir
 from goblinshift.processing.recipe import (
@@ -400,3 +404,33 @@ def test_previews_vem_depois_de_todas_as_saidas(work: Workspace) -> None:
         "previews/a.jpg",
         "previews/b.jpg",
     ]
+
+
+def test_erro_numa_imagem_no_meio_do_lote_sobe_sem_progresso_nem_preview(
+    work: Workspace, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # A primeira imagem sai inteira (conteúdo gravado e preview pendente); a segunda levanta.
+    boom = RuntimeError("falha inesperada na segunda imagem")
+    calls: list[int] = []
+
+    def prepare_that_fails_second(path: Path, limits: Limits) -> Prepared:
+        calls.append(len(calls))
+        if len(calls) == 2:
+            raise boom
+        return prepare(path, limits)
+
+    monkeypatch.setattr(
+        "goblinshift.processing.image_forge.recipe.prepare", prepare_that_fails_second
+    )
+    for name in ("a.png", "b.png", "c.png"):
+        work.add(name, rgb_png((64, 64)))
+    out = FileSystemOutputDir(work.out_dir)
+
+    with pytest.raises(RuntimeError) as raised:
+        ImageForgeV1().run(Params(), work.inputs, out, work.progress)
+
+    assert raised.value is boom
+    assert calls == [0, 1]
+    assert work.progress.done == [0]
+    assert [name for name, _role in out.created] == ["images/a.png"]
+    assert work.previews() == []
