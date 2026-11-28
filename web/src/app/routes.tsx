@@ -12,7 +12,10 @@ import { RootFailure, RouteFailure } from "./RouteFailure";
 
 export interface AppServices {
   readonly uploadServices: UploadServices;
-  /** Relógio em ms (Date.now no navegador): o período do Histórico e a validade das chaves. */
+  /**
+   * Relógio em ms do servidor (serverClock.ts no navegador): o período do Histórico e a validade
+   * dos resultados e das chaves.
+   */
   readonly now: () => number;
   /** Aviso global deste build (ADR 031), ou `null`. */
   readonly notice: SiteNotice | null;

@@ -20,11 +20,9 @@ describe("fakeApi", () => {
         }),
     });
 
-    const error = await client
-      .request({ method: "GET", path: "/api/v1/runs", schema: z.unknown() })
-      .catch((e: unknown) => e);
+    const request = client.request({ method: "GET", path: "/api/v1/runs", schema: z.unknown() });
 
-    expect(error).toBeInstanceOf(ApiError);
-    expect((error as ApiError).failure).toMatchObject({ retryAfterMs: 30_000 });
+    await expect(request).rejects.toBeInstanceOf(ApiError);
+    await expect(request).rejects.toMatchObject({ failure: { retryAfterMs: 30_000 } });
   });
 });

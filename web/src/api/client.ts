@@ -56,6 +56,8 @@ export interface ApiClientOptions {
   readonly csrfToken: CsrfTokenSource;
   readonly now: () => number;
   readonly timeoutMs?: number;
+  /** Recebe o header `Date` de toda resposta da API, de sucesso ou falha (serverClock.ts). */
+  readonly observeServerDate?: (dateHeader: string | null) => void;
 }
 
 /**
@@ -74,6 +76,7 @@ export function createApiClient(options: ApiClientOptions): ApiClient {
         read: readText,
         timeoutMs,
       });
+      options.observeServerDate?.(response.headers.get("Date"));
       return interpretResponse(rawOf(response, body), request.schema, options.now());
     },
     async requestText({ path, signal }: TextRequest): Promise<ApiResponse<string>> {
@@ -87,6 +90,7 @@ export function createApiClient(options: ApiClientOptions): ApiClient {
         read: readText,
         timeoutMs,
       });
+      options.observeServerDate?.(response.headers.get("Date"));
       return interpretTextResponse(rawOf(response, body), options.now());
     },
     hasSessionCookie(): boolean {

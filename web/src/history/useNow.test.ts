@@ -39,4 +39,28 @@ describe("useNow", () => {
 
     expect(result.current).toBe(START);
   });
+
+  it("relê o relógio quando a chave muda, sem esperar o intervalo", () => {
+    let clock = START;
+    const { result, rerender } = renderHook(({ key }) => useNow(() => clock, MINUTE, key), {
+      initialProps: { key: 0 },
+    });
+
+    clock = START + 3 * 60 * MINUTE;
+    rerender({ key: 1 });
+
+    expect(result.current).toBe(START + 3 * 60 * MINUTE);
+  });
+
+  it("com a mesma chave, o render não relê o relógio", () => {
+    let clock = START;
+    const { result, rerender } = renderHook(({ key }) => useNow(() => clock, MINUTE, key), {
+      initialProps: { key: 0 },
+    });
+
+    clock = START + MINUTE;
+    rerender({ key: 0 });
+
+    expect(result.current).toBe(START);
+  });
 });
