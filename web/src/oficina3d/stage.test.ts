@@ -1,5 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
+import type { Pose } from "./pose";
 import { Stage, type AnimationLoop } from "./stage";
 
 /** Entrada da cena: 3,5 s, abaixo dos 5 s da WCAG 2.2.2. */
@@ -57,6 +58,9 @@ describe("entrada", () => {
     vi.advanceTimersByTime(3_000);
     loop.frame(start + 3_000);
     expect(host.dataset["movimento"]).toBe("entrada");
+    // 3 s de 3,5 s: 86% do tempo e, na curva ease-out cúbica, 99,7% do caminho de 52° a -20°,
+    // ou -19,8° arredondados. Com o relógio no primeiro quadro, ainda estaria nos 52° do começo.
+    expect(host.dataset["giro"]).toBe("-20");
 
     vi.advanceTimersByTime(INTRO_MS - 3_000);
 
@@ -77,4 +81,40 @@ describe("entrada", () => {
     expect(host.dataset["giro"]).toBe(startYaw);
     expect(host.dataset["movimento"]).toBe("parado");
   });
+
+  it.each<[string, () => void]>([
+    [
+      "Pose inicial",
+      () => {
+        stage.resetPose();
+      },
+    ],
+    [
+      "Giro automático",
+      () => {
+        stage.setSpinning(true);
+      },
+    ],
+    [
+      "movimento reduzido",
+      () => {
+        stage.setReducedMotion(true);
+      },
+    ],
+  ])(
+    "%s no meio da entrada desarma o prazo: ele não reposiciona a goblin depois",
+    (_, interrupt) => {
+      const start = performance.now();
+      stage.playIntro();
+      loop.frame(start);
+      interrupt();
+      const quarterTurn: Pose = { yaw: Math.PI / 2, pitch: 0 };
+      stage.turn(quarterTurn);
+      const turnedYaw = host.dataset["giro"];
+
+      vi.advanceTimersByTime(INTRO_MS);
+
+      expect(host.dataset["giro"]).toBe(turnedYaw);
+    },
+  );
 });
