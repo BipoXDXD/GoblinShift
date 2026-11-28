@@ -54,3 +54,12 @@ Trocar `csrf_secret` invalidaria os tokens CSRF emitidos: o cookie `__Host-gs_cs
 3. retirar `GS_CSRF_SECRET_PREVIOUS_FILE` e o arquivo, e reiniciar.
 
 A variável não fica ligada no Compose nem no Coolify: o arquivo só existe durante a troca, e montá-lo sempre obrigaria a criá-lo no host.
+
+## Atualização de 2026-11-28 (#366): teto de estados de login vivos
+
+Todo `GET /auth/login/{provider}` sem autenticação grava uma linha em `login_state`. O único limite era o `limit_req` do Nginx por cliente, e muitas origens enchiam a tabela sem teto na aplicação. Agora o início confere, antes do `authorize_redirect`, se já há `MAX_LIVE_LOGIN_STATES` (20 000, cerca de 10 MB) estados vivos (`identity/login_state.py::login_states_full`). Cheio, responde a recusa genérica, sem gravar estado nem auditoria, e o log avisa no máximo uma vez por minuto (`alert=login_state_cap`, causa `gs-causa-login-anonimo-no-teto`).
+
+- **Global, e não por IP.** Um teto por IP no PostgreSQL custaria uma escrita por recusa, o recurso que se quer proteger (ADR 048, alternativa B).
+- **Só estados vivos contam.** Vencidos à espera da purga não bloqueiam ninguém. A contagem para em 20 000 e usa o índice de `expires_at`.
+- **Nada é despejado.** O teto recusa o início novo; quem já está no provedor termina o login com o estado que tem.
+- **Custo aceito (D6 do plano login-e-borda).** Com cerca de 200 IPs no ritmo da borda (10 por minuto, 10 minutos de vida), um atacante bloqueia o início de login de todos por até 10 minutos, e o alerta acende. A contagem e a gravação do estado ficam em transações separadas, então inícios simultâneos passam juntos do teto; o estouro é limitado pelas requisições em voo (tokens do threadpool vezes processos da API).
