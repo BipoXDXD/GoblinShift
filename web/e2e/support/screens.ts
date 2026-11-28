@@ -8,17 +8,31 @@ import { AcessoPage } from "../pages/AcessoPage";
 import { BancadaPage } from "../pages/BancadaPage";
 import { ExecucaoPage } from "../pages/ExecucaoPage";
 import { HistoricoPage } from "../pages/HistoricoPage";
-import type { FakeApi, RunOverrides } from "./fakeApi";
+import type { FakeApi, RunOverrides, SeededOutput } from "./fakeApi";
 import { expect } from "./test";
 
 export interface Screen {
   readonly name: string;
   readonly open: (page: Page, api: FakeApi) => Promise<void>;
+  /** Entra na medição do build com o incidente (NOTICE_INCIDENT_SCREENS). */
+  readonly incidentBand?: true;
 }
 
 const LATER = "2026-10-15T12:00:00Z";
 /** Qualquer script do build, com ou sem query: depois da carga, só os pedaços `lazy` pedem. */
 const SCRIPT_FILE = /\.js(\?.*)?$/;
+
+/**
+ * Amostra com nome em branco, nome só com espaço e uma linha mais longa que o cabeçalho: a tabela
+ * da prévia entra na medição com o cabeçalho completado e rotulado. O `<th>` vazio é regra
+ * best-practice do axe, fora das WCAG medidas aqui; quem o vigia é o RunPage.test.tsx.
+ */
+const RAGGED_SAMPLE = Buffer.from("nome,, \nAna,1,2,extra\n");
+const RAGGED_CSV: SeededOutput = {
+  name: "clientes.csv",
+  body: RAGGED_SAMPLE,
+  preview: { name: "clientes.csv", body: RAGGED_SAMPLE, contentType: "application/octet-stream" },
+};
 
 function runScreen(name: string, overrides: RunOverrides, visibleText: string): Screen {
   return {
@@ -64,6 +78,7 @@ function minutesBefore(startMs: number, minutes: number): string {
 export const SCREENS: readonly Screen[] = [
   {
     name: "Oficina",
+    incidentBand: true,
     open: async (page: Page): Promise<void> => {
       await page.goto("/");
       await expect(page.getByRole("heading", { level: 1 })).toBeVisible();
@@ -86,6 +101,7 @@ export const SCREENS: readonly Screen[] = [
   },
   {
     name: "Histórico com Carregar mais",
+    incidentBand: true,
     open: async (page: Page, api: FakeApi): Promise<void> => {
       seedRunHistory(api, 25);
       const historico = new HistoricoPage(page);
@@ -117,6 +133,7 @@ export const SCREENS: readonly Screen[] = [
   },
   {
     name: "Bancada com erros (CSV Janitor)",
+    incidentBand: true,
     open: async (page: Page): Promise<void> => {
       const bancada = new BancadaPage(page);
       await bancada.open("csv-janitor");
@@ -269,6 +286,14 @@ export const SCREENS: readonly Screen[] = [
     "Falhou",
   ),
   {
+    name: "Execução com prévia de CSV sem cabeçalho completo",
+    incidentBand: true,
+    open: async (page: Page, api: FakeApi): Promise<void> => {
+      await new ExecucaoPage(page).open(api.seedRun({ status: "succeeded" }, [RAGGED_CSV]));
+      await expect(page.getByRole("table")).toBeVisible();
+    },
+  },
+  {
     name: "Bancada sem sessão (convite para entrar)",
     open: async (page: Page, api: FakeApi): Promise<void> => {
       api.account.apiKeyValid = false;
@@ -398,3 +423,11 @@ export const SCREENS: readonly Screen[] = [
     },
   },
 ];
+
+/**
+ * Telas do build com o incidente (fase notice-incident): a faixa vermelha sobre uma tela comum,
+ * uma lista, um formulário com erro e uma tabela.
+ */
+export const NOTICE_INCIDENT_SCREENS: readonly Screen[] = SCREENS.filter(
+  (screen) => screen.incidentBand === true,
+);

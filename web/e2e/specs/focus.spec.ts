@@ -126,6 +126,7 @@ test("Bancada: arquivos → lista → parâmetros → Executar, e o foco segue o
     "Pular para o conteúdo",
     "Oficina",
     "Escolher arquivos",
+    "Escolher pasta",
     // Em cada item, a leitura: nome e ações do arquivo, depois os botões de ordem.
     `Remover ${first.name}`,
     `Mover para cima ${first.name}`,

@@ -90,6 +90,10 @@ class UnknownAccountError(LookupError):
     pass
 
 
+class SessionNoLongerValidError(LookupError):
+    """A sessão que pede a chave foi revogada, venceu, é de outra conta ou não existe."""
+
+
 class InvalidDisplayNameError(ValueError):
     pass
 
@@ -119,7 +123,12 @@ def issue_key(
     scopes: frozenset[Scope],
     now: datetime,
     days: int = DEFAULT_KEY_DAYS,
+    idem_key: str | None = None,
 ) -> IssuedKey:
+    """Grava a chave sem teto nem trava; a emissão pela sessão passa por `issue_key_for_session`.
+
+    `idem_key` só é gravada: quem a passa já a procurou sob a trava da conta (`_issue_locked`).
+    """
     if not scopes:
         raise InvalidScopesError("informe pelo menos um escopo")
     expires_at = now + key_lifetime(days)
@@ -133,11 +142,20 @@ def issue_key(
         bindparam("scopes", sorted(scopes), type_=ARRAY(Text)),
         bindparam("created_at", now),
         bindparam("expires_at", expires_at),
+        bindparam("idem_key", idem_key, type_=Text),
     ).where(app_user.c.id == owner_id)
     statement = (
         insert(api_key)
         .from_select(
-            ["owner_id", "public_id", "secret_hash", "scopes", "created_at", "expires_at"],
+            [
+                "owner_id",
+                "public_id",
+                "secret_hash",
+                "scopes",
+                "created_at",
+                "expires_at",
+                "idem_key",
+            ],
             source,
         )
         .returning(api_key.c.id)
@@ -257,7 +275,7 @@ def _known_scopes(stored: Iterable[str]) -> frozenset[Scope]:
 # --- Fatia 6: conta e chaves pela sessão web --------------------------------------------------
 # Contrato fixado na Fase 0; os corpos são da Frente C.
 
-# Teto de chaves ativas por conta, garantido com a linha da conta travada (`FOR UPDATE`).
+# Teto de chaves ativas por conta, garantido com a linha da conta travada (`FOR NO KEY UPDATE`).
 MAX_ACTIVE_KEYS = 5
 # Teto de chaves guardadas (ativas, revogadas e vencidas) por conta, sob a mesma trava: sem ele,
 # emitir e revogar em laço enche a tabela, porque a revogada só sai `KEY_RETENTION` depois do fim.
@@ -286,6 +304,19 @@ class KeySummary:
 
 class ActiveKeyLimitError(Exception):
     """A conta já tem `MAX_ACTIVE_KEYS` chaves ativas: 409 `STATE_CONFLICT`."""
+
+
+class KeyAlreadyIssuedError(Exception):
+    """A `Idempotency-Key` já emitiu uma chave desta conta: 409 `STATE_CONFLICT` com o id dela.
+
+    Vale para a chave em qualquer estado, ativa, revogada ou vencida, e sem comparar o pedido: o
+    segredo só existiu na primeira resposta e não é guardado, então não há o que repetir.
+    """
+
+    def __init__(self, key_id: UUID, public_id: str) -> None:
+        super().__init__(f"a Idempotency-Key já emitiu a chave {public_id} (id {key_id})")
+        self.key_id = key_id
+        self.public_id = public_id
 
 
 class StoredKeyLimitError(Exception):
@@ -342,15 +373,23 @@ def request_account_deletion(session: Session, owner_id: UUID, now: datetime) ->
 
 
 def issue_key_for_session(
-    session: Session, *, owner_id: UUID, scopes: frozenset[Scope], days: int, now: datetime
+    session: Session,
+    *,
+    owner_id: UUID,
+    session_id: UUID,
+    scopes: frozenset[Scope],
+    days: int,
+    now: datetime,
+    idem_key: str | None = None,
 ) -> IssuedKey:
-    """Emite chave pela sessão web, dentro dos dois tetos da conta.
+    """Emite chave pela sessão web `session_id`, dentro dos dois tetos da conta.
 
-    Com `MAX_ACTIVE_KEYS` ativas levanta `ActiveKeyLimitError`; com `MAX_STORED_KEYS` guardadas,
-    contando revogadas e vencidas, `StoredKeyLimitError`. A linha da conta fica travada
-    (`FOR UPDATE`) da contagem até o INSERT: duas emissões simultâneas se enfileiram, e a segunda
-    conta a chave da primeira (sem write skew). A mesma trava enfileira a emissão atrás de um
-    bloqueio ou pedido de exclusão, que a recusa.
+    A linha da conta fica travada (`FOR NO KEY UPDATE`) da reconferência até o INSERT. A mesma
+    trava enfileira a emissão atrás de um bloqueio, pedido de exclusão ou `logout-all`
+    (`sessions.revoke_all_credentials`), que a recusam; o `FOR KEY SHARE` das FKs para a conta
+    (login, criação de Run, auditoria) não espera por ela. Conta inativa levanta
+    `UnknownAccountError`; sessão que não existe, é de outra conta, foi revogada ou venceu,
+    `SessionNoLongerValidError`. A `idem_key` e os tetos ficam em `_issue_locked`.
     """
     account = session.execute(
         select(app_user.c.id)
@@ -359,10 +398,47 @@ def issue_key_for_session(
             app_user.c.status == ACTIVE_STATUS,
             app_user.c.deletion_requested_at.is_(None),
         )
-        .with_for_update()
+        .with_for_update(key_share=True)
     ).first()
     if account is None:
         raise UnknownAccountError(f"conta {owner_id} não existe ou não está ativa")
+    # O Principal foi lido noutra transação: sem reconferir aqui, a emissão que esperou o
+    # `logout-all` sairia com chave ativa de uma sessão já revogada.
+    if not sessions.session_still_valid(session, session_id=session_id, owner_id=owner_id, now=now):
+        raise SessionNoLongerValidError(
+            f"a sessão {session_id} não vale mais para a conta {owner_id}"
+        )
+    return _issue_locked(
+        session, owner_id=owner_id, scopes=scopes, days=days, now=now, idem_key=idem_key
+    )
+
+
+def _issue_locked(
+    session: Session,
+    *,
+    owner_id: UUID,
+    scopes: frozenset[Scope],
+    days: int,
+    now: datetime,
+    idem_key: str | None,
+) -> IssuedKey:
+    """Miolo da emissão, com a linha da conta já travada por quem chama.
+
+    Nesta ordem: a `idem_key` que já emitiu chave da conta levanta `KeyAlreadyIssuedError`; com
+    `MAX_ACTIVE_KEYS` ativas, `ActiveKeyLimitError`; com `MAX_STORED_KEYS` guardadas, contando
+    revogadas e vencidas, `StoredKeyLimitError`. A busca vem antes dos tetos para que a repetição
+    com o teto cheio responda a repetição. Como a trava vale da busca até o INSERT, duas emissões
+    simultâneas se enfileiram, e a segunda vê a chave da primeira (sem write skew); o índice único
+    `(owner_id, idem_key)` fica de rede.
+    """
+    if idem_key is not None:
+        previous = session.execute(
+            select(api_key.c.id, api_key.c.public_id).where(
+                api_key.c.owner_id == owner_id, api_key.c.idem_key == idem_key
+            )
+        ).first()
+        if previous is not None:
+            raise KeyAlreadyIssuedError(previous.id, previous.public_id)
     active, stored = session.execute(
         select(
             func.count().filter(api_key.c.revoked_at.is_(None), api_key.c.expires_at > now),
@@ -375,7 +451,9 @@ def issue_key_for_session(
         raise ActiveKeyLimitError(f"a conta já tem {MAX_ACTIVE_KEYS} chaves ativas")
     if stored >= MAX_STORED_KEYS:
         raise StoredKeyLimitError(f"a conta já guarda {MAX_STORED_KEYS} chaves")
-    return issue_key(session, owner_id=owner_id, scopes=scopes, now=now, days=days)
+    return issue_key(
+        session, owner_id=owner_id, scopes=scopes, now=now, days=days, idem_key=idem_key
+    )
 
 
 def list_keys(session: Session, owner_id: UUID, now: datetime) -> list[KeySummary]:

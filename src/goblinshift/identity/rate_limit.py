@@ -1,4 +1,4 @@
-"""Limite de requisições por conta e classe de rota (docs/GoblinShiftPlan.md, 1.7; ADR 028).
+"""Limite de requisições por conta, canal e classe de rota (GoblinShiftPlan.md, 1.7; ADR 028).
 
 Janela fixa de um minuto, em UTC, contada no PostgreSQL: vale entre réplicas sem Redis (ADR 003).
 Cada requisição é um único `INSERT … ON CONFLICT DO UPDATE … WHERE request_count < limite`, que
@@ -7,6 +7,10 @@ nenhuma corrida passa dele, nem na primeira requisição da janela.
 
 A janela fixa admite até o dobro do limite em rajada na virada do minuto; o limite protege a VPS
 de uma conta só, não mede vazão exata.
+
+O canal (`RequestChannel`, o `Principal.via`) separa os baldes da sessão web e das chaves de API:
+uma chave que esgota a conta não tranca o titular fora da sessão que a lista e revoga (#442,
+49a). O teto da conta no máximo dobra, qualquer que seja o número de chaves ou sessões.
 """
 
 from datetime import UTC, datetime, timedelta
@@ -14,11 +18,12 @@ from enum import StrEnum
 from typing import Final
 from uuid import UUID
 
-from sqlalchemy import delete, func, select, tuple_
+from sqlalchemy import Table, delete, func, select, tuple_
 from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.orm import Session
 
-from goblinshift.identity.tables import request_window
+from goblinshift.identity.principal import RequestChannel
+from goblinshift.identity.tables import channel_request_window, legacy_request_window
 from goblinshift.platform.sql import skip_locked_batch
 
 WINDOW: Final = timedelta(minutes=1)
@@ -49,32 +54,38 @@ class RequestLimitExceededError(Exception):
 
 
 def count_request(
-    session: Session, owner_id: UUID, request_class: RequestClass, now: datetime
+    session: Session,
+    owner_id: UUID,
+    channel: RequestChannel,
+    request_class: RequestClass,
+    now: datetime,
 ) -> None:
-    """Conta a requisição na janela atual ou levanta `RequestLimitExceededError`.
+    """Conta a requisição na janela atual do canal ou levanta `RequestLimitExceededError`.
 
     Roda numa transação própria e curta de quem chama: a contagem fica gravada mesmo se a
     requisição falhar depois.
     """
     window_start = _window_start(now)
     statement = (
-        insert(request_window)
+        insert(channel_request_window)
         .values(
             owner_id=owner_id,
+            channel=channel,
             request_class=request_class.value,
             window_start=window_start,
             request_count=1,
         )
         .on_conflict_do_update(
             index_elements=[
-                request_window.c.owner_id,
-                request_window.c.request_class,
-                request_window.c.window_start,
+                channel_request_window.c.owner_id,
+                channel_request_window.c.channel,
+                channel_request_window.c.request_class,
+                channel_request_window.c.window_start,
             ],
-            set_={"request_count": request_window.c.request_count + 1},
-            where=request_window.c.request_count < REQUESTS_PER_MINUTE[request_class],
+            set_={"request_count": channel_request_window.c.request_count + 1},
+            where=channel_request_window.c.request_count < REQUESTS_PER_MINUTE[request_class],
         )
-        .returning(request_window.c.request_count)
+        .returning(channel_request_window.c.request_count)
     )
     if session.execute(statement).first() is None:
         raise RequestLimitExceededError(request_class, window_start + WINDOW - now)
@@ -83,31 +94,37 @@ def count_request(
 def delete_expired_windows(session: Session, now: datetime, limit: int) -> int:
     """Apaga até `limit` janelas anteriores à anterior; devolve quantas apagou.
 
-    A janela anterior fica: uma réplica com o relógio um pouco atrasado ainda conta nela.
+    A janela anterior fica: uma réplica com o relógio um pouco atrasado ainda conta nela. Limpa
+    também a `request_window` da 0007, que só a réplica anterior ao deploy ainda grava, até o PR
+    que a apaga (preflight R4); o lote vale para as duas juntas.
     """
     previous_window = _window_start(now) - WINDOW
-    key = tuple_(
-        request_window.c.owner_id, request_window.c.request_class, request_window.c.window_start
-    )
-    chosen = skip_locked_batch(
-        select(
-            request_window.c.owner_id,
-            request_window.c.request_class,
-            request_window.c.window_start,
-        ).where(request_window.c.window_start < previous_window),
-        limit,
-    )
-    chosen_keys = select(chosen.c.owner_id, chosen.c.request_class, chosen.c.window_start)
-    deleted = session.execute(
-        delete(request_window).where(key.in_(chosen_keys)).returning(request_window.c.owner_id)
-    )
-    return len(deleted.all())
+    removed = _delete_expired(session, channel_request_window, previous_window, limit)
+    if removed < limit:
+        removed += _delete_expired(session, legacy_request_window, previous_window, limit - removed)
+    return removed
 
 
 def count_windows(session: Session) -> int:
-    """Janelas guardadas: a métrica do tamanho da tabela que a manutenção registra."""
-    total: int = session.execute(select(func.count()).select_from(request_window)).scalar_one()
+    """Janelas guardadas nas duas tabelas: a métrica de tamanho que a manutenção registra."""
+    total = 0
+    for table in (channel_request_window, legacy_request_window):
+        counted: int = session.execute(select(func.count()).select_from(table)).scalar_one()
+        total += counted
     return total
+
+
+def _delete_expired(session: Session, table: Table, previous_window: datetime, limit: int) -> int:
+    # A chave primária inteira identifica a linha; a da 0007 não tem `channel`.
+    key_columns = list(table.primary_key.columns)
+    chosen = skip_locked_batch(
+        select(*key_columns).where(table.c.window_start < previous_window), limit
+    )
+    chosen_keys = select(*(chosen.c[column.name] for column in key_columns))
+    deleted = session.execute(
+        delete(table).where(tuple_(*key_columns).in_(chosen_keys)).returning(table.c.owner_id)
+    )
+    return len(deleted.all())
 
 
 def _window_start(now: datetime) -> datetime:
