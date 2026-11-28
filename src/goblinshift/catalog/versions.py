@@ -12,6 +12,7 @@ valor, o `mapping` aponta cada `recipe_id` para um `oneOf` das versões dela, di
 
 import copy
 import dataclasses
+import re
 from collections.abc import Callable, Iterable, Mapping
 from dataclasses import dataclass, field
 from datetime import datetime
@@ -75,6 +76,26 @@ class InvalidParametersError(ValueError):
         super().__init__("; ".join(map(str, self.errors)))
 
 
+def _field_errors(error: ValidationError) -> list[FieldError]:
+    return [
+        FieldError(tuple(str(part) for part in detail["loc"]), detail["msg"], detail["type"])
+        for detail in error.errors()
+    ]
+
+
+def _sorted_keys(value: object) -> object:
+    if isinstance(value, dict):
+        return {key: _sorted_keys(value[key]) for key in sorted(value)}
+    if isinstance(value, list):
+        return [_sorted_keys(item) for item in value]
+    return value
+
+
+# Ids do catálogo e chaves de ajuste pronto (`csv-janitor`, `web-1600`); a API usa o mesmo formato
+# no caminho e nos filtros.
+SLUG_PATTERN = r"^[a-z0-9]+(?:-[a-z0-9]+)*$"
+
+
 @dataclass(frozen=True)
 class SystemPreset:
     """Ajuste pronto de uma versão (D2): dado do produto, só leitura, fora de `/presets`.
@@ -85,6 +106,10 @@ class SystemPreset:
     key: str
     name: str
     parameters: Mapping[str, object]
+
+    def __post_init__(self) -> None:
+        if re.fullmatch(SLUG_PATTERN, self.key) is None:
+            raise ValueError(f"chave de ajuste pronto fora do formato: {self.key!r}")
 
 
 @dataclass(frozen=True)
@@ -121,13 +146,9 @@ class RecipeVersion:
         names = [preset.name for preset in self.system_presets]
         if len(set(names)) != len(names):
             raise ValueError("nome de ajuste pronto repetido")
-        # O modelo direto, e não `resolve`: as versões nascem no import, antes dos auxiliares de
-        # canonização definidos mais abaixo neste módulo.
+        # `InvalidParametersError` sobe como está: o import do catálogo falha com o erro por campo.
         for preset in self.system_presets:
-            try:
-                self.parameters_model.model_validate(preset.parameters)
-            except ValidationError as error:
-                raise ValueError(f"ajuste pronto {preset.key!r} inválido: {error}") from None
+            self.resolve(preset.parameters)
 
     def resolve(self, raw_params: object) -> dict[str, object]:
         """Parâmetros validados com os defaults da versão, em forma canônica.
@@ -328,21 +349,6 @@ CATALOG = Catalog(
         MEDIA_MILL_V1,
     ]
 )
-
-
-def _field_errors(error: ValidationError) -> list[FieldError]:
-    return [
-        FieldError(tuple(str(part) for part in detail["loc"]), detail["msg"], detail["type"])
-        for detail in error.errors()
-    ]
-
-
-def _sorted_keys(value: object) -> object:
-    if isinstance(value, dict):
-        return {key: _sorted_keys(value[key]) for key in sorted(value)}
-    if isinstance(value, list):
-        return [_sorted_keys(item) for item in value]
-    return value
 
 
 def _inline_refs(schema: dict[str, Any]) -> dict[str, Any]:

@@ -26,6 +26,7 @@ from goblinshift.catalog import (
     UnknownRecipeVersionError,
     VersionStatus,
 )
+from goblinshift.catalog.versions import SLUG_PATTERN
 from goblinshift.entrypoints.api.dependencies import CurrentPrincipal
 from goblinshift.entrypoints.api.problems import ApiProblem, ProblemCode, problem_responses
 
@@ -37,7 +38,7 @@ CACHE_CONTROL = "private, no-cache"
 SUNSET_HEADER = "Sunset"
 MAX_RECIPE_ID_CHARS = 64
 # Formato dos ids do catálogo (`csv-janitor`): caminho e filtros só aceitam ids nesse formato.
-RECIPE_ID_PATTERN = r"^[a-z0-9]+(?:-[a-z0-9]+)*$"
+RECIPE_ID_PATTERN = SLUG_PATTERN
 # No máximo duas versões convivem (1.6); o teto só limita a entrada, longe do que existe.
 MAX_RECIPE_VERSION = 999
 

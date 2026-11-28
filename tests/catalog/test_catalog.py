@@ -364,32 +364,63 @@ def test_detox_recusa_com_preserve_outro_name_prefix() -> None:
 # Ajustes prontos do sistema (D2/D3 do plano de paridade): dado do catálogo, só leitura.
 
 
-def test_image_forge_v2_traz_os_tres_ajustes_prontos_resolvidos() -> None:
+@pytest.mark.parametrize(
+    ("key", "name", "expected"),
+    [
+        (
+            "web-1600",
+            "Web 1600",
+            {"fit": "contain", "max_width": 1600, "max_height": 1600},
+        ),
+        (
+            "email-1024",
+            "E-mail 1024",
+            {"fit": "contain", "max_width": 1024, "max_height": 1024},
+        ),
+        (
+            "redes-1080",
+            "Redes 1080",
+            {"fit": "cover", "max_width": 1080, "max_height": 1080},
+        ),
+    ],
+    ids=["web", "email", "redes"],
+)
+def test_ajuste_pronto_da_v2_fixa_ajuste_e_caixa(
+    key: str, name: str, expected: dict[str, object]
+) -> None:
+    v2 = CATALOG.get_version("image-forge", 2)
+    [preset] = [preset for preset in v2.system_presets if preset.key == key]
+
+    resolved = v2.resolve(preset.parameters)
+
+    assert preset.name == name
+    assert {field: resolved[field] for field in expected} == expected
+
+
+@pytest.mark.parametrize(
+    ("key", "expected"),
+    [
+        ("web-1600", {"output_format": "webp", "webp_quality": 80}),
+        ("email-1024", {"output_format": "jpeg", "jpeg_quality": 80}),
+        ("redes-1080", {"output_format": "jpeg", "jpeg_quality": 85}),
+    ],
+    ids=["web", "email", "redes"],
+)
+def test_ajuste_pronto_da_v2_fixa_formato_e_qualidade(
+    key: str, expected: dict[str, object]
+) -> None:
+    v2 = CATALOG.get_version("image-forge", 2)
+    [preset] = [preset for preset in v2.system_presets if preset.key == key]
+
+    resolved = v2.resolve(preset.parameters)
+
+    assert {field: resolved[field] for field in expected} == expected
+
+
+def test_ajustes_prontos_da_v2_saem_na_ordem_do_produto() -> None:
     v2 = CATALOG.get_version("image-forge", 2)
 
-    assert [(preset.key, preset.name) for preset in v2.system_presets] == [
-        ("web-1600", "Web 1600"),
-        ("email-1024", "E-mail 1024"),
-        ("redes-1080", "Redes 1080"),
-    ]
-    web, email, redes = (v2.resolve(preset.parameters) for preset in v2.system_presets)
-    assert (web["fit"], web["max_width"], web["output_format"], web["webp_quality"]) == (
-        "contain",
-        1600,
-        "webp",
-        80,
-    )
-    assert (email["max_height"], email["output_format"], email["jpeg_quality"]) == (
-        1024,
-        "jpeg",
-        80,
-    )
-    assert (redes["fit"], redes["max_width"], redes["max_height"], redes["jpeg_quality"]) == (
-        "cover",
-        1080,
-        1080,
-        85,
-    )
+    assert [preset.key for preset in v2.system_presets] == ["web-1600", "email-1024", "redes-1080"]
 
 
 def test_versoes_sem_ajustes_prontos_ficam_com_a_tupla_vazia() -> None:
@@ -407,14 +438,28 @@ def test_versoes_sem_ajustes_prontos_ficam_com_a_tupla_vazia() -> None:
             (SystemPreset("a", "A", {}), SystemPreset("b", "A", {})),
             "nome de ajuste pronto repetido",
         ),
-        ((SystemPreset("a", "A", {"max_width": 0}),), "ajuste pronto 'a' inválido"),
     ],
-    ids=["chave", "nome", "parametros"],
+    ids=["chave", "nome"],
 )
-def test_ajuste_pronto_invalido_e_recusado_no_import(
+def test_ajuste_pronto_repetido_e_recusado_no_import(
     presets: tuple[SystemPreset, ...], message: str
 ) -> None:
     v2 = CATALOG.get_version("image-forge", 2)
 
     with pytest.raises(ValueError, match=message):
         replace(v2, system_presets=presets)
+
+
+def test_ajuste_pronto_com_parametros_invalidos_e_recusado_pelo_modelo_da_versao() -> None:
+    v2 = CATALOG.get_version("image-forge", 2)
+
+    with pytest.raises(InvalidParametersError) as raised:
+        replace(v2, system_presets=(SystemPreset("a", "A", {"max_width": 0}),))
+
+    assert [error.location for error in raised.value.errors] == [("max_width",)]
+
+
+@pytest.mark.parametrize("key", ["", "Web-1600", "web 1600", "-web", "web-", "web--1600", "wéb"])
+def test_chave_de_ajuste_pronto_fora_do_formato_de_slug_e_recusada(key: str) -> None:
+    with pytest.raises(ValueError, match="chave de ajuste pronto fora do formato"):
+        SystemPreset(key, "A", {})
