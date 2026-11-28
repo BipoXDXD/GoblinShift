@@ -16,7 +16,7 @@ from pathlib import Path
 import psycopg
 import pytest
 from psycopg import errors as psycopg_errors
-from sqlalchemy import func, insert, select
+from sqlalchemy import Engine, func, insert, select
 from sqlalchemy.exc import DBAPIError
 from sqlalchemy.orm import Session, sessionmaker
 
@@ -38,7 +38,7 @@ from goblinshift.identity.tables import (
     login_state,
     web_session,
 )
-from goblinshift.platform.db import unit_of_work
+from goblinshift.platform.db import make_engine, make_session_factory, unit_of_work
 from goblinshift.platform.settings import Settings
 from goblinshift.runs import purge as runs_purge
 from goblinshift.runs.lifecycle import Status
@@ -53,6 +53,11 @@ pytestmark = pytest.mark.integration
 
 # `statement_timeout`: o banco respondeu, então só o passo que o levou falha.
 QUERY_CANCELED = "57014"
+# Trava que o worker segura além do `lock_timeout` da conexão.
+LOCK_NOT_AVAILABLE = "55P03"
+# Curto para o teste não esperar os 2 s do `db_lock_timeout_ms` padrão.
+LOCK_TIMEOUT_MS = 100
+MAINTENANCE_LOG = "goblinshift.maintenance"
 
 
 def full_account(
@@ -528,34 +533,39 @@ def test_banco_inalcancavel_na_purga_de_uma_conta_derruba_o_ciclo(
     assert count_owned(factory, second)["app_user"] == 1
 
 
-def test_cancelamento_falho_na_purga_conta_e_tenta_no_ciclo_seguinte(
+class FailingOnce:
+    """Cancelador que falha com `statement_timeout` na primeira chamada e depois cancela."""
+
+    def __init__(self, real: Callable[[uuid.UUID], object]) -> None:
+        self._real = real
+        self.calls = 0
+
+    def __call__(self, owner_id: uuid.UUID) -> object:
+        self.calls += 1
+        if self.calls == 1:
+            raise statement_timeout()
+        return self._real(owner_id)
+
+
+def test_cancelamento_falho_na_purga_conta_e_fica_no_log_sem_por_a_volta_no_alerta(
     factory: sessionmaker[Session],
     storage: FileStorage,
     maintenance: Maintenance,
     caplog: pytest.LogCaptureFixture,
 ) -> None:
     """#442: a Run que o `DELETE /me` não cancelou é cancelada pela purga; uma falha no
-    cancelamento conta, fica no log e a conta volta no ciclo seguinte."""
+    cancelamento conta só em `accounts_cancel_failed` e fica no log. Não conta em
+    `account_steps_failed`: é esperada, com o worker segurando a Run, e se resolve sozinha."""
     owner = create_user(factory, "ana")
     queue_run(factory, storage, owner)
     request_deletion(factory, owner)
-    real = real_canceller(factory, storage)
-    calls = 0
-
-    def failing_once(owner_id: uuid.UUID) -> object:
-        nonlocal calls
-        calls += 1
-        if calls == 1:
-            raise statement_timeout()
-        return real(owner_id)
-
-    jobs = AccountJobs(factory, cancel_active_run=failing_once)
+    jobs = AccountJobs(factory, cancel_active_run=FailingOnce(real_canceller(factory, storage)))
     maintenance.run_cycle()
+
     with caplog.at_level(logging.ERROR, logger="goblinshift.maintenance"):
         counts = jobs.run_cycle()
 
-    assert counts["accounts_cancel_failed"] == 1
-    assert counts["account_steps_failed"] == 1
+    assert (counts["accounts_cancel_failed"], counts["account_steps_failed"]) == (1, 0)
     assert count_owned(factory, owner)["app_user"] == 1
     [failure] = [r for r in caplog.records if r.getMessage() == "purga: cancelamento falhou"]
     assert failure.fields == {  # type: ignore[attr-defined]
@@ -564,9 +574,60 @@ def test_cancelamento_falho_na_purga_conta_e_tenta_no_ciclo_seguinte(
         "sqlstate": QUERY_CANCELED,
     }
 
-    cycles_until_purged(factory, maintenance, jobs, owner)
 
-    assert calls >= 2
+def test_cancelamento_falho_na_purga_tenta_de_novo_no_ciclo_seguinte(
+    factory: sessionmaker[Session], storage: FileStorage, maintenance: Maintenance
+) -> None:
+    owner = create_user(factory, "ana")
+    queue_run(factory, storage, owner)
+    request_deletion(factory, owner)
+    canceller = FailingOnce(real_canceller(factory, storage))
+    jobs = AccountJobs(factory, cancel_active_run=canceller)
+
+    cycles = cycles_until_purged(factory, maintenance, jobs, owner)
+
+    assert canceller.calls >= 2
+    assert cycles >= 2
+    assert set(count_owned(factory, owner).values()) == {0}
+
+
+def test_worker_segurando_a_run_adia_o_cancelamento_da_purga_sem_derrubar_o_ciclo(
+    engine: Engine,
+    db_settings: Settings,
+    factory: sessionmaker[Session],
+    storage: FileStorage,
+    maintenance: Maintenance,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """#442: a corrida real com o worker. Outra conexão segura a Run (`FOR UPDATE`), e o
+    cancelamento da purga desiste no `lock_timeout` (55P03): a conta fica para o ciclo seguinte,
+    sem derrubar o ciclo nem pôr a volta no alerta. Solta a trava, a purga acontece."""
+    owner = create_user(factory, "ana")
+    run_id = queue_run(factory, storage, owner)
+    request_deletion(factory, owner)
+    impatient = make_engine(db_settings.model_copy(update={"db_lock_timeout_ms": LOCK_TIMEOUT_MS}))
+    try:
+        short_lock = make_session_factory(impatient)
+        jobs = AccountJobs(short_lock, cancel_active_run=real_canceller(short_lock, storage))
+        maintenance.run_cycle()
+
+        with engine.connect() as worker, caplog.at_level(logging.ERROR, logger=MAINTENANCE_LOG):
+            worker.execute(select(run.c.id).where(run.c.id == run_id).with_for_update())
+            counts = jobs.run_cycle()
+            worker.rollback()
+
+        assert counts["accounts_cancel_failed"] == 1
+        assert (counts["account_steps_failed"], counts["accounts_purged"]) == (0, 0)
+        [failure] = [r for r in caplog.records if r.getMessage() == "purga: cancelamento falhou"]
+        assert failure.fields["sqlstate"] == LOCK_NOT_AVAILABLE  # type: ignore[attr-defined]
+        with factory() as session:
+            status = session.execute(select(run.c.status).where(run.c.id == run_id)).scalar_one()
+        assert status == Status.QUEUED
+
+        cycles_until_purged(factory, maintenance, jobs, owner)
+    finally:
+        impatient.dispose()
+
     assert set(count_owned(factory, owner).values()) == {0}
 
 

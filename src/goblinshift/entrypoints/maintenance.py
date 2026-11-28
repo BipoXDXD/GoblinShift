@@ -70,7 +70,6 @@ _ATTRIBUTE_PREFIX = "maintenance."
 ACCOUNT_STEPS_FAILED = "account_steps_failed"
 ACCOUNTS_PURGE_FAILED = "accounts_purge_failed"
 ACCOUNTS_CANCEL_FAILED = "accounts_cancel_failed"
-_ACCOUNT_FAILURE_COUNTS = (ACCOUNTS_PURGE_FAILED, ACCOUNTS_CANCEL_FAILED)
 # Contagens de passo falho que fazem a volta contar em `failed_cycles`.
 _FAILED_STEP_COUNTS = (STEPS_FAILED, ACCOUNT_STEPS_FAILED)
 
@@ -214,8 +213,10 @@ class AccountJobs:
     `account_steps_failed`, e os outros seguem, inclusive o alerta da exclusão atrasada; as
     contagens do passo que falhou ficam fora do evento. Na purga, a falha de uma conta conta em
     `accounts_purge_failed` e não impede as seguintes: cada ciclo marca a tentativa nas contas
-    que pega, e a fila segue pela tentativa mais antiga (#442). O cancelamento que falha conta em
-    `accounts_cancel_failed`, e a conta volta num ciclo seguinte, quando chegar a vez dela na fila.
+    que pega, e a fila segue pela tentativa mais antiga (#442). O cancelamento que falha sem perda
+    de conexão (o `lock_timeout` com o worker segurando a Run, por exemplo) conta só em
+    `accounts_cancel_failed`, fora de `account_steps_failed`, e a conta volta num ciclo seguinte,
+    quando chegar a vez dela na fila.
     Perda de conexão derruba o ciclo inteiro, como antes: com o banco fora, cada passo seguinte só
     esperaria o `connect_timeout` de novo.
     """
@@ -246,10 +247,10 @@ class AccountJobs:
                 # Fronteira do passo: o seguinte recomeça do banco, sem estado em memória.
                 log_step_failure(name, error)
                 failed += 1
-        # A purga ou o cancelamento que falhou numa conta também põe a volta no alerta, mesmo com
-        # as outras purgadas.
-        account_failed = any(counts.get(key, 0) > 0 for key in _ACCOUNT_FAILURE_COUNTS)
-        counts[ACCOUNT_STEPS_FAILED] = failed + int(account_failed)
+        # A purga que falhou numa conta também põe a volta no alerta, mesmo com as outras purgadas.
+        # O cancelamento que falhou não: com o worker segurando a Run, desistir no `lock_timeout`
+        # é esperado e se resolve num ciclo seguinte; fica só em `accounts_cancel_failed`.
+        counts[ACCOUNT_STEPS_FAILED] = failed + int(counts.get(ACCOUNTS_PURGE_FAILED, 0) > 0)
         overdue = counts.get("accounts_deletion_overdue", 0)
         if overdue:
             # Alerta de causa: o prazo de 24 h da exclusão (1.8) está perto de vencer.
