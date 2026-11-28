@@ -280,6 +280,10 @@ def test_ciclo_aplica_a_retencao_da_identidade(factory: sessionmaker[Session]) -
         session.execute(
             insert(login_state).values(key="k", value="{}", expires_at=now - timedelta(minutes=1))
         )
+        # Login em curso: fica, e é o que o tamanho da tabela mede depois da limpeza.
+        session.execute(
+            insert(login_state).values(key="v", value="{}", expires_at=now + timedelta(minutes=5))
+        )
         session.execute(
             insert(web_session).values(
                 user_id=owner,
@@ -309,6 +313,7 @@ def test_ciclo_aplica_a_retencao_da_identidade(factory: sessionmaker[Session]) -
     assert counts["audit_events_removed"] == 1
     assert counts["request_windows_removed"] == 1
     assert counts["request_windows"] == 1
+    assert counts["login_states"] == 1
 
 
 def test_ciclo_de_contas_conta_api_keys_removed(factory: sessionmaker[Session]) -> None:
