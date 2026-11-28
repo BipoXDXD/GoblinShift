@@ -259,25 +259,39 @@ class HostIsolationTests(unittest.TestCase):
         self.assertEqual(self.finish(second), 0, (self.root / "goblinshift.log").read_text())
         self.assert_preserved()
 
-    def test_receptor_recusa_publicar_durante_a_aceitacao(self) -> None:
-        # O deploy/acceptance/scheduled.sh segura a release.lock do goblinshift por um descritor
-        # somente leitura (ProtectSystem=strict). Com LOCK_NB, a publicação que chega nessa janela
-        # falha na hora, antes de qualquer escrita, e precisa ser rodada de novo depois (R15).
+    @contextmanager
+    def acceptance_lock(self) -> Any:
+        """A release.lock do goblinshift como o deploy/acceptance/scheduled.sh a segura.
+
+        Descritor somente leitura (a unit tem ProtectSystem=strict) e flock exclusivo; fechar o
+        descritor, como no fim do script, solta a trava.
+        """
         state = self.root / "state" / "goblinshift"
-        state.mkdir(parents=True)
+        state.mkdir(parents=True, exist_ok=True)
         lock = state / "release.lock"
         lock.touch()
         descriptor = os.open(lock, os.O_RDONLY)
         try:
             fcntl.flock(descriptor, fcntl.LOCK_EX | fcntl.LOCK_NB)
+            yield lock
+        finally:
+            os.close(descriptor)
+
+    def test_receptor_recusa_publicar_durante_a_aceitacao(self) -> None:
+        # Com LOCK_NB, a publicação que chega durante a aceitação falha na hora, antes de qualquer
+        # escrita, e precisa ser refeita depois da janela (README, "Aceitação semanal, agendada").
+        with self.acceptance_lock() as lock:
             with self.assertRaises(BlockingIOError), r.release_locks(lock):
                 self.fail("a trava da aceitação não barrou o receptor")
             self.assert_refused_before_input("goblinshift")
             self.assertIn("BlockingIOError", (self.root / "goblinshift.log").read_text())
-        finally:
-            os.close(descriptor)
-        second = self.start("goblinshift")
-        self.assertEqual(self.finish(second), 0, (self.root / "goblinshift.log").read_text())
+        self.assert_preserved()
+
+    def test_receptor_publica_quando_a_aceitacao_solta_a_trava(self) -> None:
+        with self.acceptance_lock():
+            pass
+        process = self.start("goblinshift")
+        self.assertEqual(self.finish(process), 0, (self.root / "goblinshift.log").read_text())
         self.assert_preserved()
 
     def test_killed_import_keeps_host_fenced_until_admin_reconciliation(self) -> None:

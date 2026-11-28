@@ -14,14 +14,15 @@
 # Antes de tudo, o script toma a trava da publicação do projeto (a release.lock que o receptor,
 # deploy/coolify/release/receiver.py, toma com LOCK_NB) e a segura até o fim: um merge na janela
 # recriaria worker e manutenção no meio das sondas, e a manutenção nova apagaria as sondas. Espera
-# até 15 min pela publicação em curso (D14); ocupada ou ausente depois disso, pinga /fail e sai com
+# até 15 min pela publicação em curso, que costuma ser curta; ocupada ou ausente depois disso, pinga /fail e sai com
 # 75 sem tocar em nada. A publicação que chega durante o teste falha na hora e precisa ser rodada
 # de novo depois da janela (README, "Aceitação semanal, agendada"). A trava não é a host.lock,
 # que barraria por até 1 h a publicação dos outros projetos do host.
 #
 # Com Persistent=true, o teste perdido roda logo depois do boot, e o worker pode ainda não ter
 # subido: a menos de 30 min do boot, o script espera até 10 min o worker aparecer no `docker ps`
-# antes de procurá-lo para parar. Se ele não aparecer, segue como hoje, sem worker para parar.
+# antes de procurá-lo para parar. Se ele não aparecer, a aceitação roda sem worker para parar.
+# SIGTERM durante a espera pinga /fail e sai sem tocar no worker.
 #
 # Roda da cópia que o deploy/acceptance/install.sh faz em /usr/local/lib/goblinshift (do root), nunca
 # do checkout, que pertence ao usuário goblinshift; o lib.sh e o pacote vêm da mesma cópia.
@@ -65,18 +66,23 @@ find_workers() {
 
 # wait_for_worker_after_boot: perto do boot, espera o worker religar antes da procura que decide
 # se ele para. Falha do `docker ps` aqui conta como "ainda não": o daemon pode estar subindo, e a
-# procura de verdade, depois, é que reprova se ele continuar falhando.
+# procura de verdade, depois, é que reprova se ele continuar falhando. Sai com 1 se o serviço
+# recebeu SIGTERM durante a espera.
 wait_for_worker_after_boot() {
   local uptime_s deadline
   uptime_s="$(cut -d. -f1 "$PROC_UPTIME" 2>/dev/null)" || return 0
   [[ "$uptime_s" =~ ^[0-9]+$ ]] && ((uptime_s < RECENT_BOOT_S)) || return 0
   echo "máquina ligada há ${uptime_s} s: esperando o worker subir (até ${WORKER_WAIT_S} s)"
   deadline=$((SECONDS + WORKER_WAIT_S))
-  while true; do
+  while ((interrupted == 0)); do
     [[ -n "$(find_workers 2>/dev/null)" ]] && return 0
-    ((SECONDS < deadline && interrupted == 0)) || break
-    sleep "$WORKER_POLL_S"
+    ((SECONDS < deadline)) || break
+    # Em segundo plano: o `wait` volta assim que chega o sinal, e o `sleep` morto pelo SIGTERM do
+    # cgroup não derruba o script pelo `set -e`.
+    sleep "$WORKER_POLL_S" &
+    wait "$!" || true
   done
+  ((interrupted == 0)) || return 1
   echo "o worker não apareceu em ${WORKER_WAIT_S} s depois do boot; o teste segue sem parar" \
     "worker nenhum" >&2
 }
@@ -114,7 +120,12 @@ healthcheck_ping "$ACCEPTANCE_HEALTHCHECK_URL" "/start"
 interrupted=0
 trap 'interrupted=1' TERM INT
 
-wait_for_worker_after_boot
+if ! wait_for_worker_after_boot; then
+  # Nada foi tocado ainda: sem parar nem religar o worker.
+  echo "interrompido durante a espera pelo worker; o worker não foi tocado" >&2
+  healthcheck_ping "$ACCEPTANCE_HEALTHCHECK_URL" "/fail"
+  exit "$SIGTERM_EXIT"
+fi
 
 status=0
 # Em variável, e não em `< <(...)`: a substituição de processo esconde a falha do `docker ps`, e
