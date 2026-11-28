@@ -137,24 +137,37 @@ def test_login_failed_de_conta_conhecida_sempre_auditado(
     fake: FakeProviders,
     factory: sessionmaker[Session],
     monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    # O teto por minuto vale só para a falha sem conta: com ele estourado, a recusa da conta
+    # bloqueada continua gravada com a conta, e o código de referência leva a ela.
+    blocked_after_a_session(login_app, fake, factory)
+    monkeypatch.setattr(auth_login, "MAX_ANONYMOUS_LOGIN_FAILURES_PER_MINUTE", 1)
+    with browser(login_app) as client:
+        assert_login_failed(client.get("/auth/callback/google?code=x&state=y"))
+
+    blocked = assert_login_failed(login_as(login_app, fake, BLOCKED_SUBJECT))
+
+    assert audit_by_ref(factory, blocked) == [
+        ("LOGIN_FAILED", account_id(factory, BLOCKED_SUBJECT))
+    ]
+
+
+def test_login_failed_anonimo_alem_do_teto_fica_so_no_log(
+    login_app: FastAPI,
+    factory: sessionmaker[Session],
+    monkeypatch: pytest.MonkeyPatch,
     caplog: pytest.LogCaptureFixture,
 ) -> None:
-    # Review Focus 5: o teto por minuto vale só para a falha sem conta. Com ele cheio, o callback
-    # forjado fica só no log, e a recusa da conta bloqueada continua com o evento e o código.
-    blocked_after_a_session(login_app, fake, factory)
+    # Com o teto cheio, o callback forjado não grava evento: o aviso sai no log, e o código de
+    # referência dessa recusa não acha nada na auditoria.
     monkeypatch.setattr(auth_login, "MAX_ANONYMOUS_LOGIN_FAILURES_PER_MINUTE", 1)
     with browser(login_app) as client:
         first = assert_login_failed(client.get("/auth/callback/google?code=x&state=y"))
         with caplog.at_level(logging.WARNING, logger=auth_login.__name__):
             dropped = assert_login_failed(client.get("/auth/callback/google?code=x&state=y"))
 
-    blocked = assert_login_failed(login_as(login_app, fake, BLOCKED_SUBJECT))
-
     assert audit_by_ref(factory, first) == [("LOGIN_FAILED", None)]
     assert audit_by_ref(factory, dropped) == []
-    assert audit_by_ref(factory, blocked) == [
-        ("LOGIN_FAILED", account_id(factory, BLOCKED_SUBJECT))
-    ]
     assert [event for event, _, user in audit_events(factory) if user is None] == ["LOGIN_FAILED"]
     alerts = [getattr(record, "fields", {}).get("alert") for record in caplog.records]
-    assert "login_failure_audit_cap" in alerts
+    assert [alert for alert in alerts if alert is not None] == ["login_failure_audit_cap"]

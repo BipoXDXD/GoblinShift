@@ -67,9 +67,10 @@ def login_states_full(session: Session, now: datetime, limit: int) -> bool:
     """Se já há `limit` estados vivos (`expires_at > now`); vencidos à espera da purga não contam.
 
     A contagem para em `limit` (`count(*)` sobre um `SELECT ... LIMIT`) e usa o índice de
-    `expires_at`: o custo não cresce com a tabela cheia. Dois inícios simultâneos podem passar
-    juntos do teto por uma ou duas linhas; a corrida é aceita, porque o teto protege o tamanho da
-    tabela, não um número exato.
+    `expires_at`: o custo não cresce com a tabela cheia. A contagem e a gravação do estado ficam em
+    transações separadas, então inícios simultâneos passam juntos do teto: o estouro é limitado
+    pelas requisições em voo (tokens do threadpool vezes processos da API). A corrida é aceita,
+    porque o teto protege o tamanho da tabela, não um número exato.
     """
     live = (
         select(literal(1))

@@ -236,7 +236,7 @@ def test_erro_generico_e_um_caminho_local(client: TestClient) -> None:
     assert_login_failed(client.get("/auth/callback/google"))
 
 
-# --- Teto de estados vivos (login-e-borda, Tarefa 4) -------------------------------------------
+# --- Teto de estados vivos ---------------------------------------------------------------------
 
 
 def stored_states(factory: sessionmaker[Session]) -> list[str]:
@@ -270,7 +270,7 @@ def test_teto_de_login_state_nao_despeja_login_em_curso(
     sessions: StoredSessions,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    # Review Focus 5: com o teto cheio, o início novo é recusado, e o estado já gravado de quem
+    # Com o teto cheio, o início novo é recusado, e o estado já gravado de quem
     # está no provedor continua valendo para o callback (nada é despejado para abrir vaga).
     monkeypatch.setattr(auth_login, "MAX_LIVE_LOGIN_STATES", 1)
     open_signup(login_app)

@@ -177,8 +177,9 @@ def record_anonymous_login_failure(
     não gasta o teto. A janela é aberta no início (`occurred_at > now - 1 min`), como a do
     `record_csrf_failure`, e a busca usa o índice de `occurred_at`.
 
-    Duas requisições simultâneas podem gravar acima do teto por uma ou duas linhas: nenhuma vê a
-    outra antes do commit. A corrida é aceita, porque o teto protege o tamanho da tabela.
+    Requisições simultâneas gravam acima do teto, porque nenhuma vê a outra antes do commit: o
+    estouro é limitado pelas requisições em voo (tokens do threadpool vezes processos da API). A
+    corrida é aceita, porque o teto protege o tamanho da tabela.
     """
     values = _event_values(
         event=AuditEventType.LOGIN_FAILED,

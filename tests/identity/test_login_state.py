@@ -149,7 +149,7 @@ def test_duas_leituras_simultaneas_so_uma_recebe_o_estado(
     assert sorted(results, key=str) == [None, VALUE]
 
 
-# --- Teto de estados vivos (login-e-borda, Tarefa 4) -------------------------------------------
+# --- Teto de estados vivos ---------------------------------------------------------------------
 
 
 def save_states(factory: sessionmaker[Session], count: int, expires_at: datetime) -> None:
@@ -170,7 +170,7 @@ def test_login_states_full_no_limite_exato(
 
 
 def test_estados_vencidos_nao_contam_no_teto(factory: sessionmaker[Session]) -> None:
-    # Vencidos, mas ainda não purgados pela manutenção (Review Focus 4 do plano login-e-borda).
+    # Vencidos, mas ainda não purgados pela manutenção: não bloqueiam ninguém.
     save_states(factory, 3, T0 - timedelta(seconds=1))
     save_states(factory, 2, T0 + LOGIN_STATE_TTL)
 
