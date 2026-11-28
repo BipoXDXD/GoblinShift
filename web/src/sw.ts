@@ -3,35 +3,40 @@
 // cache de página nem de asset e não intercepta nenhum outro pedido: um deploy novo vale na próxima
 // navegação, como sem service worker (`Cache-Control: no-cache` no index.html).
 
+import { purgeExpiredShares } from "./share/inbox";
 import { openNotificationTarget } from "./share/notificationClick";
-import { storeShared } from "./share/inbox";
+import { isShareRequest, receiveShare } from "./share/receive";
 
 declare const self: ServiceWorkerGlobalScope;
-
-const SHARE_PATH = "/compartilhar";
-/** Sem como guardar os arquivos (cota, corpo ilegível), a Oficina explica o motivo. */
-const SHARE_UNAVAILABLE = "/?compartilhamento=indisponivel";
 
 // Versão nova assume na hora: ela não tem estado nem cache para migrar.
 self.addEventListener("install", () => {
   void self.skipWaiting();
 });
 
+// Ao ativar, apaga os compartilhamentos vencidos que ninguém abriu (prazo de 1 h).
 self.addEventListener("activate", (event) => {
-  event.waitUntil(self.clients.claim());
+  event.waitUntil(
+    Promise.all([
+      self.clients.claim(),
+      purgeExpiredShares(self.caches, Date.now()).catch(() => undefined),
+    ]),
+  );
 });
 
 self.addEventListener("fetch", (event) => {
   const { request } = event;
-  const url = new URL(request.url);
-  if (
-    request.method !== "POST" ||
-    url.origin !== self.location.origin ||
-    url.pathname !== SHARE_PATH
-  ) {
+  if (!isShareRequest(request, self.location.origin)) {
     return;
   }
-  event.respondWith(receiveShare(request));
+  event.respondWith(
+    receiveShare(request, {
+      caches: self.caches,
+      now: Date.now(),
+      newId: () => crypto.randomUUID(),
+      origin: self.location.origin,
+    }).then((location) => Response.redirect(location, 303)),
+  );
 });
 
 self.addEventListener("notificationclick", (event) => {
@@ -47,21 +52,3 @@ self.addEventListener("notificationclick", (event) => {
     ),
   );
 });
-
-/** Guarda os arquivos e manda a página escolher a receita (303: a página abre com GET). */
-async function receiveShare(request: Request): Promise<Response> {
-  try {
-    const form = await request.formData();
-    const id = await storeShared(self.caches, form, {
-      now: Date.now(),
-      newId: () => crypto.randomUUID(),
-    });
-    return redirect(`${SHARE_PATH}?${new URLSearchParams({ id }).toString()}`);
-  } catch {
-    return redirect(SHARE_UNAVAILABLE);
-  }
-}
-
-function redirect(path: string): Response {
-  return Response.redirect(new URL(path, self.location.origin).href, 303);
-}

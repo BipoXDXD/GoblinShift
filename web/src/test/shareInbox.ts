@@ -10,15 +10,22 @@ const ORIGIN = "https://goblinshift.test";
  * `put`, `match`, `keys` e `delete`); o resto falha, para um uso novo não passar em silêncio. O
  * jsdom não tem a Cache API.
  */
-export function fakeCacheStorage(): CacheStorage {
-  return new FakeCacheStorage();
+export function fakeCacheStorage({
+  failOnPut,
+}: { readonly failOnPut?: number } = {}): CacheStorage {
+  return new FakeCacheStorage(failOnPut ?? null);
 }
 
 class FakeCacheStorage implements CacheStorage {
   readonly #stores = new Map<string, FakeCache>();
+  readonly #failOnPut: number | null;
+
+  constructor(failOnPut: number | null) {
+    this.#failOnPut = failOnPut;
+  }
 
   open(name: string): Promise<Cache> {
-    const cache = this.#stores.get(name) ?? new FakeCache();
+    const cache = this.#stores.get(name) ?? new FakeCache(this.#failOnPut);
     this.#stores.set(name, cache);
     return Promise.resolve(cache);
   }
@@ -42,8 +49,19 @@ class FakeCacheStorage implements CacheStorage {
 
 class FakeCache implements Cache {
   readonly #entries = new Map<string, Response>();
+  /** O `put` de número `failOnPut` (a partir de 1) rejeita, como a cota cheia do navegador. */
+  readonly #failOnPut: number | null;
+  #puts = 0;
+
+  constructor(failOnPut: number | null) {
+    this.#failOnPut = failOnPut;
+  }
 
   put(request: RequestInfo | URL, response: Response): Promise<void> {
+    this.#puts += 1;
+    if (this.#puts === this.#failOnPut) {
+      return Promise.reject(new DOMException("cota cheia", "QuotaExceededError"));
+    }
     this.#entries.set(urlOf(request), response);
     return Promise.resolve();
   }

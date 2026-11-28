@@ -6,6 +6,8 @@ import {
   SHARE_CACHE,
   SHARE_FIELD,
   SHARE_TTL_MS,
+  purgeExpiredShares,
+  ShareRejected,
   storeShared,
   takeShared,
 } from "./inbox";
@@ -18,6 +20,13 @@ function formWith(...files: File[]): FormData {
     form.append(SHARE_FIELD, file);
   }
   return form;
+}
+
+const MIB = 1024 * 1024;
+
+async function storedPaths(caches: CacheStorage): Promise<string[]> {
+  const keys = await (await caches.open(SHARE_CACHE)).keys();
+  return keys.map((request) => new URL(request.url).pathname);
 }
 
 async function textOf(file: File): Promise<string> {
@@ -123,5 +132,93 @@ describe("caixa de entrada do compartilhamento", () => {
     });
 
     expect(await peekSharedNames(caches, id, NOW)).toEqual(names);
+  });
+
+  it("um vencido some na leitura, sem precisar de outro compartilhamento", async () => {
+    const caches = fakeCacheStorage();
+    await storeShared(caches, formWith(new File(["x"], "a.csv")), { now: NOW, newId: () => "a" });
+    await storeShared(caches, formWith(new File(["y"], "b.csv")), {
+      now: NOW + SHARE_TTL_MS / 2,
+      newId: () => "b",
+    });
+
+    await peekSharedNames(caches, "b", NOW + SHARE_TTL_MS + 1);
+
+    expect(await storedPaths(caches)).toEqual(["/__compartilhado/b/0"]);
+  });
+
+  it("tirar um compartilhamento também apaga os vencidos de outros", async () => {
+    const caches = fakeCacheStorage();
+    await storeShared(caches, formWith(new File(["x"], "a.csv")), { now: NOW, newId: () => "a" });
+    await storeShared(caches, formWith(new File(["y"], "b.csv")), {
+      now: NOW + SHARE_TTL_MS / 2,
+      newId: () => "b",
+    });
+
+    await takeShared(caches, "b", NOW + SHARE_TTL_MS + 1);
+
+    expect(await storedPaths(caches)).toEqual([]);
+  });
+
+  it("a limpeza do service worker apaga só os vencidos", async () => {
+    const caches = fakeCacheStorage();
+    await storeShared(caches, formWith(new File(["x"], "a.csv")), { now: NOW, newId: () => "a" });
+    await storeShared(caches, formWith(new File(["y"], "b.csv")), {
+      now: NOW + SHARE_TTL_MS / 2,
+      newId: () => "b",
+    });
+
+    await purgeExpiredShares(caches, NOW + SHARE_TTL_MS + 1);
+
+    expect(await storedPaths(caches)).toEqual(["/__compartilhado/b/0"]);
+  });
+
+  it("falha num put apaga o compartilhamento inteiro e propaga o erro", async () => {
+    const caches = fakeCacheStorage({ failOnPut: 2 });
+    const form = formWith(
+      new File(["1"], "a.csv"),
+      new File(["2"], "b.csv"),
+      new File(["3"], "c.csv"),
+    );
+
+    await expect(storeShared(caches, form, { now: NOW, newId: () => "cota" })).rejects.toThrow(
+      "cota cheia",
+    );
+    expect(await storedPaths(caches)).toEqual([]);
+  });
+
+  it("recusa arquivo comum acima de 50 MiB sem gravar nada", async () => {
+    const caches = fakeCacheStorage();
+    const form = formWith(
+      new File(["x"], "a.csv"),
+      new File([new Uint8Array(50 * MIB + 1)], "grande.pdf"),
+    );
+
+    await expect(storeShared(caches, form, { now: NOW, newId: () => "teto" })).rejects.toThrow(
+      ShareRejected,
+    );
+    expect(await storedPaths(caches)).toEqual([]);
+  });
+
+  it("vídeo acima de 50 MiB passa, porque o teto dele é 256 MiB", async () => {
+    const caches = fakeCacheStorage();
+    const form = formWith(new File([new Uint8Array(50 * MIB + 1)], "clipe.mp4"));
+
+    await storeShared(caches, form, { now: NOW, newId: () => "video" });
+
+    expect(await storedPaths(caches)).toEqual(["/__compartilhado/video/0"]);
+  });
+
+  it("recusa mais de 100 arquivos num compartilhamento", async () => {
+    const caches = fakeCacheStorage();
+    const files = Array.from(
+      { length: 101 },
+      (_, index) => new File(["x"], `f${String(index)}.csv`),
+    );
+
+    await expect(
+      storeShared(caches, formWith(...files), { now: NOW, newId: () => "muitos" }),
+    ).rejects.toThrow(ShareRejected);
+    expect(await storedPaths(caches)).toEqual([]);
   });
 });

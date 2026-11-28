@@ -12,6 +12,26 @@ export const SHARE_TTL_MS = 3_600_000;
 /** Campo do formulário do `share_target` (manifest.webmanifest) com os arquivos. */
 export const SHARE_FIELD = "arquivos";
 
+const MIB = 1024 * 1024;
+
+/**
+ * Tetos de um compartilhamento, os mesmos do servidor (ADR 036 e 062): o front não tem constante
+ * deles, porque a Bancada lê os limites de cada receita no catálogo, e o service worker não tem o
+ * catálogo. Aqui eles só impedem que um POST encha o armazenamento do aparelho; a Bancada ainda
+ * confere os limites da receita escolhida.
+ */
+const SHARE_MAX_FILES = 100;
+const SHARE_MAX_FILE_BYTES = 50 * MIB;
+const SHARE_MAX_VIDEO_BYTES = 256 * MIB;
+const SHARE_MAX_TOTAL_BYTES = 512 * MIB;
+
+const VIDEO_NAME = /\.(?:mp4|mov|webm)$/i;
+
+/** Compartilhamento fora dos tetos: nada é gravado e a Oficina explica que não chegou. */
+export class ShareRejected extends Error {
+  override readonly name = "ShareRejected";
+}
+
 const PREFIX = "/__compartilhado/";
 const NAME_HEADER = "X-Gs-Name";
 const AT_HEADER = "X-Gs-At";
@@ -24,32 +44,60 @@ interface Entry {
 
 /**
  * Grava cada arquivo do campo `arquivos` sob um id novo e devolve o id. Antes, apaga as entradas
- * vencidas de compartilhamentos que ninguém abriu.
+ * vencidas de compartilhamentos que ninguém abriu. Fora dos tetos, rejeita com `ShareRejected` sem
+ * gravar; se um `put` falhar (cota), apaga o que já gravou do id e propaga o erro.
  */
 export async function storeShared(
   caches: CacheStorage,
   form: FormData,
   { now, newId }: { readonly now: number; readonly newId: () => string },
 ): Promise<string> {
+  const files = form.getAll(SHARE_FIELD).filter((value) => value instanceof File);
+  checkLimits(files);
   const cache = await caches.open(SHARE_CACHE);
   await purgeExpired(cache, now);
   const id = newId();
-  const files = form.getAll(SHARE_FIELD).filter((value) => value instanceof File);
-  await Promise.all(
-    files.map((file, index) =>
-      cache.put(
-        entryPath(id, index),
-        new Response(file, {
-          headers: {
-            [NAME_HEADER]: encodeURIComponent(file.name),
-            "Content-Type": file.type === "" ? "application/octet-stream" : file.type,
-            [AT_HEADER]: String(now),
-          },
-        }),
-      ),
-    ),
-  );
+  try {
+    await Promise.all(
+      files.map((file, index) => cache.put(entryPath(id, index), entryOf(file, now))),
+    );
+  } catch (error) {
+    await Promise.all(files.map((_, index) => cache.delete(entryPath(id, index))));
+    throw error;
+  }
   return id;
+}
+
+/** Apaga os compartilhamentos vencidos; o service worker chama ao ativar. */
+export async function purgeExpiredShares(caches: CacheStorage, now: number): Promise<void> {
+  await purgeExpired(await caches.open(SHARE_CACHE), now);
+}
+
+function checkLimits(files: readonly File[]): void {
+  if (files.length > SHARE_MAX_FILES) {
+    throw new ShareRejected(`mais de ${String(SHARE_MAX_FILES)} arquivos`);
+  }
+  if (files.some((file) => file.size > maxBytesOf(file))) {
+    throw new ShareRejected("arquivo acima do teto");
+  }
+  if (files.reduce((total, file) => total + file.size, 0) > SHARE_MAX_TOTAL_BYTES) {
+    throw new ShareRejected("compartilhamento acima do teto do lote");
+  }
+}
+
+function maxBytesOf(file: File): number {
+  const video = file.type.startsWith("video/") || VIDEO_NAME.test(file.name);
+  return video ? SHARE_MAX_VIDEO_BYTES : SHARE_MAX_FILE_BYTES;
+}
+
+function entryOf(file: File, now: number): Response {
+  return new Response(file, {
+    headers: {
+      [NAME_HEADER]: encodeURIComponent(file.name),
+      "Content-Type": file.type === "" ? "application/octet-stream" : file.type,
+      [AT_HEADER]: String(now),
+    },
+  });
 }
 
 /** Os arquivos do compartilhamento, que saem da caixa; sem entrada ou vencido, `"expired"`. */
@@ -59,6 +107,7 @@ export async function takeShared(
   now: number,
 ): Promise<readonly File[] | "expired"> {
   const cache = await caches.open(SHARE_CACHE);
+  await purgeExpired(cache, now);
   const entries = await entriesOf(cache, id);
   const valid = entries.length > 0 && entries.every((entry) => !isExpired(entry.response, now));
   const files = valid ? await Promise.all(entries.map(fileOf)) : null;
@@ -73,6 +122,7 @@ export async function peekSharedNames(
   now: number,
 ): Promise<readonly string[] | "expired"> {
   const cache = await caches.open(SHARE_CACHE);
+  await purgeExpired(cache, now);
   const entries = await entriesOf(cache, id);
   if (entries.length === 0 || entries.some((entry) => isExpired(entry.response, now))) {
     return "expired";

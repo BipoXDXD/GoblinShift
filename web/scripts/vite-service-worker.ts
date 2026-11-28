@@ -10,16 +10,19 @@ import { build, type Plugin } from "vite";
  * não vale em todo navegador. Por isso um build próprio, em IIFE, depois do da página.
  */
 export function serviceWorker(entry: string): Plugin {
+  let root = process.cwd();
   let outDir = "dist";
   return {
     name: "goblinshift-service-worker",
     apply: "build",
     configResolved(config) {
-      outDir = config.build.outDir;
+      root = config.root;
+      outDir = resolve(config.root, config.build.outDir);
     },
     async closeBundle() {
       await build({
         configFile: false,
+        root,
         logLevel: "warn",
         publicDir: false,
         build: {
@@ -28,7 +31,7 @@ export function serviceWorker(entry: string): Plugin {
           sourcemap: false,
           minify: true,
           lib: {
-            entry: resolve(entry),
+            entry: resolve(root, entry),
             formats: ["iife"],
             name: "goblinShiftServiceWorker",
             fileName: () => "sw.js",
