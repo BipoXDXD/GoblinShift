@@ -36,6 +36,7 @@ from goblinshift.identity.audit import (
     AuditOutcome,
     LimitChange,
     limits_changed_details,
+    record_csrf_failure,
     truncate_ip,
 )
 from goblinshift.identity.audit import record as record_audit_event
@@ -71,6 +72,7 @@ from goblinshift.identity.sessions import (
     IssuedSession,
     SessionRefusal,
     authenticate_session,
+    record_session_use,
     resolve_session,
     revoke_all_credentials,
     revoke_session,
@@ -142,6 +144,8 @@ __all__ = [
     "parse_scopes",
     "purge_owner",
     "record_audit_event",
+    "record_csrf_failure",
+    "record_session_use",
     "request_account_deletion",
     "resolve_login",
     "resolve_session",

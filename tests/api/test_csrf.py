@@ -5,7 +5,9 @@ nova entra sozinha. A mutação legítima de referência é o cancelamento de um
 passar pelo CSRF dá 404, e não 403.
 """
 
-from uuid import uuid4
+import dataclasses
+from datetime import UTC, datetime, timedelta
+from uuid import UUID, uuid4
 
 import httpx2 as httpx
 import pytest
@@ -14,7 +16,9 @@ from fastapi.testclient import TestClient
 from sqlalchemy import select
 from sqlalchemy.orm import Session, sessionmaker
 
-from goblinshift.identity.tables import audit_event
+from goblinshift.entrypoints.api.dependencies import current_time
+from goblinshift.identity import REQUESTS_PER_MINUTE, RequestClass
+from goblinshift.identity.tables import audit_event, web_session
 from tests.api.session_support import open_session, session_headers
 from tests.api.support import assert_problem
 from tests.identity.support import new_key, new_user
@@ -25,16 +29,38 @@ pytestmark = pytest.mark.integration
 
 _MUTATING = {"POST", "PUT", "PATCH", "DELETE"}
 CANCEL = "/api/v1/runs/{run_id}/cancel"
+NOW = datetime(2026, 10, 14, 12, 0, tzinfo=UTC)
+# Passado o minuto de `LAST_SEEN_RESOLUTION`: um uso registrado aqui grava `last_seen_at`.
+AFTER_A_MINUTE = NOW + timedelta(seconds=61)
 MUTATIONS = [
     pytest.param(method, path, id=f"{method} {path}")
     for method, path, _rule in entries()
     if method in _MUTATING
 ]
+# `POST /auth/logout` confere o par e a origem, não o HMAC (#442, 46a): o token de outra sessão
+# tem teste próprio, `test_logout_confere_o_par_e_nao_o_hmac`.
+HMAC_MUTATIONS = [param for param in MUTATIONS if param.values != ("POST", "/auth/logout")]
 
 
 def _send(client: TestClient, method: str, path: str, headers: dict[str, str]) -> httpx.Response:
     value = str(uuid4())
     return client.request(method, fill_path_params(path, lambda _name: value), headers=headers)
+
+
+def _freeze(app: FastAPI, now: datetime) -> None:
+    app.dependency_overrides[current_time] = lambda: now
+
+
+def _last_seen_and_idle_expiry(
+    factory: sessionmaker[Session], session_id: UUID
+) -> tuple[datetime, datetime]:
+    with factory() as session:
+        row = session.execute(
+            select(web_session.c.last_seen_at, web_session.c.idle_expires_at).where(
+                web_session.c.id == session_id
+            )
+        ).one()
+    return row.last_seen_at, row.idle_expires_at
 
 
 def _csrf_failures(factory: sessionmaker[Session]) -> list[str]:
@@ -80,7 +106,7 @@ def test_mutacao_por_cookie_com_origin_de_outra_origem_e_recusada(
     assert_problem(_send(client, method, path, headers), 403, "CSRF_FAILED")
 
 
-@pytest.mark.parametrize(("method", "path"), MUTATIONS)
+@pytest.mark.parametrize(("method", "path"), HMAC_MUTATIONS)
 def test_mutacao_por_cookie_com_token_de_outra_sessao_e_recusada(
     app: FastAPI, client: TestClient, factory: sessionmaker[Session], method: str, path: str
 ) -> None:
@@ -112,6 +138,24 @@ def test_falha_de_csrf_e_auditada_mesmo_com_a_requisicao_recusada(
 
     _send(client, "POST", CANCEL, headers)
 
+    assert _csrf_failures(factory) == ["failure"]
+
+
+def test_rajada_de_csrf_invalido_grava_uma_linha(
+    app: FastAPI, client: TestClient, factory: sessionmaker[Session]
+) -> None:
+    # Uma linha por conta e minuto: a rajada não inunda a auditoria (#442, 50a).
+    issued = open_session(app, new_user(factory), now=NOW)
+    _freeze(app, NOW)
+    headers = session_headers(app, issued)
+    del headers["X-CSRF-Token"]
+
+    statuses = [
+        _send(client, "POST", CANCEL, headers).status_code
+        for _ in range(REQUESTS_PER_MINUTE[RequestClass.COMMAND])
+    ]
+
+    assert statuses == [403] * REQUESTS_PER_MINUTE[RequestClass.COMMAND]
     assert _csrf_failures(factory) == ["failure"]
 
 
@@ -155,3 +199,159 @@ def test_bearer_nao_exige_csrf(client: TestClient, factory: sessionmaker[Session
     }
 
     assert_problem(_send(client, "POST", CANCEL, headers), 404, "NOT_FOUND")
+
+
+# --- Ordem: identificar, contar, conferir o CSRF e só então registrar o uso ------------------
+
+
+def test_post_same_site_recusado_nao_estende_a_sessao(
+    app: FastAPI, client: TestClient, factory: sessionmaker[Session]
+) -> None:
+    issued = open_session(app, new_user(factory), now=NOW)
+    _freeze(app, AFTER_A_MINUTE)
+    headers = {**session_headers(app, issued), "Sec-Fetch-Site": "same-site"}
+    del headers["X-CSRF-Token"]
+
+    response = _send(client, "POST", CANCEL, headers)
+
+    assert_problem(response, 403, "CSRF_FAILED")
+    assert _last_seen_and_idle_expiry(factory, issued.session_id) == (
+        NOW,
+        NOW + timedelta(minutes=30),
+    )
+
+
+def test_mutacao_com_csrf_invalido_conta_no_limite_de_comandos(
+    app: FastAPI, client: TestClient, factory: sessionmaker[Session]
+) -> None:
+    issued = open_session(app, new_user(factory), now=NOW)
+    _freeze(app, AFTER_A_MINUTE)
+    headers = session_headers(app, issued, csrf_header="x" * 87)
+
+    for _ in range(REQUESTS_PER_MINUTE[RequestClass.COMMAND]):
+        assert _send(client, "POST", CANCEL, headers).status_code == 403
+    response = _send(client, "POST", CANCEL, headers)
+
+    assert_problem(response, 429, "RATE_LIMITED")
+    assert "retry-after" in response.headers
+
+
+def test_mutacao_legitima_estende_a_sessao_depois_de_um_minuto(
+    app: FastAPI, client: TestClient, factory: sessionmaker[Session]
+) -> None:
+    issued = open_session(app, new_user(factory), now=NOW)
+    _freeze(app, AFTER_A_MINUTE)
+
+    response = _send(client, "POST", CANCEL, session_headers(app, issued))
+
+    assert_problem(response, 404, "NOT_FOUND")
+    assert _last_seen_and_idle_expiry(factory, issued.session_id) == (
+        AFTER_A_MINUTE,
+        AFTER_A_MINUTE + timedelta(minutes=30),
+    )
+
+
+# --- Troca do segredo do CSRF (#442, 46a) -----------------------------------------------------
+
+# Baixa entropia de propósito, para o gitleaks não confundir com segredo real.
+NEW_KEY = b"n" * 32
+LOGOUT = "/auth/logout"
+
+
+def _use_csrf_keys(app: FastAPI, *, current: bytes, previous: bytes | None) -> None:
+    app.state.web_identity = dataclasses.replace(
+        app.state.web_identity, csrf_key=current, csrf_previous_key=previous
+    )
+
+
+def _revoked_at(factory: sessionmaker[Session], session_id: UUID) -> datetime | None:
+    with factory() as session:
+        revoked: datetime | None = session.execute(
+            select(web_session.c.revoked_at).where(web_session.c.id == session_id)
+        ).scalar_one()
+    return revoked
+
+
+def test_logout_com_o_par_revoga_mesmo_com_o_segredo_trocado(
+    app: FastAPI, client: TestClient, factory: sessionmaker[Session]
+) -> None:
+    issued = open_session(app, new_user(factory))
+    _use_csrf_keys(app, current=NEW_KEY, previous=None)
+
+    response = client.post(LOGOUT, headers=session_headers(app, issued))
+
+    assert response.status_code == 204
+    assert _revoked_at(factory, issued.session_id) is not None
+
+
+def test_logout_confere_o_par_e_nao_o_hmac(
+    app: FastAPI, client: TestClient, factory: sessionmaker[Session]
+) -> None:
+    user_id = new_user(factory)
+    mine, other = open_session(app, user_id), open_session(app, user_id)
+    headers = session_headers(app, mine)
+    # Par bem formado e igual, mas assinado para outra sessão: outro site não o monta, porque o
+    # cookie é `__Host-`. Revoga a sessão do cookie, e só ela.
+    headers["Cookie"] = headers["Cookie"].replace(mine.csrf_token, other.csrf_token)
+    headers["X-CSRF-Token"] = other.csrf_token
+
+    response = client.post(LOGOUT, headers=headers)
+
+    assert response.status_code == 204
+    assert _revoked_at(factory, mine.session_id) is not None
+    assert _revoked_at(factory, other.session_id) is None
+
+
+def test_logout_sem_o_par_com_sessao_valida_e_auditado(
+    app: FastAPI, client: TestClient, factory: sessionmaker[Session]
+) -> None:
+    headers = session_headers(app, open_session(app, new_user(factory)))
+    del headers["X-CSRF-Token"]
+
+    assert_problem(client.post(LOGOUT, headers=headers), 403, "CSRF_FAILED")
+    assert _csrf_failures(factory) == ["failure"]
+
+
+def test_mutacao_com_a_chave_anterior_configurada_passa(
+    app: FastAPI, client: TestClient, factory: sessionmaker[Session]
+) -> None:
+    issued = open_session(app, new_user(factory))
+    old_key: bytes = app.state.web_identity.csrf_key
+    _use_csrf_keys(app, current=NEW_KEY, previous=old_key)
+
+    response = _send(client, "POST", CANCEL, session_headers(app, issued))
+
+    assert_problem(response, 404, "NOT_FOUND")
+
+
+def test_mutacao_sem_a_chave_anterior_403(
+    app: FastAPI, client: TestClient, factory: sessionmaker[Session]
+) -> None:
+    issued = open_session(app, new_user(factory))
+    _use_csrf_keys(app, current=NEW_KEY, previous=None)
+
+    response = _send(client, "POST", CANCEL, session_headers(app, issued))
+
+    assert_problem(response, 403, "CSRF_FAILED")
+
+
+def test_logout_cross_site_continua_recusado(
+    app: FastAPI, client: TestClient, factory: sessionmaker[Session]
+) -> None:
+    issued = open_session(app, new_user(factory))
+    _use_csrf_keys(app, current=NEW_KEY, previous=None)
+    headers = {**session_headers(app, issued), "Sec-Fetch-Site": "cross-site"}
+
+    response = client.post(LOGOUT, headers=headers)
+
+    assert_problem(response, 403, "CSRF_FAILED")
+    assert _revoked_at(factory, issued.session_id) is None
+
+
+def test_get_com_cookie_csrf_da_chave_antiga_continua_200(
+    app: FastAPI, client: TestClient, factory: sessionmaker[Session]
+) -> None:
+    issued = open_session(app, new_user(factory))
+    _use_csrf_keys(app, current=NEW_KEY, previous=None)
+
+    assert client.get("/api/v1/me", headers=session_headers(app, issued)).status_code == 200

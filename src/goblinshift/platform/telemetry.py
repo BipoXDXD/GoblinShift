@@ -114,6 +114,7 @@ LOGGED_FIELDS = frozenset(
         "error.type",
         "error_reason",
         "error_type",
+        "events",
         "failed",
         "failed_step",
         "failures",
