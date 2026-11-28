@@ -845,3 +845,63 @@ def test_erro_do_pool_ao_fechar_a_conexao_nao_leva_o_detalhe_ao_stderr(
     assert canary not in err
     assert "host=" not in err
     assert "Traceback" not in err
+
+
+FIXED_NOW = datetime(2001, 2, 3, 4, 5, 6, tzinfo=UTC)
+
+
+def audited_at(factory: sessionmaker[Session], user_id: str, event_type: str) -> datetime:
+    with factory() as session:
+        occurred_at: datetime = session.execute(
+            select(audit_event.c.occurred_at).where(
+                audit_event.c.user_id == UUID(user_id), audit_event.c.event_type == event_type
+            )
+        ).scalar_one()
+    return occurred_at
+
+
+def key_times(factory: sessionmaker[Session]) -> tuple[datetime, datetime | None]:
+    with factory() as session:
+        row = session.execute(select(api_key.c.expires_at, api_key.c.revoked_at)).one()
+    return row.expires_at, row.revoked_at
+
+
+@pytest.mark.usefixtures("storage")
+@pytest.mark.parametrize(
+    "command",
+    ["issue-key", "revoke-key", "block", "unblock", "request-deletion", "set-limits"],
+)
+def test_comandos_gravam_o_now_injetado(
+    capsys: pytest.CaptureFixture[str], factory: sessionmaker[Session], command: str
+) -> None:
+    """Cada comando que grava um instante usa o `now` injetado, não o relógio do sistema."""
+    user_id = create_user(capsys)
+    argv = ["--user", user_id]
+    if command == "issue-key":
+        argv += ["--scopes", "files:read", "--days", "7"]
+    elif command == "revoke-key":
+        _, token, _ = run(capsys, "issue-key", "--user", user_id, "--scopes", "files:read")
+        argv = ["--key", token.split("_")[1]]
+    elif command == "unblock":
+        run(capsys, "block", "--user", user_id)
+    elif command == "set-limits":
+        argv += ["--runs-per-24h", "5"]
+
+    exit_code = main([command, *argv], now=lambda: FIXED_NOW)
+    capsys.readouterr()
+
+    assert exit_code == EXIT_OK
+    match command:
+        case "issue-key":
+            assert key_times(factory)[0] == FIXED_NOW + timedelta(days=7)
+        case "revoke-key":
+            assert key_times(factory)[1] == FIXED_NOW
+        case "block":
+            assert audited_at(factory, user_id, "ACCOUNT_BLOCKED") == FIXED_NOW
+        case "unblock":
+            assert audited_at(factory, user_id, "ACCOUNT_UNBLOCKED") == FIXED_NOW
+        case "request-deletion":
+            assert deletion_requested_at(factory, user_id) == FIXED_NOW
+            assert audited_at(factory, user_id, "ACCOUNT_DELETION_REQUESTED") == FIXED_NOW
+        case "set-limits":
+            assert audited_at(factory, user_id, "ACCOUNT_LIMITS_CHANGED") == FIXED_NOW

@@ -10,6 +10,7 @@ O escopo dos spans do processo fica em `test_worker_tracer.py`; aqui, só a orde
 """
 
 from collections.abc import Callable, Iterator, Sequence
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any, Self
 from unittest.mock import Mock
@@ -243,7 +244,9 @@ def test_emissor_do_admin_le_o_segredo_antes_de_abrir_o_tracing(
     """
     settings = _settings(tmp_path)
     factory: sessionmaker[Session] = sessionmaker()
-    context = admin_cli._Context(factory=factory, settings=settings, clock=lambda: 0.0)
+    context = admin_cli._Context(
+        factory=factory, settings=settings, clock=lambda: 0.0, now=lambda: datetime.now(UTC)
+    )
     monkeypatch.setattr(bootstrap, "RunFinishedReporter", events.reporter_maker())
 
     with admin_cli._run_finished_reporter(context):

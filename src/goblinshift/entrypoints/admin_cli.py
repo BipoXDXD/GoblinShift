@@ -143,16 +143,26 @@ class _Context:
     factory: sessionmaker[Session]
     settings: Settings
     clock: Callable[[], float]
+    now: Callable[[], datetime]
 
 
 type Command = Callable[[argparse.Namespace, _Context], int]
 
 
-def main(argv: Sequence[str] | None = None, *, clock: Callable[[], float] = time.time) -> int:
+def _utc_now() -> datetime:
+    return datetime.now(UTC)
+
+
+def main(
+    argv: Sequence[str] | None = None,
+    *,
+    clock: Callable[[], float] = time.time,
+    now: Callable[[], datetime] = _utc_now,
+) -> int:
     args = _argument_parser().parse_args(argv)
     with _stderr_logging():
         try:
-            return _run_command(args, clock)
+            return _run_command(args, clock, now)
         except MissingSecretError as error:
             return _fail(EXIT_MISSING_SECRET, str(error))
         except KeyboardInterrupt:
@@ -190,12 +200,14 @@ class _OneLineFormatter(logging.Formatter):
         return f"{line} ({_type_and_sqlstate(exception)})"
 
 
-def _run_command(args: argparse.Namespace, clock: Callable[[], float]) -> int:
+def _run_command(
+    args: argparse.Namespace, clock: Callable[[], float], now: Callable[[], datetime]
+) -> int:
     command: Command = args.command
     settings = Settings()
     engine = make_engine(settings)
     try:
-        return command(args, _Context(make_session_factory(engine), settings, clock))
+        return command(args, _Context(make_session_factory(engine), settings, clock, now))
     finally:
         engine.dispose()
 
@@ -309,7 +321,7 @@ def _issue_key(args: argparse.Namespace, context: _Context) -> int:
                 session,
                 owner_id=args.user,
                 scopes=scopes,
-                now=datetime.now(UTC),
+                now=context.now(),
                 days=args.days,
             )
     except (InvalidScopesError, InvalidKeyLifetimeError) as error:
@@ -323,7 +335,7 @@ def _issue_key(args: argparse.Namespace, context: _Context) -> int:
 
 def _revoke_key(args: argparse.Namespace, context: _Context) -> int:
     with unit_of_work(context.factory) as session:
-        found = revoke_key(session, args.key, datetime.now(UTC))
+        found = revoke_key(session, args.key, context.now())
     if not found:
         return _fail(EXIT_NOT_FOUND, f"chave {args.key} não existe")
     print(f"chave {args.key} revogada", file=sys.stderr)
@@ -332,7 +344,7 @@ def _revoke_key(args: argparse.Namespace, context: _Context) -> int:
 
 def _block(args: argparse.Namespace, context: _Context) -> int:
     with _run_finished_reporter(context) as finished:
-        now = datetime.now(UTC)
+        now = context.now()
         with unit_of_work(context.factory) as session:
             found = block_account(session, args.user, now)
             if found:
@@ -352,7 +364,7 @@ def _unblock(args: argparse.Namespace, context: _Context) -> int:
     with unit_of_work(context.factory) as session:
         found = unblock_account(session, args.user)
         if found:
-            _audit(session, AuditEventType.ACCOUNT_UNBLOCKED, args.user, datetime.now(UTC))
+            _audit(session, AuditEventType.ACCOUNT_UNBLOCKED, args.user, context.now())
     if not found:
         return _fail(EXIT_NOT_FOUND, f"conta {args.user} não existe ou tem exclusão pedida")
     print(f"conta {args.user} liberada", file=sys.stderr)
@@ -361,7 +373,7 @@ def _unblock(args: argparse.Namespace, context: _Context) -> int:
 
 def _request_deletion(args: argparse.Namespace, context: _Context) -> int:
     with _run_finished_reporter(context) as finished:
-        now = datetime.now(UTC)
+        now = context.now()
         try:
             with unit_of_work(context.factory) as session:
                 request_account_deletion(session, args.user, now)
@@ -437,7 +449,7 @@ def _set_limits(args: argparse.Namespace, context: _Context) -> int:
         with unit_of_work(context.factory) as session:
             if find_account(session, args.user) is None:
                 return _fail(EXIT_NOT_FOUND, f"conta {args.user} não existe")
-            change_account_limits(session, args.user, limits, datetime.now(UTC))
+            change_account_limits(session, args.user, limits, context.now())
     except capacity.StorageBelowReservedError as error:
         return _fail(EXIT_USAGE, str(error))
     print(f"limites da conta {args.user} atualizados", file=sys.stderr)
