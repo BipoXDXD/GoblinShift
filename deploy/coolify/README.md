@@ -4,6 +4,8 @@ A publicação usa aplicações Git Compose em modo Raw, com repositório preser
 
 Aplicação e infraestrutura têm recursos separados para que uma publicação da aplicação não pare o banco. As definições compartilham o nome Compose original, usam redes externas e guardam os dados em binds do host, sem volumes nomeados, e não executam remoção de órfãos. Só o gateway, um recurso próprio de nome `edge`, tem volumes externos. Os binds privados existem previamente no host; suas credenciais não ficam no repositório. Cada imagem é fixada por digest e deve estar previamente importada e validada; `pull_policy: never` impede trocar a imagem durante o corte.
 
+O Postgres (`infra.json`) tem `stop_grace_period: 60s`, para o checkpoint final da parada terminar sem SIGKILL, e `shm_size: 128m` de `/dev/shm` para as queries paralelas. Os dois só valem no host depois de o operador reimplantar o recurso de infraestrutura (Tarefa 9 do plano de contêineres, #366).
+
 A configuração de preparação da migração, sem escritores em segundo plano, já não existe: `app.json` traz os serviços completos, com `worker` e `maintenance`.
 
 Cada serviço tem `container_name` fixo, então uma publicação substitui a API e o Nginx, sem duas versões lado a lado. O Coolify para os containers do recurso antes de subir a versão nova: a publicação os recria, e pode haver indisponibilidade curta durante a troca. Não há medição registrada do efeito disso em produção ([README](../../README.md#publicação-em-produção)).
