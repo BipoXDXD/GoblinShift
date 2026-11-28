@@ -54,7 +54,7 @@ def clean_table(
 
 
 def _clean(data: bytes, params: Params, limits: Limits) -> TableCleaned:
-    table = read_table(data, params.input_delimiter, limits)
+    table = read_table(data, params.input_delimiter, limits, params.input_encoding)
     column = _index_columns(table.header, params)
     normalize = _normalizer(params, column)
     records = [_Record(n, normalize(fields)) for n, fields in enumerate(table.records, start=1)]

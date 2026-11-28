@@ -7,14 +7,28 @@ estado global) e numera linhas físicas. Este módulo cobre essas lacunas.
 
 import csv
 import io
-from collections.abc import Iterator
+import re
+from collections.abc import Iterator, Mapping
 from dataclasses import dataclass
 
 from goblinshift.processing.csv_janitor.limits import Limits
-from goblinshift.processing.csv_janitor.params import Delimiter
+from goblinshift.processing.csv_janitor.params import Delimiter, InputEncoding
 from goblinshift.processing.csv_janitor.results import RejectionCode, TableRejectionError
 
 _BOM = "\ufeff"
+_UTF8_BOM_BYTES = _BOM.encode()
+# Faixa dos controles C1 (0x80-0x9F): o Windows-1252 põe ali €, aspas curvas e travessões, e
+# texto Latin-1 de verdade não os usa (D4 do plano de paridade).
+_C1_CONTROLS = re.compile(rb"[\x80-\x9f]")
+_CODECS: Mapping[InputEncoding, str] = {
+    InputEncoding.WINDOWS_1252: "cp1252",
+    InputEncoding.LATIN_1: "latin-1",
+}
+_LABELS: Mapping[InputEncoding, str] = {
+    InputEncoding.UTF_8: "UTF-8",
+    InputEncoding.WINDOWS_1252: "Windows-1252",
+    InputEncoding.LATIN_1: "Latin-1",
+}
 
 
 @dataclass(frozen=True)
@@ -24,12 +38,21 @@ class Table:
     blank_lines_ignored: int
 
 
-def read_table(data: bytes, delimiter: Delimiter, limits: Limits) -> Table:
-    """Lê cabeçalho e registros, ou rejeita a tabela inteira com o primeiro problema encontrado."""
+def read_table(
+    data: bytes,
+    delimiter: Delimiter,
+    limits: Limits,
+    encoding: InputEncoding = InputEncoding.UTF_8,
+) -> Table:
+    """Lê cabeçalho e registros, ou rejeita a tabela inteira com o primeiro problema encontrado.
+
+    `table_bytes` mede os bytes crus da entrada; os demais limites, o texto já decodificado,
+    em bytes UTF-8.
+    """
     if len(data) > limits.table_bytes:
         raise _limit_exceeded(f"a tabela tem {len(data)} bytes; o limite é {limits.table_bytes}")
     _let_record_limit_govern(limits)
-    lines = _RecordMeter(io.StringIO(_decode(data), newline=""), limits.record_bytes)
+    lines = _RecordMeter(io.StringIO(_decode(data, encoding), newline=""), limits.record_bytes)
     header: tuple[str, ...] | None = None
     records: list[tuple[str, ...]] = []
     blank_lines = 0
@@ -78,14 +101,35 @@ def _let_record_limit_govern(limits: Limits) -> None:
         csv.field_size_limit(limits.record_bytes)
 
 
-def _decode(data: bytes) -> str:
+def _decode(data: bytes, encoding: InputEncoding) -> str:
+    if encoding is InputEncoding.UTF_8:
+        try:
+            # O utf-8-sig tira só um BOM; Excel e LibreOffice consomem os seguintes e avaliariam A1.
+            return data.decode("utf-8-sig").lstrip(_BOM)
+        except UnicodeDecodeError as error:
+            raise _invalid_bytes(encoding, error.start) from None
+    if data.startswith(_UTF8_BOM_BYTES):
+        # Decodificado em 8 bits, o BOM viraria `ï»¿` grudado no primeiro nome de coluna.
+        raise _unsupported("começa com o BOM do UTF-8; escolha UTF-8 como codificação de entrada")
+    if encoding is InputEncoding.LATIN_1:
+        control = _C1_CONTROLS.search(data)
+        if control is not None:
+            raise _unsupported(
+                f"o byte {control.start()} é um controle C1, que texto Latin-1 não usa; "
+                "o arquivo parece Windows-1252"
+            )
     try:
-        # O utf-8-sig tira só um BOM; Excel e LibreOffice consomem os seguintes e avaliariam A1.
-        return data.decode("utf-8-sig").lstrip(_BOM)
+        return data.decode(_CODECS[encoding])
     except UnicodeDecodeError as error:
-        raise TableRejectionError(
-            RejectionCode.UNSUPPORTED_FORMAT, f"não é UTF-8 válido (byte {error.start})"
-        ) from None
+        raise _invalid_bytes(encoding, error.start) from None
+
+
+def _invalid_bytes(encoding: InputEncoding, start: int) -> TableRejectionError:
+    return _unsupported(f"não é {_LABELS[encoding]} válido (byte {start})")
+
+
+def _unsupported(reason: str) -> TableRejectionError:
+    return TableRejectionError(RejectionCode.UNSUPPORTED_FORMAT, reason)
 
 
 class _RecordTooLargeError(Exception):

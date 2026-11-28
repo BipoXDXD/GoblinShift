@@ -22,6 +22,14 @@ class Delimiter(StrEnum):
     TAB = "\t"
 
 
+class InputEncoding(StrEnum):
+    """Codificação declarada dos arquivos de entrada; a saída é sempre UTF-8."""
+
+    UTF_8 = "utf-8"
+    WINDOWS_1252 = "windows-1252"
+    LATIN_1 = "latin-1"
+
+
 class CaseMode(StrEnum):
     LOWER = "lower"
     UPPER = "upper"
@@ -82,6 +90,7 @@ class Params:
     # None preserva todas as colunas na ordem original; tupla vazia é inválida.
     output_columns: tuple[str, ...] | None = None
     formula_guard: FormulaGuard = FormulaGuard.NONE
+    input_encoding: InputEncoding = InputEncoding.UTF_8
 
     def __post_init__(self) -> None:
         _require_distinct("trim_columns", self.trim_columns)
