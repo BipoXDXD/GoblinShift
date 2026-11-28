@@ -1,8 +1,76 @@
 # GoblinShift
 
-API de processamento de arquivos por receitas — imagens, tabelas CSV, lotes de downloads e PDFs — com resultados privados, manifesto e execução isolada. Projeto de portfólio e serviço aberto.
+API de processamento de arquivos por cinco receitas (CSV Janitor, Image Forge, Downloads Detox, PDF Press e Media Mill), com resultados privados, manifesto e cada execução isolada num sandbox gVisor sem rede.
 
-> Em construção. Fatias 0 a 6 (fundação e deploy, sandbox, CSV Janitor, fluxo durável, executor real sob gVisor, Image Forge e Downloads Detox, identidade e segurança web) concluídas; as fatias 7 a 10 (interface, abertura pública, PDF Press e Media Mill) estão na `main` com pendências que dependem da VPS ou de decisão do dono. O serviço segue fechado a cadastros ([ADR 023](docs/adr/023-cadastro-fechado-ate-a-abertura.md)). O estado de cada fatia está em [docs/GoblinShiftPlan.md](docs/GoblinShiftPlan.md#s3-9).
+No ar em [goblinshift.dev](https://goblinshift.dev): a Oficina, a Bancada, os textos e a [documentação da API](https://goblinshift.dev/docs) são públicos; executar pede conta, e o cadastro está fechado ([ADR 023](docs/adr/023-cadastro-fechado-ate-a-abertura.md)).
+
+![Jornada do Image Forge: enviar os arquivos, escolher os parâmetros, executar e baixar](docs/img/vitrine/jornada.gif)
+
+## As cinco receitas
+
+| Receita | Id | O que faz | Captura |
+|---|---|---|---|
+| CSV Janitor | `csv-janitor` | Limpa tabelas CSV: delimitadores, espaços, duplicatas, filtros, caixa e colunas finais, com aviso ou neutralização das células que parecem fórmulas. | <a href="docs/img/vitrine/receita-csv-janitor.png"><img src="docs/img/vitrine/receita-csv-janitor.png" alt="Execução concluída do CSV Janitor" width="240"></a> |
+| Image Forge | `image-forge` | Reduz imagens para caber num tamanho máximo, sem ampliar, converte entre PNG e JPEG e gera miniaturas. | <a href="docs/img/vitrine/receita-image-forge.png"><img src="docs/img/vitrine/receita-image-forge.png" alt="Execução concluída do Image Forge" width="240"></a> |
+| Downloads Detox | `downloads-detox` | Organiza um lote de downloads: remove os repetidos pelo conteúdo, separa em pastas por tipo e numera os nomes. | <a href="docs/img/vitrine/receita-downloads-detox.png"><img src="docs/img/vitrine/receita-downloads-detox.png" alt="Execução concluída do Downloads Detox" width="240"></a> |
+| PDF Press | `pdf-press` | Junta PDFs na ordem da lista, separa cada um em partes ou monta um PDF com as páginas escolhidas. | <a href="docs/img/vitrine/receita-pdf-press.png"><img src="docs/img/vitrine/receita-pdf-press.png" alt="Execução concluída do PDF Press" width="240"></a> |
+| Media Mill | `media-mill` | Extrai o áudio de vídeos em WAV ou FLAC e tira miniaturas em pontos fixos da duração. | <a href="docs/img/vitrine/receita-media-mill.png"><img src="docs/img/vitrine/receita-media-mill.png" alt="Execução concluída do Media Mill" width="240"></a> |
+
+A Oficina, a Bancada no celular e o Histórico:
+
+<a href="docs/img/vitrine/oficina.png"><img src="docs/img/vitrine/oficina.png" alt="Oficina com as receitas e as execuções recentes" width="300"></a>
+<a href="docs/img/vitrine/bancada-celular.png"><img src="docs/img/vitrine/bancada-celular.png" alt="Bancada do Image Forge numa tela de celular" width="120"></a>
+<a href="docs/img/vitrine/historico.png"><img src="docs/img/vitrine/historico.png" alt="Histórico de execuções com filtros" width="240"></a>
+
+## Arquitetura
+
+```mermaid
+flowchart LR
+  nav[Navegador] --> cf[Cloudflare] --> caddy[Caddy] --> nginx["Nginx com a SPA"] --> api["API FastAPI"]
+  api --> pg[("PostgreSQL: estado e fila")]
+  worker[worker] --> pg
+  worker --> ctl["executor-ctl no host"] --> box["um container gVisor por tentativa, sem rede"]
+  api --> storage[("storage local")]
+  worker --> storage
+  maint[maintenance] --> pg
+  maint --> storage
+  api -.-> otel["OpenTelemetry Collector"]
+  worker -.-> otel
+  maint -.-> otel
+  otel --> oo[OpenObserve]
+```
+
+As camadas e os contratos de import estão em [3.2](docs/GoblinShiftPlan.md#s3-2), conferidos pelo `lint-imports` na CI.
+O worker não cria containers: pede ao `executor-ctl`, no host, um container gVisor por tentativa ([ADR 004](docs/adr/004-container-gvisor-por-tentativa.md)).
+Na borda, o Caddy termina o TLS ([ADR 014](docs/adr/014-proxy-de-borda-caddy.md)) e só aceita o IP do cliente informado pela Cloudflare quando a conexão vem das faixas dela ([ADR 041](docs/adr/041-ip-do-cliente-atras-da-cloudflare.md)).
+
+## Segurança
+
+- Cada tentativa roda num container gVisor próprio, sem rede, sobre uma área de trabalho de tamanho fixo ([ADR 004](docs/adr/004-container-gvisor-por-tentativa.md) e [ADR 005](docs/adr/005-area-do-executor-em-filesystem-fixo.md)).
+- O [modelo de ameaças](docs/seguranca/modelo-de-ameacas.md) é conferido por `tests/security/test_threat_model.py`.
+- A matriz de autorização (`tests/security/test_authz_matrix.py`) reprova qualquer rota nova que fique fora dela.
+- CSP estrita, sem script inline, a mesma no Nginx de produção e nos testes do navegador.
+- gitleaks no pre-commit e na CI.
+- CodeQL e `pip-audit` obrigatórios no merge ([ADR 044](docs/adr/044-auditoria-e-codeql-obrigatorios-no-merge.md)).
+- Para relatar uma vulnerabilidade: [SECURITY.md](SECURITY.md).
+
+## Testes e CI
+
+[![CI](https://github.com/BipoXDXD/GoblinShift/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/BipoXDXD/GoblinShift/actions/workflows/ci.yml)
+
+- pytest com PostgreSQL real (Testcontainers), mypy estrito e contratos de import.
+- Vitest com Testing Library na interface.
+- Playwright em desktop (1280 px) e celular (400 px), com axe WCAG 2.2 A/AA nos dois temas.
+- Sabotagem que exige a falha: `npm run e2e:sabotage` planta um defeito por spec e reprova se a spec continuar verde.
+- Schemathesis com `--checks=all` contra a API local, e o contrato `/api/v1` só cresce.
+- Jornadas reais das receitas sob gVisor no CI.
+- Restauração do backup testada todo mês.
+
+## Créditos e licenças
+
+- Código sob Apache-2.0: [LICENSE](LICENSE) e [NOTICE](NOTICE).
+- Arte: "Arte do GoblinShift (https://goblinshift.dev), CC BY 4.0", com a marca reservada; as condições estão em [LICENSE-ART](docs/art/LICENSE-ART.md).
+- As imagens desta página saem de `cd web && npm run vitrine`, com o build local e a API falsa. O manifesto `docs/img/vitrine/vitrine.json` se repete byte a byte entre rodadas; os bytes dos PNGs variam entre sistemas, pela rasterização das fontes.
 
 ## Documentos
 
@@ -77,7 +145,7 @@ O pytest falha se o `openapi.json` não acompanhar a API, e o job "Interface web
 
 O palco 3D também tem uma suíte independente de [WebKit móvel](docs/testing/webkit-palco-3d.md), com `npm run e2e:webkit` e job próprio; a emulação não substitui a homologação em Safari/iOS físico.
 
-As specs rodam no Chromium, em desktop (1280 px) e celular (400 px): as jornadas das quatro receitas (arquivos, reordenar só por botões, parâmetros, executar, baixar), o Histórico (execuções recentes na Oficina, Carregar mais pelo cursor, filtros na URL), axe WCAG 2.2 A/AA com contraste nos dois temas, anel de foco e ordem do Tab, movimento reduzido, troca de tema sem piscar, CLS e CSP sem violação. O build de `dist/` é servido com os cabeçalhos lidos de `docker/nginx/snippets/spa-headers.conf`, a mesma CSP de produção, e a API é falsa, dentro do processo do Playwright (`e2e/support/fakeApi.ts`), com os tipos da spec.
+As specs rodam no Chromium, em desktop (1280 px) e celular (400 px): as jornadas das cinco receitas (a do Media Mill só com a API falsa), com arquivos, reordenação só por botões, parâmetros, execução e download, o Histórico (execuções recentes na Oficina, Carregar mais pelo cursor, filtros na URL), axe WCAG 2.2 A/AA com contraste nos dois temas, anel de foco e ordem do Tab, movimento reduzido, troca de tema sem piscar, CLS e CSP sem violação. O build de `dist/` é servido com os cabeçalhos lidos de `docker/nginx/snippets/spa-headers.conf`, a mesma CSP de produção, e a API é falsa, dentro do processo do Playwright (`e2e/support/fakeApi.ts`), com os tipos da spec.
 
 A chave de API só existe no processo de teste: cada pedido para `/api/v1/` ganha o `Authorization` por rota do Playwright, e uma spec confere que a chave, um canário `CANARY-<uuid>`, não aparece no HTML, nos assets, no storage nem nos cookies. Sem a chave, a API recusa com 401 e a Bancada mostra o aviso de login em breve, sem repetir a leitura.
 
