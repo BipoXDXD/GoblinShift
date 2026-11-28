@@ -55,6 +55,10 @@ Trocar `csrf_secret` invalidaria os tokens CSRF emitidos: o cookie `__Host-gs_cs
 
 A variável não fica ligada no Compose nem no Coolify: o arquivo só existe durante a troca, e montá-lo sempre obrigaria a criá-lo no host.
 
+## Atualização de 2026-11-28 (#366)
+
+A recência da sessão no Google passa a vir do `auth_time` do ID token, e o teto absoluto de 8 h conta da abertura da sessão: [ADR 065](065-reautenticacao-pelo-auth-time-do-google.md).
+
 ## Atualização de 2026-11-28 (#366): teto de estados de login vivos
 
 Todo `GET /auth/login/{provider}` sem autenticação grava uma linha em `login_state`. O único limite era o `limit_req` do Nginx por cliente, e muitas origens enchiam a tabela sem teto na aplicação. Agora o início confere, antes do `authorize_redirect`, se já há `MAX_LIVE_LOGIN_STATES` (20 000, cerca de 10 MB) estados vivos (`identity/login_state.py::login_states_full`). Cheio, responde a recusa genérica, sem gravar estado nem auditoria, e o log avisa no máximo uma vez por minuto (`alert=login_state_cap`, causa `gs-causa-login-anonimo-no-teto`).

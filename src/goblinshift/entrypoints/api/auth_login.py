@@ -18,6 +18,16 @@ navegador já tem, e o callback só aceita a identidade dessa mesma conta. Outra
 provedor) é recusada antes de qualquer escrita: a sessão anterior continua valendo e nenhuma
 sessão recente nasce para quem não pediu a confirmação. Sem sessão válida, é um login comum.
 
+Recência (ADR 065): o Google não força a senha (não aceita `prompt=login` nem `max_age`), então
+todo pedido a ele exige o claim `auth_time`, e a sessão guarda `min(auth_time, agora)` como
+`authenticated_at`. Um navegador logado no Google há dias entra, mas não abre `DELETE /me` nem a
+emissão de chave. Sem `auth_time` ("Session age claims" desligado), vale a hora do callback, com o
+alerta `google_auth_time_missing`. O GitHub não informa a hora: o login dele conta como recente,
+risco aceito no mesmo ADR. Uma reautenticação da mesma conta com `auth_time` fora da janela de
+10 min é recusada com aviso próprio (`/?login_error=reauth_stale`): a sessão atual continua,
+nenhuma outra nasce, e a auditoria grava `REAUTH_REQUIRED`. Só chega aqui quem tem a sessão e a
+mesma identidade, então o aviso não enumera conta.
+
 As rotas são `async` porque a integração Starlette do Authlib é; o banco é acessado numa thread
 do pool, em transação curta, e nunca durante uma chamada ao provedor.
 
@@ -58,6 +68,7 @@ from goblinshift.entrypoints.api.oauth_http import MAX_PROVIDER_RESPONSE_BYTES, 
 from goblinshift.entrypoints.api.problems import ApiProblem, ProblemCode, request_id_of
 from goblinshift.identity import (
     MAX_ANONYMOUS_LOGIN_FAILURES_PER_MINUTE,
+    RECENT_AUTH_WINDOW,
     AuditEventType,
     AuditOutcome,
     ExternalIdentity,
@@ -86,6 +97,7 @@ from goblinshift.identity.providers import (
     GITHUB_TOKEN_URL,
     GITHUB_USER_URL,
     GOOGLE_ACCEPTED_ISSUERS,
+    GOOGLE_AUTH_TIME_CLAIMS,
     GOOGLE_AUTHORIZE_URL,
     GOOGLE_ID_TOKEN_ALGORITHMS,
     GOOGLE_ISSUER,
@@ -108,11 +120,15 @@ router = APIRouter(prefix="/auth", include_in_schema=False)
 # código de referência do fragmento (`#ref=<request_id>`).
 LOGIN_FAILED_LOCATION = "/?login_error=failed"
 LOGIN_REF_FRAGMENT = "ref"
+# Reautenticação sem senha no Google: a SPA explica como sair da conta Google e entrar de novo.
+LOGIN_REAUTH_STALE_LOCATION = "/?login_error=reauth_stale"
 # Proteção contra open redirect: só caminho local, sem `//`, `\`, controle nem esquema.
 RETURN_TO_PATTERN = re.compile(r"/(?!/)[A-Za-z0-9/_\-.?=&%]*")
 MAX_RETURN_TO_CHARS = 512
 DEFAULT_RETURN_TO = "/"
 REAUTH_PROMPT = "select_account"
+# Login no Google sem `auth_time`: a recência cai na hora do callback (D3 do plano login-e-borda).
+GOOGLE_AUTH_TIME_MISSING_ALERT = "google_auth_time_missing"
 # Falhas esperadas de um provedor externo ou de um callback forjado. Qualquer outra exceção é
 # defeito nosso e segue para o handler de erro 500. `TimeoutError` é o prazo total;
 # `MalformedProviderResponseError`, o JSON válido com forma errada (`_consume_provider`).
@@ -326,6 +342,8 @@ async def start_login(
     else:
         request.session[_reauth_key(name)] = str(reauth_user)
     extra = {"prompt": REAUTH_PROMPT} if reauthenticating else {}
+    if name is ProviderName.GOOGLE:
+        extra["claims"] = GOOGLE_AUTH_TIME_CLAIMS
     response: Response = await login_provider.oauth_app.authorize_redirect(
         request, _redirect_uri(request, name), **extra
     )
@@ -354,6 +372,11 @@ async def finish_login(request: Request, provider: str, now: Now) -> Response:
         if not await run_in_threadpool(_record_login_failure, factory, attempt):
             _warn_login_failure_audit_cap(request)
         return _login_failed(attempt)
+    if name is ProviderName.GOOGLE and identity.authenticated_at is None:
+        logger.warning(
+            "login google sem auth_time",
+            extra={"fields": {"alert": GOOGLE_AUTH_TIME_MISSING_ALERT}},
+        )
 
     result = await run_in_threadpool(
         _complete_login,
@@ -367,6 +390,8 @@ async def finish_login(request: Request, provider: str, now: Now) -> Response:
     )
     if isinstance(result, LoginRefusal):
         logger.info("login %s recusado: conta %s", name, result.reason.name)
+        if result.reason is LoginRefused.REAUTH_STALE:
+            return _reauth_stale(attempt)
         return _login_failed(attempt)
     response = RedirectResponse(return_to, status_code=303)
     set_session_cookies(response, result)
@@ -397,23 +422,45 @@ def _complete_login(
     """Conta, sessão nova e auditoria numa transação só (a conta pendente também é gravada).
 
     Com `reauth_user`, a identidade precisa ser a dessa conta, conferida antes de qualquer
-    escrita: senão a recusa é auditada na conta da sessão, e nada mais muda.
+    escrita: senão a recusa é auditada na conta da sessão, e nada mais muda. A mesma conta com o
+    login no provedor fora da janela de recência (o Google confirmou sem senha) também é recusada
+    sem escrita além de `REAUTH_REQUIRED`: a sessão nova não seria recente, e a confirmação
+    entraria em laço sem explicação.
     """
     now = attempt.now
     with unit_of_work(factory) as session:
-        if reauth_user is not None and find_login_account(session, identity) != reauth_user:
-            _record(session, AuditEventType.LOGIN_FAILED, reauth_user, attempt)
-            return LoginRefusal(reauth_user, LoginRefused.REAUTH_MISMATCH)
+        if reauth_user is not None:
+            if find_login_account(session, identity) != reauth_user:
+                _record(session, AuditEventType.LOGIN_FAILED, reauth_user, attempt)
+                return LoginRefusal(reauth_user, LoginRefused.REAUTH_MISMATCH)
+            if now - _session_authenticated_at(identity, now) > RECENT_AUTH_WINDOW:
+                _record(session, AuditEventType.REAUTH_REQUIRED, reauth_user, attempt)
+                return LoginRefusal(reauth_user, LoginRefused.REAUTH_STALE)
         resolved = resolve_login(session, identity, signup_open=signup_open, now=now)
         if isinstance(resolved, LoginRefusal):
             _record(session, AuditEventType.LOGIN_FAILED, resolved.account_id, attempt)
             return resolved
         _revoke_previous_session(session, previous_token, now)
         issued = start_session(
-            session, user_id=resolved, authenticated_at=now, now=now, csrf_key=csrf_key
+            session,
+            user_id=resolved,
+            authenticated_at=_session_authenticated_at(identity, now),
+            now=now,
+            csrf_key=csrf_key,
         )
         _record(session, AuditEventType.LOGIN_SUCCEEDED, resolved, attempt)
         return issued
+
+
+def _session_authenticated_at(identity: ExternalIdentity, now: datetime) -> datetime:
+    """A hora do login no provedor para a recência: a que ele informou, nunca depois de `now`.
+
+    Sem a hora (GitHub, ou Google sem `auth_time`), vale `now`. Um `auth_time` no futuro (relógio
+    do provedor adiantado) também vira `now`, sem recusar o login.
+    """
+    if identity.authenticated_at is None:
+        return now
+    return min(identity.authenticated_at, now)
 
 
 def _revoke_previous_session(session: Session, token: str | None, now: datetime) -> None:
@@ -531,6 +578,12 @@ def _failure_kind(exc: Exception) -> str:
     if isinstance(exc, HTTPStatusError):
         return f"{type(exc).__name__} {exc.response.status_code}"
     return type(exc).__name__
+
+
+def _reauth_stale(attempt: LoginAttempt) -> Response:
+    """O aviso da reautenticação sem senha, com o mesmo código de referência no fragmento."""
+    location = f"{LOGIN_REAUTH_STALE_LOCATION}#{LOGIN_REF_FRAGMENT}={attempt.request_id}"
+    return RedirectResponse(location, status_code=303)
 
 
 def _warn_login_state_cap(request: Request) -> None:

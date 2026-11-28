@@ -766,6 +766,8 @@ export const TEXT = {
       reauthBody:
         "Por segurança, esta ação exige um login feito há poucos minutos. Entre de novo e volte para cá.",
       failed: "Não foi possível entrar. Tente de novo com a mesma conta ou com o outro provedor.",
+      reauthStale:
+        "O Google confirmou sua conta sem pedir a senha, então a confirmação não vale. Saia da conta Google neste navegador e entre de novo.",
       navSignIn: "Entrar",
       navAccess: "Acesso",
     },

@@ -1,5 +1,6 @@
 """`GET /auth/login/{provider}`: pedido de autorização e cookie de login (3.6; ADRs 008, 025)."""
 
+import json
 import logging
 from pathlib import Path
 
@@ -92,6 +93,18 @@ def test_states_de_dois_inicios_sao_diferentes(client: TestClient, provider: str
 @pytest.mark.parametrize("provider", PROVIDERS)
 def test_reauth_pede_escolha_de_conta(client: TestClient, provider: str) -> None:
     assert authorize_query(start_login(client, provider, reauth="1"))["prompt"] == "select_account"
+
+
+@pytest.mark.parametrize("params", [{}, {"reauth": "1"}], ids=["login", "reauth"])
+def test_pedido_ao_google_pede_o_auth_time(client: TestClient, params: dict[str, str]) -> None:
+    query = authorize_query(start_login(client, "google", **params))
+
+    assert json.loads(query["claims"]) == {"id_token": {"auth_time": {"essential": True}}}
+
+
+@pytest.mark.parametrize("params", [{}, {"reauth": "1"}], ids=["login", "reauth"])
+def test_pedido_ao_github_nao_pede_claims(client: TestClient, params: dict[str, str]) -> None:
+    assert "claims" not in authorize_query(start_login(client, "github", **params))
 
 
 @pytest.mark.parametrize("params", [{}, {"reauth": "0"}, {"reauth": "true"}])
