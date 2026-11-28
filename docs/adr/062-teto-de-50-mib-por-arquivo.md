@@ -24,8 +24,11 @@ decidiu em 22/11 subir para "50 MB". Falta fixar a unidade e conferir o que o va
   OpenAPI e os docs técnicos dizem "50 MiB".
 - **Versões de receita:** o teto por arquivo é limite operacional, fora da versão
   ([3.2](../GoblinShiftPlan.md#s3-2)); as v1 publicam o valor novo sem virar v2.
-- **Testes:** os literais dos testes são escritos por extenso (`50 * 1024 * 1024`), nunca pela
-  constante. `test_arquivo_no_teto_passa_e_um_byte_acima_e_recusado` (API) prende a fronteira.
+- **Testes:** os testes de fronteira e de contrato escrevem o teto por extenso
+  (`50 * 1024 * 1024`), nunca pela constante, para que mudar o valor exija mudar o teste. Os dois
+  `test_arquivo_no_teto_passa_e_um_byte_acima_e_recusado_*` (API) prendem a fronteira: 50 MiB
+  passa (`heavy`, manda o arquivo inteiro) e 50 MiB + 1 declarado recebe 422. Os testes `heavy` de
+  pior caso usam `MAX_FILE_BYTES` de propósito: medem o teto vigente e, se ele subir, medem o novo.
 - **Pior caso no executor:** `tests/processing/test_pior_caso_50_mib.py` roda cada receita com
   entradas no teto num processo novo e mede o pico de RSS (`tests/processing/peak_rss.py`). São
   `heavy`: o `addopts` os tira do padrão local e o job Verificações os roda (o `-m` dele substitui
