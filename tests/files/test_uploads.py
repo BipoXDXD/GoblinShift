@@ -10,7 +10,7 @@ import pytest
 from sqlalchemy import func, select, update
 from sqlalchemy.orm import Session, sessionmaker
 
-from goblinshift.files import limits
+from goblinshift import capacity
 from goblinshift.files.errors import (
     InvalidUploadRequestError,
     UploadContentTooLargeError,
@@ -21,6 +21,7 @@ from goblinshift.files.errors import (
     UploadSizeMismatchError,
     UploadStateConflictError,
 )
+from goblinshift.files.limits import MAX_FILE_BYTES
 from goblinshift.files.states import Availability, UploadState
 from goblinshift.files.storage import FileStorage
 from goblinshift.files.tables import stored_object, upload
@@ -32,6 +33,7 @@ from goblinshift.files.uploads import (
     request_deletion,
 )
 from goblinshift.platform.db import unit_of_work
+from tests.capacity.support import account_reserved, live_amount
 from tests.files.support import (
     create_intent,
     create_user,
@@ -42,7 +44,6 @@ from tests.files.support import (
 pytestmark = pytest.mark.integration
 
 MIB = 1024 * 1024
-MAX_FILE_BYTES = 32 * MIB
 MAX_BATCH_BYTES = 512 * MIB
 
 
@@ -285,12 +286,12 @@ def test_conteudo_completo_deixa_upload_pronto_com_hash_e_tamanho(
     assert files_under(storage) != []
 
 
-def test_conteudo_de_32_mib_exatos_e_aceito(
+def test_conteudo_no_teto_comum_exato_e_aceito(
     factory: sessionmaker[Session], storage: FileStorage
 ) -> None:
     owner = create_user(factory, "a")
     intent = create_intent(factory, owner, size=MAX_FILE_BYTES)
-    chunks = (b"\x00" * MIB for _ in range(32))
+    chunks = (b"\x00" * MIB for _ in range(MAX_FILE_BYTES // MIB))
 
     with factory() as session:
         view = receive_content(session, storage, owner, intent.id, chunks)
@@ -326,11 +327,12 @@ def assert_failed_without_object(
         assert get_upload(session, owner, upload_id).state is UploadState.FAILED
     assert object_state(factory, upload_id) == "pending"
     assert files_under(storage) == []
+    # A recusa devolve a reserva da intenção à cota, como qualquer outra falha do envio.
+    assert live_amount(factory, capacity.HolderKind.UPLOAD, upload_id) is None
+    assert account_reserved(factory, owner) == 0
 
 
-@pytest.mark.parametrize(
-    ("size", "checked"), [(limits.MAX_FILE_BYTES, False), (limits.MAX_FILE_BYTES + 1, True)]
-)
+@pytest.mark.parametrize(("size", "checked"), [(MAX_FILE_BYTES, False), (MAX_FILE_BYTES + 1, True)])
 def test_assinatura_so_e_conferida_acima_do_teto_comum(
     factory: sessionmaker[Session], storage: FileStorage, size: int, checked: bool
 ) -> None:
@@ -352,8 +354,9 @@ def test_recusa_de_assinatura_nao_e_erro_de_tamanho(
     factory: sessionmaker[Session], storage: FileStorage
 ) -> None:
     owner = create_user(factory, "a")
-    size = limits.MAX_FILE_BYTES + 1
+    size = MAX_FILE_BYTES + 1
     intent = create_intent(factory, owner, name="clip.mp4", size=size)
+    assert live_amount(factory, capacity.HolderKind.UPLOAD, intent.id) == size
 
     with pytest.raises(UploadSignatureMismatchError) as error, factory() as session:
         receive_content(session, storage, owner, intent.id, [b"\x00" * 100])
@@ -367,7 +370,7 @@ def test_video_grande_com_assinatura_fica_pronto(
     factory: sessionmaker[Session], storage: FileStorage, name: str, header: bytes
 ) -> None:
     owner = create_user(factory, "a")
-    size = limits.MAX_FILE_BYTES + 1
+    size = MAX_FILE_BYTES + 1
     intent = create_intent(factory, owner, name=name, size=size)
 
     with factory() as session:
@@ -381,7 +384,7 @@ def test_assinatura_conferida_com_cabecalho_fatiado(
     factory: sessionmaker[Session], storage: FileStorage
 ) -> None:
     owner = create_user(factory, "a")
-    size = limits.MAX_FILE_BYTES + 1
+    size = MAX_FILE_BYTES + 1
     good = create_intent(factory, owner, name="bom.mp4", size=size)
     bad = create_intent(factory, owner, name="lixo.mp4", size=size)
     garbage = b"\x01" * 64
@@ -396,6 +399,7 @@ def test_assinatura_conferida_com_cabecalho_fatiado(
         receive_content(session, storage, owner, bad.id, content_of(size, garbage, header_block=1))
     with factory() as session:
         assert get_upload(session, owner, bad.id).state is UploadState.FAILED
+    assert live_amount(factory, capacity.HolderKind.UPLOAD, bad.id) is None
 
 
 def test_objeto_fora_de_pending_na_conclusao_e_estado_impossivel(

@@ -226,6 +226,12 @@ export const TEXT = {
       remove: "Remover",
       announceReady: (name: string) => `${name} enviado.`,
       announceFailed: (name: string) => `Falha ao enviar ${name}.`,
+      // `errors[].code` do 422 do envio do conteúdo; o front não conhece o teto comum em bytes.
+      contentErrors: {
+        signature_mismatch:
+          "Este arquivo não parece um vídeo. Acima do tamanho comum, só vídeos são aceitos.",
+        size_mismatch: "O arquivo chegou com tamanho diferente do esperado. Envie de novo.",
+      },
     },
     removal: {
       titleOne: (name: string) => `Remover ${name}?`,

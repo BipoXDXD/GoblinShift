@@ -50,6 +50,12 @@ DETAIL_KEYS = {
 }
 
 
+def reserved_bytes(client: TestClient, auth: dict[str, str]) -> int:
+    """Bytes que a conta tem reservados na cota de armazenamento, como o `/me` publica."""
+    reserved: int = client.get("/api/v1/me", headers=auth).json()["usage"]["storage_reserved_bytes"]
+    return reserved
+
+
 def upload_url(item: dict[str, Any]) -> str:
     return f"{UPLOADS}/{item['id']}"
 
@@ -303,6 +309,7 @@ def test_put_de_mp4_grande_que_nao_e_video_da_422_signature_mismatch(
 ) -> None:
     _, auth = new_account(factory)
     item = create_upload(client, auth, name="clip.mp4", size=MAX_FILE_BYTES + 1)
+    assert reserved_bytes(client, auth) == MAX_FILE_BYTES + 1
 
     response = client.put(
         item["content"]["url"], content=b"\x00" * 100, headers={**auth, **OCTET_STREAM}
@@ -311,6 +318,7 @@ def test_put_de_mp4_grande_que_nao_e_video_da_422_signature_mismatch(
     body = assert_problem(response, 422, "VALIDATION_FAILED")
     assert [(e["field"], e["code"]) for e in body["errors"]] == [("body", "signature_mismatch")]
     assert client.get(upload_url(item), headers=auth).json()["state"] == "failed"
+    assert reserved_bytes(client, auth) == 0
 
 
 def test_segundo_envio_de_upload_pronto_responde_409(
