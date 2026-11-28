@@ -1,10 +1,19 @@
 import { useQuery } from "@tanstack/react-query";
 import { ChevronLeft, Download } from "lucide-react";
-import { useId, useRef, type ReactElement, type ReactNode } from "react";
-import { Link, useParams } from "react-router";
+import {
+  useCallback,
+  useEffect,
+  useId,
+  useRef,
+  useState,
+  type ReactElement,
+  type ReactNode,
+} from "react";
+import { Link, useParams, useSearchParams } from "react-router";
 import { z } from "zod";
 
 import { useApiClient } from "../api/ApiClientContext";
+import type { ApiProblem } from "../api/problem";
 import { NotFoundPage } from "../app/NotFoundPage";
 import { workbenchPath } from "../app/paths";
 import { GoblinIllustration, type GoblinState } from "../art/GoblinIllustration";
@@ -28,6 +37,8 @@ import { CancelRun } from "./CancelRun";
 import type { ResultReference, RunResults as RunResultsData } from "./commands";
 import { artifactDownloadPath, getRunResults } from "./commands";
 import { unavailableReason } from "./availability";
+import { DOWNLOAD_FAILURE_PARAM, downloadFailureCode } from "./downloadFailure";
+import { DownloadFailureNotice } from "./DownloadFailureNotice";
 import { ResultPreview } from "./preview/ResultPreview";
 import { ResultsAvailability } from "./ResultsAvailability";
 import { RunItems } from "./RunItems";
@@ -65,6 +76,7 @@ export function RunPage(): ReactElement {
  */
 function RunView({ runId }: { readonly runId: string }): ReactElement {
   const { query, announcement, acknowledge, failure } = useRunPolling(runId);
+  const [downloadFailure, dismissDownloadFailure] = useDownloadFailure();
   const run = query.data;
   // O convite para entrar (ou aceitar os termos) não é alerta; anunciado aqui, uma vez só.
   const showsGuidance = failure !== null && isGuidance(failure);
@@ -98,7 +110,13 @@ function RunView({ runId }: { readonly runId: string }): ReactElement {
           {run.items.length > 0 && <RunItems items={run.items} summary={run.summary} />}
         </div>
       )}
-      {run !== undefined && SUCCEEDED.has(run.status) && <RunResults runId={run.id} />}
+      {run !== undefined && SUCCEEDED.has(run.status) && (
+        <RunResults
+          runId={run.id}
+          downloadFailure={downloadFailure}
+          onDownload={dismissDownloadFailure}
+        />
+      )}
       {run !== undefined && (
         <div className="order-2">
           <NewRunLink recipeId={run.recipe_id} />
@@ -106,6 +124,29 @@ function RunView({ runId }: { readonly runId: string }): ReactElement {
       )}
     </div>
   );
+}
+
+type DownloadFailureCode = ApiProblem["code"];
+
+/**
+ * A falha do download que voltou à tela com `?falha=<code>` (64a). Lida uma vez e guardada em
+ * estado; o parâmetro sai da URL com `replace`, para recarregar ou voltar não repetir o aviso.
+ */
+function useDownloadFailure(): readonly [DownloadFailureCode | null, () => void] {
+  const [searchParams, setSearchParams] = useSearchParams();
+  const [code, setCode] = useState(() => downloadFailureCode(searchParams));
+  useEffect(() => {
+    if (!searchParams.has(DOWNLOAD_FAILURE_PARAM)) {
+      return;
+    }
+    const next = new URLSearchParams(searchParams);
+    next.delete(DOWNLOAD_FAILURE_PARAM);
+    setSearchParams(next, { replace: true });
+  }, [searchParams, setSearchParams]);
+  const dismiss = useCallback(() => {
+    setCode(null);
+  }, []);
+  return [code, dismiss];
 }
 
 function BackToWorkbench({ recipeId }: { readonly recipeId: string }): ReactElement | null {
@@ -217,7 +258,14 @@ function flavorOf(status: RunStatus): string | null {
   return SUCCEEDED.has(status) ? T.flavor.succeeded : null;
 }
 
-function RunResults({ runId }: { readonly runId: string }): ReactElement {
+interface RunResultsProps {
+  readonly runId: string;
+  /** Falha do download que voltou à tela, mostrada acima da lista; some ao baixar de novo. */
+  readonly downloadFailure: DownloadFailureCode | null;
+  readonly onDownload: () => void;
+}
+
+function RunResults({ runId, downloadFailure, onDownload }: RunResultsProps): ReactElement {
   const client = useApiClient();
   const headingId = useId();
   const heading = useRef<HTMLHeadingElement>(null);
@@ -249,13 +297,20 @@ function RunResults({ runId }: { readonly runId: string }): ReactElement {
         />
       )}
       {results.data !== undefined && (
-        <ResultsAvailability
-          runId={runId}
-          results={results.data}
-          onDeleted={() => heading.current?.focus()}
-        >
-          <ResultFiles results={results.data} />
-        </ResultsAvailability>
+        <>
+          {downloadFailure !== null && (
+            <div className="mb-6">
+              <DownloadFailureNotice code={downloadFailure} headingLevel={3} />
+            </div>
+          )}
+          <ResultsAvailability
+            runId={runId}
+            results={results.data}
+            onDeleted={() => heading.current?.focus()}
+          >
+            <ResultFiles results={results.data} onDownload={onDownload} />
+          </ResultsAvailability>
+        </>
       )}
     </Card>
   );
@@ -263,9 +318,16 @@ function RunResults({ runId }: { readonly runId: string }): ReactElement {
 
 /**
  * O pacote com tudo é a ação primária da tela (Baixar); os arquivos avulsos são links (pirâmide de
- * ações, RUI cap. 2). Download sempre por navegação, nunca por fetch (2.2).
+ * ações, RUI cap. 2). Download sempre por navegação, nunca por fetch (2.2), e sem o atributo
+ * `download`: o `attachment` da API decide, e a recusa volta à tela com `?falha=` (64a).
  */
-function ResultFiles({ results }: { readonly results: RunResultsData }): ReactElement {
+function ResultFiles({
+  results,
+  onDownload,
+}: {
+  readonly results: RunResultsData;
+  readonly onDownload: () => void;
+}): ReactElement {
   if (!results.published || results.artifacts.length === 0) {
     return (
       <EmptyState title={T.results.empty} headingLevel={3}>
@@ -287,7 +349,7 @@ function ResultFiles({ results }: { readonly results: RunResultsData }): ReactEl
           <a
             key={artifact.artifact_id}
             href={artifactDownloadPath(artifact.artifact_id)}
-            download={artifact.file_name}
+            onClick={onDownload}
             // Nome sem espaço quebra em qualquer ponto em vez de empurrar a página (WCAG 1.4.10).
             className={`${buttonClassName({ variant: "primary", size: "lg" })} wrap-anywhere`}
           >
@@ -318,7 +380,7 @@ function ResultFiles({ results }: { readonly results: RunResultsData }): ReactEl
                       <>
                         <a
                           href={artifactDownloadPath(artifact.artifact_id)}
-                          download={artifact.file_name}
+                          onClick={onDownload}
                           className="inline-flex min-h-11 items-center font-mono text-sm wrap-anywhere"
                         >
                           {T.results.download(artifact.file_name)}
