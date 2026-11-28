@@ -5,13 +5,13 @@ de capacidade (`capacity.purge_owner`) e a própria `app_user`. A auditoria fica
 
 Também a retenção do que a identidade acumula: estado de login vencido, sessões encerradas há
 mais de 7 dias, chaves de API revogadas ou vencidas há mais de 30 dias e eventos de auditoria com
-mais de 90 dias, sempre em lotes.
+mais de 90 dias, sempre em lotes, e as contagens do atraso e do tamanho da auditoria.
 """
 
 from datetime import datetime, timedelta
 from uuid import UUID
 
-from sqlalchemy import ColumnElement, Table, delete, func, select, update
+from sqlalchemy import ColumnElement, Table, delete, func, select, text, update
 from sqlalchemy.orm import Session
 
 from goblinshift import capacity
@@ -23,6 +23,9 @@ from goblinshift.platform.sql import skip_locked_batch
 DELETION_OVERDUE_AFTER = timedelta(hours=20)
 WEB_SESSION_RETENTION = timedelta(days=7)
 AUDIT_RETENTION = timedelta(days=90)
+# Folga da retenção da auditoria antes do alerta: a manutenção roda a cada 30 s, então um dia de
+# atraso só acontece se a entrada passar do que o laço apaga no prazo de cada ciclo.
+AUDIT_OVERDUE_AFTER = AUDIT_RETENTION + timedelta(days=1)
 
 
 class AccountNotMarkedForDeletionError(Exception):
@@ -131,6 +134,30 @@ def delete_old_audit_events(session: Session, now: datetime, limit: int) -> int:
         .returning(audit_event.c.id)
     )
     return len(deleted.all())
+
+
+def count_overdue_audit_events(session: Session, now: datetime) -> int:
+    """Eventos com mais de `AUDIT_OVERDUE_AFTER` (métrica para o alerta), pelo índice da data."""
+    count: int = session.execute(
+        select(func.count())
+        .select_from(audit_event)
+        .where(audit_event.c.occurred_at < now - AUDIT_OVERDUE_AFTER)
+    ).scalar_one()
+    return count
+
+
+def estimate_audit_events(session: Session) -> int:
+    """Tamanho estimado do `audit_event` pelas estatísticas do `pg_class`, sem varrer a tabela.
+
+    Antes do primeiro ANALYZE o PostgreSQL guarda -1 ("desconhecido"), que vira 0.
+    """
+    reltuples: float = session.execute(
+        select(text("reltuples"))
+        .select_from(text("pg_class"))
+        .where(text("oid = CAST(:table AS regclass)"))
+        .params(table=audit_event.fullname)
+    ).scalar_one()
+    return max(round(reltuples), 0)
 
 
 def _delete_batch(
