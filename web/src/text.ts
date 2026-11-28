@@ -418,6 +418,20 @@ export const TEXT = {
         succeeded_with_warnings: "! Concluída com avisos",
         failed: "✕ Falhou",
       },
+      toggleOff: "Avisar quando terminar",
+      toggleOn: "Aviso ligado",
+      blocked:
+        "O navegador bloqueou os avisos deste site. O título da aba ainda muda quando a execução terminar.",
+      // Aparece na tela bloqueada: o corpo nunca leva nome de arquivo.
+      notification: {
+        title: {
+          succeeded: "Execução concluída",
+          succeeded_with_warnings: "Execução concluída com avisos",
+          failed: "Execução falhou",
+        },
+        body: (recipe: string, count: number) =>
+          `${recipe} · ${String(count)} ${count === 1 ? "arquivo" : "arquivos"}`,
+      },
     },
     flavor: {
       queued: "As goblins pegam este lote assim que uma bancada vagar.",

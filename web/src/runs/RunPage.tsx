@@ -24,11 +24,13 @@ import { formatDateTime } from "../format";
 import { findRecipe } from "../recipes/registry";
 import { TEXT } from "../text";
 import type { Run, RunStatus } from "./api";
+import { useCompletionAlert } from "./alerts";
 import { CancelRun } from "./CancelRun";
-import { useCompletionTitle } from "./completionSignal";
+import { CompletionAlertToggle } from "./CompletionAlertToggle";
 import type { ResultReference, RunResults as RunResultsData } from "./commands";
 import { artifactDownloadPath, getRunResults } from "./commands";
 import { unavailableReason } from "./availability";
+import { isTerminalStatus } from "./polling";
 import { ResultPreview } from "./preview/ResultPreview";
 import { ResultsAvailability } from "./ResultsAvailability";
 import { RunItems } from "./RunItems";
@@ -67,7 +69,7 @@ export function RunPage(): ReactElement {
 function RunView({ runId }: { readonly runId: string }): ReactElement {
   const { query, announcement, acknowledge, failure } = useRunPolling(runId);
   const run = query.data;
-  useCompletionTitle(run?.status);
+  useCompletionAlert(run);
   // O convite para entrar (ou aceitar os termos) não é alerta; anunciado aqui, uma vez só.
   const showsGuidance = failure !== null && isGuidance(failure);
   const guidanceText = failure === null ? null : guidanceAnnouncement(failure);
@@ -93,7 +95,11 @@ function RunView({ runId }: { readonly runId: string }): ReactElement {
               // ação some e os dados já carregados ficam. Os resultados só aparecem no estado
               // terminal, em que o polling já parou e não há 401 dele.
               showsGuidance ? null : (
-                <CancelRun runId={run.id} status={run.status} onAnnounced={acknowledge} />
+                <div className="flex flex-wrap items-start gap-3">
+                  <CancelRun runId={run.id} status={run.status} onAnnounced={acknowledge} />
+                  {/* O aviso só serve enquanto a execução não terminou. */}
+                  {!isTerminalStatus(run.status) && <CompletionAlertToggle />}
+                </div>
               )
             }
           />
