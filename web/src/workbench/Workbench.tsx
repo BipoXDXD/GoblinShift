@@ -39,6 +39,9 @@ import type { Preset } from "../presets/api";
 import type { RecipeForm, RecipeModule } from "../recipes/registry";
 import type { RecipeDraft, RecipeId, RecipeInput } from "../recipes/types";
 import { createRun } from "../runs/commands";
+import { SharedFilesPrompt } from "../share/SharedFilesPrompt";
+import { ShareNotice } from "../share/ShareNotice";
+import { useSharedFiles } from "../share/useSharedFiles";
 import { TEXT } from "../text";
 import { useUploadBatch, type UploadEntry, type UploadServices } from "../upload/useUploadBatch";
 import { orderEntries, runInputs, uploadAnnouncement, type RunInputs } from "./inputs";
@@ -71,6 +74,8 @@ interface WorkbenchProps {
   readonly notice?: ReactNode;
   /** O preset cujos parâmetros abriram o formulário, que "Atualizar preset" substitui. */
   readonly sourcePreset?: Preset | null;
+  /** Compartilhamento cujos arquivos entram no lote ao abrir (ADR 064); `null` sem nenhum. */
+  readonly sharedId?: string | null;
 }
 
 interface Submission {
@@ -89,10 +94,12 @@ export function Workbench({
   uploadServices,
   notice = null,
   sourcePreset = null,
+  sharedId = null,
 }: WorkbenchProps): ReactElement {
   const client = useApiClient();
   const navigate = useNavigate();
   const batch = useUploadBatch(uploadServices);
+  const shared = useSharedFiles(sharedId, batch.add);
   const [order, setOrder] = useState<readonly string[]>([]);
   const [draft, setDraft] = useState<RecipeDraft<RecipeId>>(form.initialDraft);
   const [attempt, setAttempt] = useState(0);
@@ -238,6 +245,7 @@ export function Workbench({
   return (
     <div className="flex flex-col gap-8">
       {notice}
+      {shared.expired && <ShareNotice>{TEXT.share.expired}</ShareNotice>}
       <form noValidate onSubmit={onSubmit} className="flex flex-col gap-8">
         <ErrorSummary issues={issues} attempt={attempt} />
         {/* Duas colunas a partir de 1024 px (D9): arquivos fluida, parâmetros com largura fixa. A
@@ -262,6 +270,10 @@ export function Workbench({
                 },
               }}
               notice={pickNotice?.tone === "info" ? pickNotice.message : null}
+            />
+            <SharedFilesPrompt
+              shared={shared}
+              onDone={() => document.getElementById(FILES_FIELD_ID)?.focus()}
             />
             {entries.length === 0 ? (
               <EmptyState

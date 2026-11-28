@@ -4,6 +4,7 @@ import { catalogVersion } from "../test/catalog";
 import {
   findRecipe,
   RECIPE_LIST,
+  recipesAccepting,
   withoutUploadBoundParameters,
   type RecipeModule,
 } from "./registry";
@@ -107,5 +108,23 @@ describe("withoutUploadBoundParameters", () => {
       parameters,
       dropped: false,
     });
+  });
+});
+
+describe("recipesAccepting", () => {
+  it.each([
+    [
+      ["tabela.csv", "OUTRA.CSV"],
+      ["csv-janitor", "downloads-detox"],
+    ],
+    [
+      ["foto.JPG", "logo.png", "celular.mpo"],
+      ["image-forge", "downloads-detox"],
+    ],
+    [["nota.pdf", "logo.png"], ["downloads-detox"]],
+    [["sem-extensao"], ["downloads-detox"]],
+    [["video.webm"], ["downloads-detox", "media-mill"]],
+  ] as const)("%j vai para %j", (names, recipes) => {
+    expect(recipesAccepting(names)).toEqual(recipes);
   });
 });

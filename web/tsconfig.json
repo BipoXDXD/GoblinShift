@@ -8,6 +8,9 @@
       "path": "./tsconfig.node.json"
     },
     {
+      "path": "./tsconfig.sw.json"
+    },
+    {
       "path": "./e2e"
     }
   ]
