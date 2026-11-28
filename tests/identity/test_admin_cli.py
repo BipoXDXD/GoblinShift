@@ -239,10 +239,11 @@ def test_issue_key_com_o_teto_de_guardadas_sai_com_2(
     capsys: pytest.CaptureFixture[str], factory: sessionmaker[Session]
 ) -> None:
     user_id = create_user(capsys)
+    # Revogada logo depois de emitida, para não esbarrar no teto de ativas.
     for _ in range(MAX_STORED_KEYS):
         new_key(factory, UUID(user_id))
-    with unit_of_work(factory) as session:
-        session.execute(update(api_key).values(revoked_at=datetime.now(UTC)))
+        with unit_of_work(factory) as session:
+            session.execute(update(api_key).values(revoked_at=datetime.now(UTC)))
 
     exit_code, out, err = run(capsys, "issue-key", "--user", user_id, "--scopes", "files:read")
 

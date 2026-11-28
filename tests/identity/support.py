@@ -10,7 +10,7 @@ from goblinshift.identity import (
     IssuedKey,
     Scope,
     create_admin_user,
-    issue_key,
+    issue_key_for_admin,
     purge_owner,
     request_account_deletion,
 )
@@ -36,13 +36,19 @@ def prepare_database(settings: Settings, engine: Engine) -> None:
 def new_user(factory: sessionmaker[Session], *, blocked: bool = False) -> UUID:
     with unit_of_work(factory) as session:
         user_id = create_admin_user(session, "Conta de teste")
-        if blocked:
-            session.execute(
-                update(app_user)
-                .where(app_user.c.id == user_id)
-                .values(status="blocked", awaiting_approval=True)
-            )
+    if blocked:
+        mark_blocked(factory, user_id)
     return user_id
+
+
+def mark_blocked(factory: sessionmaker[Session], user_id: UUID) -> None:
+    """Põe a conta em `blocked` aguardando aprovação, sem revogar as chaves já emitidas."""
+    with unit_of_work(factory) as session:
+        session.execute(
+            update(app_user)
+            .where(app_user.c.id == user_id)
+            .values(status="blocked", awaiting_approval=True)
+        )
 
 
 def purge_account(factory: sessionmaker[Session], user_id: UUID, now: datetime) -> None:
@@ -61,7 +67,7 @@ def new_key(
     days: int = 30,
 ) -> IssuedKey:
     with unit_of_work(factory) as session:
-        return issue_key(
+        return issue_key_for_admin(
             session,
             owner_id=user_id,
             scopes=scopes,

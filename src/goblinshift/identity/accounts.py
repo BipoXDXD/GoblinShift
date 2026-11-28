@@ -112,7 +112,7 @@ def create_admin_user(session: Session, display_name: str) -> UUID:
     return user_id
 
 
-def issue_key(
+def _insert_key(
     session: Session,
     *,
     owner_id: UUID,
@@ -120,6 +120,7 @@ def issue_key(
     now: datetime,
     days: int = DEFAULT_KEY_DAYS,
 ) -> IssuedKey:
+    """Só o INSERT da chave, sem trava nem tetos: emitir é `_issue_for_active_account`."""
     if not scopes:
         raise InvalidScopesError("informe pelo menos um escopo")
     expires_at = now + key_lifetime(days)
@@ -436,8 +437,7 @@ def issue_key_for_session(
     a emissão atrás de um bloqueio ou pedido de exclusão, que a recusa com `UnknownAccountError`.
     Os tetos ficam em `_issue_locked`.
     """
-    _lock_active_account(session, owner_id)
-    return _issue_locked(session, owner_id=owner_id, scopes=scopes, days=days, now=now)
+    return _issue_for_active_account(session, owner_id=owner_id, scopes=scopes, days=days, now=now)
 
 
 def issue_key_for_admin(
@@ -449,6 +449,13 @@ def issue_key_for_admin(
     sem essa recusa, a chave emitida durante o bloqueio escaparia de `revoke_all_credentials` e
     passaria a valer num `unblock`. Os tetos ficam em `_issue_locked`.
     """
+    return _issue_for_active_account(session, owner_id=owner_id, scopes=scopes, days=days, now=now)
+
+
+def _issue_for_active_account(
+    session: Session, *, owner_id: UUID, scopes: frozenset[Scope], days: int, now: datetime
+) -> IssuedKey:
+    """Corpo comum das duas emissões públicas: trava a conta ativa e emite dentro dos tetos."""
     _lock_active_account(session, owner_id)
     return _issue_locked(session, owner_id=owner_id, scopes=scopes, days=days, now=now)
 
@@ -495,7 +502,7 @@ def _issue_locked(
         raise ActiveKeyLimitError(f"a conta já tem {MAX_ACTIVE_KEYS} chaves ativas")
     if stored >= MAX_STORED_KEYS:
         raise StoredKeyLimitError(f"a conta já guarda {MAX_STORED_KEYS} chaves")
-    return issue_key(session, owner_id=owner_id, scopes=scopes, now=now, days=days)
+    return _insert_key(session, owner_id=owner_id, scopes=scopes, now=now, days=days)
 
 
 def list_keys(session: Session, owner_id: UUID, now: datetime) -> list[KeySummary]:

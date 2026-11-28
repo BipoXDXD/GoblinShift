@@ -16,7 +16,7 @@ from goblinshift.identity import (
     MAX_STORED_KEYS,
     Scope,
     authenticate_api_key,
-    issue_key,
+    issue_key_for_admin,
 )
 from goblinshift.identity.keys import MIN_KEY_DAYS
 from goblinshift.identity.tables import api_key, app_user, audit_event
@@ -247,9 +247,14 @@ def test_centesima_primeira_chave_guardada_409_com_mensagem_propria(
     owner = new_user(factory)
     sessions.sign_in(owner)
     with unit_of_work(factory) as session:
+        # Revogada logo depois de emitida, para não esbarrar no teto de ativas.
         for _ in range(MAX_STORED_KEYS):
-            issue_key(session, owner_id=owner, scopes=frozenset({Scope.FILES_READ}), now=NOW)
-        session.execute(update(api_key).where(api_key.c.owner_id == owner).values(revoked_at=NOW))
+            issue_key_for_admin(
+                session, owner_id=owner, scopes=frozenset({Scope.FILES_READ}), days=30, now=NOW
+            )
+            session.execute(
+                update(api_key).where(api_key.c.owner_id == owner).values(revoked_at=NOW)
+            )
 
     response = client.post(KEYS, json=VALID)
 
