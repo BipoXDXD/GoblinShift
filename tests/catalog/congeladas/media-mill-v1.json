@@ -1,0 +1,69 @@
+{
+  "defaults": {
+    "audio_format": "wav",
+    "audio_stream_index": null,
+    "extract_audio": true,
+    "thumbnail_count": 1
+  },
+  "variant_schema": {
+    "properties": {
+      "parameters": {
+        "additionalProperties": false,
+        "properties": {
+          "audio_format": {
+            "default": "wav",
+            "enum": [
+              "wav",
+              "flac"
+            ],
+            "title": "AudioFormat",
+            "type": "string"
+          },
+          "audio_stream_index": {
+            "anyOf": [
+              {
+                "maximum": 15,
+                "minimum": 0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Audio Stream Index"
+          },
+          "extract_audio": {
+            "default": true,
+            "title": "Extract Audio",
+            "type": "boolean"
+          },
+          "thumbnail_count": {
+            "default": 1,
+            "enum": [
+              0,
+              1,
+              3
+            ],
+            "type": "integer"
+          }
+        },
+        "title": "MediaMillV1Parameters",
+        "type": "object"
+      },
+      "recipe_id": {
+        "const": "media-mill"
+      },
+      "recipe_version": {
+        "const": 1
+      }
+    },
+    "required": [
+      "recipe_id",
+      "recipe_version",
+      "parameters"
+    ],
+    "title": "media-mill v1",
+    "type": "object"
+  }
+}

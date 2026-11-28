@@ -7,6 +7,7 @@ import { configDefaults, defineConfig } from "vitest/config";
 import { FONT_PRELOADS } from "./scripts/check-budget";
 import { assetsInlineLimit } from "./scripts/vite-asset-inline";
 import { preloadFonts } from "./scripts/vite-preload-fonts";
+import { serviceWorker } from "./scripts/vite-service-worker";
 
 /**
  * Só para o build do E2E com aviso (npm run build:notice-e2e): troca o `notice.json` do
@@ -15,7 +16,12 @@ import { preloadFonts } from "./scripts/vite-preload-fonts";
 const noticeFile = process.env["GS_NOTICE_FILE"];
 
 export default defineConfig({
-  plugins: [react(), tailwindcss(), preloadFonts(FONT_PRELOADS.map((font) => font.file))],
+  plugins: [
+    react(),
+    tailwindcss(),
+    preloadFonts(FONT_PRELOADS.map((font) => font.file)),
+    serviceWorker("src/sw.ts"),
+  ],
   resolve: {
     alias:
       noticeFile === undefined || noticeFile === ""

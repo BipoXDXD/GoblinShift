@@ -248,7 +248,7 @@ uv run gs-admin revoke-key --key <public_id>
 uv run gs-admin block --user <id>                          # roteiro: docs/runbooks/abuso.md
 uv run gs-admin request-deletion --user <id>               # como DELETE /me, também para conta bloqueada
 uv run gs-admin find-user --user-hash <hash>               # user.hash da telemetria → id da conta (- lê da entrada)
-uv run gs-admin orphan-files                               # arquivos do storage sem linha viva; só leitura
+uv run gs-admin orphan-files                               # arquivos do storage sem linha viva; só leitura por padrão
 curl -H "Authorization: Bearer $(cat chave.txt)" https://…/api/v1/me
 ```
 
@@ -258,7 +258,7 @@ A chave tem o formato `gsk_<public_id>_<segredo>`: 16 dígitos hexadecimais púb
 
 ### Arquivos órfãos no storage
 
-`gs-admin orphan-files` compara o disco do storage com `stored_object` e **só lê**: não apaga nem altera nada. Imprime uma linha por arquivo (chave, bytes, modificação em UTC e categoria, separados por tab) e os totais por categoria em stderr: `sem-linha` (nenhuma linha referencia o arquivo) e `marcado-removido-mas-presente` (linha `deleted` ou `missing` com o arquivo ainda no disco). Arquivo modificado há menos de `--min-age-hours` (padrão 6) fica de fora, por poder ser gravação em curso, e `--limit` (padrão 200) limita só as linhas listadas. Sem a sentinela de montagem o storage não é verificado (saída 4). Na VPS, direto no container em execução:
+`gs-admin orphan-files` compara o disco do storage com `stored_object` e **só lê por padrão**: sem `--delete-orphans --yes`, não apaga nem altera nada. Imprime uma linha por arquivo (chave, bytes, modificação em UTC e categoria, separados por tab) e os totais por categoria em stderr: `sem-linha` (nenhuma linha referencia o arquivo, cujo nome é de um formato da aplicação: `uploads/<32 hex>` ou `runs/<uuid>/g<n>/<32 hex>`), `desconhecido` (sem linha e com nome fora desses formatos, como um `dump.sql` deixado na raiz) e `marcado-removido-mas-presente` (linha `deleted` ou `missing` com o arquivo ainda no disco). Arquivo modificado há menos de `--min-age-hours` (padrão 6) fica de fora, por poder ser gravação em curso, e `--limit` (padrão 200) limita só as linhas listadas. Sem a sentinela de montagem o storage não é verificado (saída 4). Na VPS, direto no container em execução:
 
 ```bash
 sudo docker exec -i goblinshift-api-1 gs-admin orphan-files --min-age-hours 6 --limit 200 > orfaos.tsv
@@ -277,9 +277,15 @@ Limitações do relatório, para ler antes de agir sobre ele:
 - **Arquivo com modificação no futuro fica invisível.** O corte de idade compara o `mtime` com o relógio da máquina: um `mtime` à frente dele (relógio ajustado, arquivo tocado à mão) nunca passa do corte e nunca é listado.
 - **Só entram arquivos comuns com nome de chave válido.** Nomes fora do padrão de chave (espaço, acento, começo por ponto), symlinks e o diretório `.tmp` não aparecem; os temporários têm limpeza própria na manutenção. Um arquivo assim no storage não foi criado pela aplicação e pede inspeção à mão.
 
+Para apagar os `sem-linha` (por exemplo, uploads e candidatos criados depois do dump, após uma restauração), confira a lista e rode com `--delete-orphans --yes`. Só a categoria `sem-linha` é apagada, nunca `desconhecido` nem `marcado-removido-mas-presente`; logo antes de cada remoção a linha (em qualquer estado) e o `mtime` são conferidos de novo, e o arquivo que ganhou linha ou foi modificado depois do corte fica e entra na contagem de poupados. Cada arquivo apagado sai na hora numa linha com a categoria `apagado`, de modo que uma queda no meio deixa no arquivo de saída o que já foi apagado; o que sumiu, estava adulterado (symlink no lugar do arquivo) ou falhou ao apagar sai na hora em stderr com a chave. Uma falha ao apagar não para os outros, mas a saída é 4. `--limit` vira o máximo de remoções por execução, e o aviso "chegou ao limite" só aparece quando sobrou órfão: repita até ele sumir. `--delete-orphans` sem `--yes` sai com 2 sem apagar nada.
+
+```bash
+sudo docker exec -i goblinshift-api-1 gs-admin orphan-files --min-age-hours 6 --limit 200 --delete-orphans --yes > apagados.tsv
+```
+
 ## Publicação em produção
 
-A produção é publicada pelo workflow [Coolify release](deploy/coolify/release/README.md) após o CI da `main`. O workflow publica os digests dos três índices aprovados e o receptor recebe seus manifestos AMD64. O job `deploy` da CI testa localmente o contrato do receptor e a recusa do ingresso SSH legado.
+A produção é publicada pelo workflow [Coolify release](deploy/coolify/release/README.md) após o CI da `main`. O workflow publica os digests dos três índices aprovados e o receptor recebe seus manifestos AMD64. O job `deploy` da CI testa localmente o contrato do receptor e a recusa do ingresso SSH legado. Para voltar a uma versão anterior, siga o [roteiro de rollback](docs/runbooks/rollback.md): é um `git revert` na `main`, e o schema não volta junto.
 
 **Em produção**, a release grava as imagens novas no recurso da aplicação, o Coolify para os containers do recurso, sobe a versão nova com `compose up -d`, e o receptor só registra sucesso depois de conferir a saúde e a imagem dos containers ([`deploy/coolify/release/receiver.py`](deploy/coolify/release/receiver.py)). A publicação recria os containers do recurso, e pode haver indisponibilidade curta durante a troca. Cada serviço tem `container_name` fixo em `deploy/coolify/app.json`, então a API e o Nginx, que leva o build da SPA, são substituídos, sem duas versões lado a lado. Nada garante uma troca sem queda. Enquanto o Nginx volta, a borda repete a falha de conexão por até 5 s (`lb_try_duration` no site do GoblinShift, montado pelo `deploy/coolify/gateway.json`); isso não cobre a API fora do ar com o Nginx de pé. Não há medição registrada da indisponibilidade de uma publicação em produção, e o repositório não tem número para ela.
 
@@ -348,6 +354,44 @@ Rotação:
 - *client secrets*: gerar um novo no console do provedor, sobrescrever o arquivo (mantendo o modo 644), rodar `sudo docker restart goblinshift-api-1`, conferir um login e só então revogar o antigo;
 - `csrf_secret`: sobrescrever o arquivo com `openssl rand -hex 32` (mantendo o modo 644) e rodar `sudo docker restart goblinshift-api-1`. A API só lê esses arquivos na partida. Não apague o arquivo: nada o recria na publicação. Invalida os tokens CSRF em uso: a próxima mutação de cada sessão falha até um novo login;
 - `login_cookie_secret`: o mesmo procedimento. Só derruba os logins em andamento.
+
+### Senha do banco
+
+A senha do papel `goblinshift` fica em `/srv/goblinshift/secrets/db_password`, montada em `/run/secrets/db_password` no PostgreSQL (`deploy/coolify/infra.json`) e em `api`, `worker`, `maintenance`, `migrate` e `storage-init` (`deploy/coolify/app.json`). Cada processo lê o arquivo uma vez, ao montar a URL do banco na partida (`Settings.database_url` em `src/goblinshift/platform/settings.py`), e o PostgreSQL só usa o arquivo para criar o papel num volume vazio: trocar o arquivo não muda a senha no banco, e mudar a senha no banco não chega aos processos de pé. Para trocar:
+
+1. Gere a senha nova num arquivo ao lado, com o mesmo modo `644` dos outros segredos (com `600` os containers não leem). O comando roda como `goblinshift` e volta ao seu shell, sem mostrar a senha:
+
+   ```bash
+   sudo -u goblinshift sh -c 'cd /srv/goblinshift/secrets && umask 022 && openssl rand -hex 32 > db_password.new'
+   ```
+
+2. Mude a senha no banco mandando só o verificador SCRAM, calculado aqui a partir do arquivo: a senha não passa pelo terminal, pela área de transferência nem pelo PostgreSQL, e o log de comandos registra no máximo o hash. Não use `ALTER ROLE ... PASSWORD '...'` com o texto da senha.
+
+   ```bash
+   psql_gs() { sudo docker exec -i goblinshift-postgres-1 psql -U goblinshift -d goblinshift -v ON_ERROR_STOP=1 "$@"; }
+   verifier=$(sudo -u goblinshift python3 - /srv/goblinshift/secrets/db_password.new <<'PY'
+   import base64, hashlib, hmac, os, sys
+   password = open(sys.argv[1], encoding="ascii").read().strip().encode()
+   salt, iterations = os.urandom(16), 4096
+   salted = hashlib.pbkdf2_hmac("sha256", password, salt, iterations)
+   client = hmac.digest(salted, b"Client Key", "sha256")
+   server = hmac.digest(salted, b"Server Key", "sha256")
+   b64 = lambda raw: base64.b64encode(raw).decode()
+   stored = hashlib.sha256(client).digest()
+   print(f"SCRAM-SHA-256${iterations}:{b64(salt)}${b64(stored)}:{b64(server)}")
+   PY
+   )
+   psql_gs -v verifier="$verifier" <<'SQL'
+   ALTER ROLE goblinshift PASSWORD :'verifier';
+   SQL
+   unset verifier
+   ```
+
+3. Grave a senha nova no arquivo de verdade, mantendo o modo `644`: `sudo -u goblinshift sh -c 'cd /srv/goblinshift/secrets && cat db_password.new > db_password && rm db_password.new'`.
+4. Reinicie `api`, `worker` e `maintenance` no Coolify (ou `sudo docker restart goblinshift-api-1 goblinshift-worker-1 goblinshift-maintenance-1`). Entre o passo 2 e este, as conexões já abertas continuam valendo, mas uma conexão nova falha: faça os passos 2 a 4 em sequência. O `migrate` e o `storage-init` leem o arquivo novo na próxima publicação.
+5. Confira `curl -fsS https://goblinshift.dev/readyz` (200) e, no log da API, a ausência de falha de autenticação no banco (`sudo docker logs --tail 100 goblinshift-api-1`).
+
+Quando o [ADR 055](docs/adr/055-papeis-do-banco-com-menor-privilegio.md) estiver ligado, o mesmo procedimento vale para `gs_app` (`api` e `worker`) e `gs_maintenance` (`maintenance`), cada um com o próprio arquivo de segredo e reiniciando só os serviços que o usam.
 
 ## Imagem do executor
 

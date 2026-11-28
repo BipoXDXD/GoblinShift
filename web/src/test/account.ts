@@ -7,6 +7,8 @@ export const KEY_ID = "9a8b7c6d-5e4f-4a3b-9c2d-1e0f9a8b7c6d";
 export const SECOND_KEY_ID = "1b2c3d4e-5f6a-4b7c-8d9e-0f1a2b3c4d5e";
 
 interface MeOverrides {
+  readonly id?: string;
+  readonly provider?: Schemas["MeResponse"]["provider"];
   readonly via?: Schemas["MeResponse"]["via"];
   readonly usage?: Partial<Schemas["Usage"]>;
   readonly limits?: Partial<Schemas["Limits"]>;
@@ -16,8 +18,9 @@ interface MeOverrides {
 /** Corpo de GET /me de uma conta com sessão, termos aceitos e cotas com folga. */
 export function meBody(overrides: MeOverrides = {}): Schemas["MeResponse"] {
   return {
-    id: ACCOUNT_ID,
+    id: overrides.id ?? ACCOUNT_ID,
     display_name: "Ana",
+    provider: overrides.provider === undefined ? "google" : overrides.provider,
     scopes: ["files:read", "files:write", "runs:read", "runs:write"],
     via: overrides.via ?? "session",
     limits: {
@@ -25,7 +28,7 @@ export function meBody(overrides: MeOverrides = {}): Schemas["MeResponse"] {
       input_bytes_per_24h: 2_000_000_000,
       storage_bytes: 5_000_000_000,
       active_runs: 1,
-      file_bytes: 33_554_432,
+      file_bytes: 52_428_800,
       video_file_bytes: 268_435_456,
       batch_files: 50,
       batch_bytes: 536_870_912,

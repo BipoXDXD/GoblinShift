@@ -5,15 +5,18 @@ provedores reais (os do código de produção, que não usa discovery). Ele se c
 servidor de autorização exigente: o `code` vale uma vez, o `redirect_uri` da troca tem de ser
 idêntico ao da autorização e ao cadastrado, o PKCE S256 é conferido e o cliente se autentica.
 O Google emite ID tokens RS256 assinados com uma chave gerada no teste e publica a JWKS; cada
-teste pode trocar os claims, o cabeçalho ou o token inteiro para simular ataques.
+teste pode trocar os claims, o cabeçalho ou o token inteiro para simular ataques. Para o provedor
+hostil, cada resposta pode demorar (`latency_s`), o token e a JWKS podem vir com outro corpo, e um
+endereço pode responder um corpo enorme em blocos (`oversized_url`), contando quantos foram lidos.
 """
 
+import asyncio
 import base64
 import hashlib
 import json
 import secrets
 import time
-from collections.abc import Callable
+from collections.abc import AsyncIterator, Callable
 from dataclasses import dataclass, field
 from typing import Any
 from urllib.parse import parse_qs, urlencode, urlsplit
@@ -42,6 +45,8 @@ GITHUB_USER: dict[str, object] = {
     "email": "mesma@example.com",
 }
 KEY_ID = "chave-de-teste"
+OVERSIZED_CHUNK_BYTES = 64 * 1024
+_JSON = {"content-type": "application/json"}
 
 
 def b64url(data: bytes) -> str:
@@ -63,6 +68,8 @@ class Grant:
     code_challenge: str | None
     code_challenge_method: str | None
     nonce: str | None
+    # O parâmetro `claims` do pedido (JSON), como o Google o recebe.
+    claims: str | None = None
 
 
 IdTokenFactory = Callable[[dict[str, Any], RSAKey], str]
@@ -79,12 +86,22 @@ class FakeProviders:
     claims_patch: dict[str, Any] = field(default_factory=dict)
     id_token_factory: IdTokenFactory | None = None
     omit_id_token: bool = False
+    # O Google só manda `auth_time` com "Session age claims" ligado e o app verificado.
+    omit_auth_time: bool = False
     google_subject: str = GOOGLE_SUBJECT
     github_user_body: bytes = field(default_factory=lambda: json.dumps(GITHUB_USER).encode())
     github_user_status: int = 200
     token_failure: httpx.Response | None = None
     network_failure: Exception | None = None
     issued_access_tokens: list[str] = field(default_factory=list)
+    # Provedor hostil: corpo trocado no token (depois de conferir o grant) e na JWKS, demora por
+    # resposta e um endereço que responde `oversized_chunks` blocos de 64 KiB, sem Content-Length.
+    token_body: bytes | None = None
+    jwks_body: bytes | None = None
+    latency_s: float = 0.0
+    oversized_url: str | None = None
+    oversized_chunks: int = 16
+    chunks_served: int = 0
 
     @property
     def transport(self) -> httpx.MockTransport:
@@ -103,6 +120,7 @@ class FakeProviders:
             code_challenge=query.get("code_challenge"),
             code_challenge_method=query.get("code_challenge_method"),
             nonce=query.get("nonce"),
+            claims=query.get("claims"),
         )
         callback = urlsplit(query["redirect_uri"])
         return f"{callback.path}?{urlencode({'code': code, 'state': query['state']})}"
@@ -117,6 +135,8 @@ class FakeProviders:
             "exp": now + 300,
             "email": GITHUB_USER["email"],
         }
+        if not self.omit_auth_time and _requests_auth_time(grant.claims):
+            claims["auth_time"] = now
         if grant.nonce is not None:
             claims["nonce"] = grant.nonce
         return claims | self.claims_patch
@@ -130,12 +150,18 @@ class FakeProviders:
 
     # --- Servidor --------------------------------------------------------------------------
 
-    def _handle(self, request: httpx.Request) -> httpx.Response:
+    async def _handle(self, request: httpx.Request) -> httpx.Response:
         self.requests.append(request)
+        if self.latency_s:
+            await asyncio.sleep(self.latency_s)
         if self.network_failure is not None:
             raise self.network_failure
         url = str(request.url).split("?")[0]
+        if url == self.oversized_url:
+            return httpx.Response(200, content=self._oversized_body())
         if url == GOOGLE_JWKS_URL:
+            if self.jwks_body is not None:
+                return httpx.Response(200, content=self.jwks_body, headers=_JSON)
             return httpx.Response(200, json={"keys": [self.key.as_dict(private=False)]})
         if url in {GOOGLE_TOKEN_URL, GITHUB_TOKEN_URL}:
             return self._token(request, "google" if url == GOOGLE_TOKEN_URL else "github")
@@ -159,6 +185,8 @@ class FakeProviders:
             or not _pkce_matches(grant, form.get("code_verifier"))
         ):
             return httpx.Response(400, json={"error": "invalid_grant"})
+        if self.token_body is not None:
+            return httpx.Response(200, content=self.token_body, headers=_JSON)
         access_token = f"gho_{secrets.token_urlsafe(24)}"
         self.issued_access_tokens.append(access_token)
         body: dict[str, Any] = {"access_token": access_token, "token_type": "bearer"}
@@ -176,10 +204,27 @@ class FakeProviders:
             return httpx.Response(401, json={"message": "Bad credentials"})
         return httpx.Response(self.github_user_status, content=self.github_user_body)
 
+    async def _oversized_body(self) -> AsyncIterator[bytes]:
+        for _ in range(self.oversized_chunks):
+            self.chunks_served += 1
+            yield b"x" * OVERSIZED_CHUNK_BYTES
+
     @staticmethod
     def _client_authenticated(request: httpx.Request, client: OAuthClient) -> bool:
         expected = base64.b64encode(f"{client.client_id}:{client.client_secret}".encode())
         return request.headers.get("authorization") == f"Basic {expected.decode()}"
+
+
+def _requests_auth_time(claims: str | None) -> bool:
+    """O Google só põe `auth_time` no ID token quando o pedido o exige no parâmetro `claims`."""
+    if claims is None:
+        return False
+    try:
+        requested = json.loads(claims)
+    except json.JSONDecodeError:
+        return False
+    id_token = requested.get("id_token") if isinstance(requested, dict) else None
+    return isinstance(id_token, dict) and "auth_time" in id_token
 
 
 def _pkce_matches(grant: Grant, verifier: str | None) -> bool:
