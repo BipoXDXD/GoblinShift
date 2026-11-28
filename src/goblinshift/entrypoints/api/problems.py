@@ -29,7 +29,7 @@ from fastapi import FastAPI, Request
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse, Response
 from pydantic import BaseModel, Field
-from sqlalchemy.exc import DBAPIError, OperationalError
+from sqlalchemy.exc import OperationalError
 from sqlalchemy.exc import TimeoutError as PoolTimeoutError
 from starlette.datastructures import MutableHeaders
 from starlette.exceptions import HTTPException as StarletteHTTPException
@@ -38,6 +38,7 @@ from starlette.types import ASGIApp, Message, Receive, Scope, Send
 
 from goblinshift.entrypoints.api.download_navigation import failure_redirect
 from goblinshift.entrypoints.api.wide_event import record_error
+from goblinshift.platform.db import is_unavailable_for_request
 from goblinshift.platform.telemetry import request_id_bound
 
 logger = logging.getLogger(__name__)
@@ -52,15 +53,6 @@ POOL_EXHAUSTED_RETRY_AFTER_SECONDS = 1
 # Mesmo valor do piso de `capacity_problems.STORAGE_MIN_RETRY_AFTER`, que tem outro significado
 # (espera até a cota liberar) e por isso não é reaproveitado.
 STORAGE_RETRY_AFTER_SECONDS = 60
-# O psycopg põe em `OperationalError` também erros de programação (55000, 3B001, 2F005, 54000...);
-# só estes SQLSTATEs dizem que repetir a requisição pode dar certo. 40001 e 40P01 desfazem a
-# transação inteira, e é a contenção que os causa: chegam aqui ao esgotar as tentativas de
-# `runs/store.py` ou em rota sem retry.
-_UNAVAILABLE_SQLSTATE_CLASSES = frozenset({"08", "53", "57"})
-_UNAVAILABLE_SQLSTATES = frozenset({"40001", "40P01", "55P03"})
-# Da classe 08, mas é parâmetro errado no SQL (`bind message supplies...`), não falha de conexão.
-_PROTOCOL_VIOLATION_SQLSTATE = "08P01"
-_SQLSTATE_CLASS_LENGTH = 2
 # Disco cheio, cota estourada e erro de E/S na gravação: o storage está indisponível agora, e a
 # requisição pode dar certo depois. Os outros errnos (permissão, caminho) são defeito nosso: 500.
 _STORAGE_UNAVAILABLE_ERRNOS = frozenset({errno.ENOSPC, errno.EDQUOT, errno.EIO})
@@ -428,7 +420,7 @@ def _unhandled_error_response(exc: Exception, instance: str, request_id: str) ->
     Fica aqui, e não em `exception_handler`, porque o Starlette troca por `RuntimeError` a
     exceção com handler registrado que ocorre depois de a resposta começar.
     """
-    if _is_database_unavailable(exc):
+    if is_unavailable_for_request(exc):
         return _database_unavailable_response(exc, instance, request_id)
     if _is_storage_unavailable(exc):
         return _storage_unavailable_response(exc, instance, request_id)
@@ -474,26 +466,6 @@ async def _handle_api_problem(request: Request, exc: ApiProblem) -> Response:
         request_id=request_id_of(request),
         headers=exc.headers,
         errors=exc.errors,
-    )
-
-
-def _is_database_unavailable(exc: Exception) -> bool:
-    if isinstance(exc, PoolTimeoutError):
-        return True
-    # A conexão perdida vale para qualquer classe do driver: 25P03 chega como `InternalError`.
-    if isinstance(exc, DBAPIError) and exc.connection_invalidated:
-        return True
-    if not isinstance(exc, OperationalError):
-        return False
-    sqlstate = _sqlstate_of(exc)
-    # Sem SQLSTATE o servidor não chegou a responder: falha ao conectar ou conexão perdida.
-    if sqlstate is None:
-        return True
-    if sqlstate == _PROTOCOL_VIOLATION_SQLSTATE:
-        return False
-    return (
-        sqlstate in _UNAVAILABLE_SQLSTATES
-        or sqlstate[:_SQLSTATE_CLASS_LENGTH] in _UNAVAILABLE_SQLSTATE_CLASSES
     )
 
 

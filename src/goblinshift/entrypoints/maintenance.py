@@ -33,6 +33,7 @@ from goblinshift.files.storage import FileStorage
 from goblinshift.identity import purge as identity_purge
 from goblinshift.identity import rate_limit
 from goblinshift.platform.db import (
+    is_connection_lost,
     is_lock_contention,
     make_engine,
     make_session_factory,
@@ -52,7 +53,6 @@ from goblinshift.runs.maintenance import (
     STEPS_FAILED,
     Maintenance,
     MaintenanceConfig,
-    is_connection_error,
     log_step_failure,
 )
 from goblinshift.runs.worker.executor_ctl_runner import ExecutorCtlError, ExecutorCtlRunner
@@ -279,7 +279,7 @@ class AccountJobs:
                 log_step_failure(name, partial.cause)
                 failed += 1
             except Exception as error:
-                if is_connection_error(error):
+                if is_connection_lost(error):
                     raise
                 # Fronteira do passo: o seguinte recomeça do banco, sem estado em memória.
                 log_step_failure(name, error)
@@ -370,7 +370,7 @@ class AccountJobs:
                     lambda s: identity_purge.delete_old_audit_events(s, now, batch)
                 )
             except Exception as error:
-                if removed == 0 or is_connection_error(error):
+                if removed == 0 or is_connection_lost(error):
                     raise
                 raise _PartialStepError({"audit_events_removed": removed}, error) from error
             removed += deleted
@@ -396,7 +396,7 @@ class AccountJobs:
             try:
                 outcome = self._purge_account(owner_id)
             except Exception as error:
-                if is_connection_error(error):
+                if is_connection_lost(error):
                     raise
                 # Uma conta com defeito vai para o fim da fila; as seguintes não esperam por ela.
                 _log_purge_failure(owner_id, error)
@@ -436,7 +436,7 @@ class AccountJobs:
         try:
             self._cancel_active_run(owner_id)
         except Exception as error:
-            if is_connection_error(error):
+            if is_connection_lost(error):
                 raise
             _log_purge_failure(owner_id, error, message="purga: cancelamento falhou")
             return _Purge.CANCEL_CONTENDED if is_lock_contention(error) else _Purge.CANCEL_FAILED

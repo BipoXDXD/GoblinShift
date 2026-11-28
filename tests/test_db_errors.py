@@ -14,7 +14,7 @@ from sqlalchemy.exc import DBAPIError
 from sqlalchemy.exc import TimeoutError as PoolTimeoutError
 
 from goblinshift.entrypoints import maintenance as maintenance_entrypoint
-from goblinshift.entrypoints.api import problems
+from goblinshift.platform.db import is_connection_lost, is_unavailable_for_request
 from goblinshift.runs import maintenance as runs_maintenance
 
 
@@ -56,8 +56,8 @@ CASES: list[tuple[str, Exception, bool, bool]] = [
 def test_as_duas_regras_divergem_onde_ja_divergiam(
     error: Exception, lost: bool, unavailable: bool
 ) -> None:
-    assert runs_maintenance.is_connection_error(error) is lost
-    assert problems._is_database_unavailable(error) is unavailable
+    assert is_connection_lost(error) is lost
+    assert is_unavailable_for_request(error) is unavailable
 
 
 def _raw_lock_error() -> psycopg.Error:
