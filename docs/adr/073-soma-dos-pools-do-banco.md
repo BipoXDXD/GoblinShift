@@ -24,7 +24,7 @@ Opção D. `make_engine(settings, *, pool=None)` recebe um `PoolSize(size, overf
 | Processo | Pool | Pico | Observação |
 |----------|------|------|------------|
 | api | settings (10 + 5) | 2 × 15 = 30 | duas réplicas durante o rollout |
-| worker | `WORKER_POOL` (2 + 1) | 3 + 1 = 4 | o laço e a renovação do lease em paralelo; o `LISTEN` fica numa conexão própria, fora do pool |
+| worker | `WORKER_POOL` (2 + 1) | 3 + 1 = 4 | pico medido de 1 conexão do pool; o 2 + 1 é margem. A renovação do lease em thread só roda durante o `start` e o `stop` do executor, quando o laço não segura conexão. O `LISTEN` fica numa conexão própria, fora do pool |
 | maintenance | `MAINTENANCE_POOL` (2 + 1) | 3 | ciclos em sequência |
 | gs-admin | `ADMIN_POOL` (1 + 0) | 1 | uma transação por vez; o cancelamento e o `run.finished` rodam depois do commit |
 | migrate | `MIGRATE_POOL` (1 + 0) | 1 | uma conexão por rodada, cada migration na sua transação |
@@ -37,11 +37,12 @@ O teste lê `-c max_connections=` do serviço postgres em `compose.yaml` e `depl
 ## Consequências
 
 - Um processo novo, ou um pool maior, entra em `PEAK_CONNECTIONS` de `tests/test_db_pool_budget.py`; se a soma passar do teto, o teste falha.
-- Pool esgotado no worker ou na manutenção espera o `pool_timeout` (5 s) e falha com `TimeoutError`, como na API. O teste de processo do worker confere que o log não tem essa falha.
+- Pool esgotado no worker ou na manutenção espera o `pool_timeout` (5 s) e falha com `TimeoutError`, como na API. No worker, o pico medido de 1 conexão deixa o 2 + 1 com margem. Se uma mudança fizer o laço e a renovação segurarem conexão juntos, o teste de pool do worker acusa.
 - A folga cobre conexões manuais de operação (`psql`) e até três réplicas a mais da API (45 conexões); a quarta passaria do teto.
 
 ## Compliance
 
 - `tests/test_db_pool_budget.py`: a soma cabe no teto; a API fica em 10 + 5; worker, manutenção e `gs-admin` pedem o próprio pool ao compor o processo; o `env.py` pede o `MIGRATE_POOL`.
-- `tests/runs/test_worker_process.py`: o worker real, com o `WORKER_POOL`, renova o lease, faz claim e coleta sem esgotar o pool.
+- `tests/runs/test_worker_process.py`, `test_worker_completa_a_run_dentro_do_worker_pool`: roda o `serve` no processo do teste com o `WORKER_POOL`. Faz claim, renova o lease durante um `start` que bloqueia por dois leases, coleta e publica. O pico de conexões em uso, medido pelos eventos `checkout` e `checkin` do pool, fica em `WORKER_POOL.size` ou menos.
+- `tests/test_db_pool_budget.py` também recusa `make_engine(` sem `pool=` fora de `api/app.py` e `GS_DB_POOL_SIZE` ou `GS_DB_POOL_MAX_OVERFLOW` em `compose.yaml` e `deploy/coolify/*.json`.
 - Os testes do `gs-admin` (`tests/identity/test_admin_cli*.py`) e das migrações rodam contra PostgreSQL com os pools de 1 conexão.

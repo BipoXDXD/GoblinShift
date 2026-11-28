@@ -51,9 +51,10 @@ class PoolSize:
 
 
 # Pools dos processos fora da API (ADR 073). A API fica com o das settings (10 + 5), do qual o teto
-# do middleware deriva (ADR 050). O worker usa no máximo duas ao mesmo tempo (o laço e a renovação
-# do lease em paralelo); o `LISTEN` fica numa conexão própria, fora do pool. A manutenção roda os
-# ciclos um a um; o `gs-admin` e o migrate, uma transação por vez.
+# do middleware deriva (ADR 050). O worker segura uma conexão do pool por vez: a renovação do lease
+# em thread só roda durante o `start` e o `stop` do executor, quando o laço não segura nenhuma, e o
+# `LISTEN` usa uma conexão própria, fora do pool. O pico medido é 1, e o 2 + 1 é margem. A
+# manutenção roda os ciclos um a um; o `gs-admin` e o migrate, uma transação por vez.
 WORKER_POOL = PoolSize(2, 1)
 MAINTENANCE_POOL = PoolSize(2, 1)
 ADMIN_POOL = PoolSize(1, 0)

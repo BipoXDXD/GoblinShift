@@ -6,9 +6,11 @@ do pico fica em `PEAK_CONNECTIONS`, a fonte da soma do ADR 073.
 """
 
 import argparse
+import ast
 import json
 import re
 from datetime import timedelta
+from functools import partial
 from pathlib import Path
 from typing import Any
 
@@ -31,6 +33,10 @@ from goblinshift.runs.worker.runner import LocalRunner
 ROOT = Path(__file__).resolve().parents[1]
 COMPOSE = ROOT / "compose.yaml"
 COOLIFY_INFRA = ROOT / "deploy" / "coolify" / "infra.json"
+SRC = ROOT / "src" / "goblinshift"
+# O único processo que fica com o pool das settings (10 + 5): o teto do middleware deriva dele.
+DEFAULT_POOL_CALLERS = {Path("entrypoints/api/app.py")}
+POOL_ENV = ("GS_DB_POOL_SIZE", "GS_DB_POOL_MAX_OVERFLOW")
 # Padrão do PostgreSQL 18 e conexões reservadas ao superusuário (`superuser_reserved_connections`).
 POSTGRES_DEFAULT_MAX_CONNECTIONS = 100
 SUPERUSER_RESERVED = 3
@@ -102,20 +108,10 @@ class _EngineSpy:
         raise _EngineCapturedError
 
 
-def _compose_worker() -> None:
-    worker.serve(
-        Settings(),
-        LocalRunner(Path("unused"), attempt_timeout=timedelta(seconds=1)),
-        ShutdownFlag(),
-    )
-
-
-def _compose_maintenance() -> None:
-    maintenance.serve(
-        Settings(),
-        LocalRunner(Path("unused"), attempt_timeout=timedelta(seconds=1)),
-        ShutdownFlag(),
-    )
+def _serve(process: Any) -> None:
+    """Compõe `gs-worker` ou `gs-maintenance` pelo `serve` do módulo."""
+    runner = LocalRunner(Path("unused"), attempt_timeout=timedelta(seconds=1))
+    process.serve(Settings(), runner, ShutdownFlag())
 
 
 def _compose_admin_cli() -> None:
@@ -126,8 +122,8 @@ def _compose_admin_cli() -> None:
 @pytest.mark.parametrize(
     ("module", "compose", "expected"),
     [
-        (worker, _compose_worker, WORKER_POOL),
-        (maintenance, _compose_maintenance, MAINTENANCE_POOL),
+        (worker, partial(_serve, worker), WORKER_POOL),
+        (maintenance, partial(_serve, maintenance), MAINTENANCE_POOL),
         (admin_cli, _compose_admin_cli, ADMIN_POOL),
     ],
     ids=["worker", "maintenance", "admin_cli"],
@@ -150,3 +146,42 @@ def test_migrate_usa_o_proprio_pool() -> None:
     source = (ROOT / "migrations" / "env.py").read_text(encoding="utf-8")
 
     assert "make_engine(settings, pool=MIGRATE_POOL)" in source
+
+
+def _make_engine_without_pool(path: Path) -> list[int]:
+    tree = ast.parse(path.read_text(encoding="utf-8"))
+    return [
+        node.lineno
+        for node in ast.walk(tree)
+        if isinstance(node, ast.Call)
+        and isinstance(node.func, ast.Name | ast.Attribute)
+        and (node.func.id if isinstance(node.func, ast.Name) else node.func.attr) == "make_engine"
+        and not any(keyword.arg == "pool" for keyword in node.keywords)
+    ]
+
+
+def test_so_a_api_usa_o_pool_das_settings() -> None:
+    # Um processo novo sem `pool=` herdaria 10 + 5 fora da conta de `PEAK_CONNECTIONS`.
+    found = {
+        f"{path.relative_to(SRC)}:{line}"
+        for path in SRC.rglob("*.py")
+        if path.relative_to(SRC) not in DEFAULT_POOL_CALLERS
+        for line in _make_engine_without_pool(path)
+    }
+
+    assert found == set()
+    for allowed in DEFAULT_POOL_CALLERS:
+        assert _make_engine_without_pool(SRC / allowed), f"{allowed} deixou de chamar make_engine"
+
+
+def test_ambiente_nao_muda_o_pool_das_settings() -> None:
+    # A conta usa os defaults de `Settings`; uma variável no deploy mudaria o pico sem o teste ver.
+    files = [COMPOSE, *sorted((ROOT / "deploy" / "coolify").glob("*.json"))]
+    found = {
+        f"{path.relative_to(ROOT)}: {name}"
+        for path in files
+        for name in POOL_ENV
+        if name in path.read_text(encoding="utf-8")
+    }
+
+    assert found == set()
