@@ -1,6 +1,6 @@
 # ADR 037. Previews em `previews/`, papel `preview` e vínculo com a saída de origem
 
-- **Estado:** proposto (2026-10-16), pendente de revisão do usuário no PR
+- **Estado:** aceito no merge do PR #91 (2026-10-16); antes: proposto (2026-10-16), pendente de revisão do usuário no PR
 - **Plano:** [1.6](../GoblinShiftPlan.md#s1-2), [1.7](../GoblinShiftPlan.md#s1-7), [2.2](../GoblinShiftPlan.md#s2-2), [3.3](../GoblinShiftPlan.md#s2-3), [3.6](../GoblinShiftPlan.md#s3-4)
 - **Relacionado:** [ADR 019](019-layout-de-out-pacote-e-papeis.md), [ADR 007](007-storedobject-e-exclusao-adiada.md)
 
