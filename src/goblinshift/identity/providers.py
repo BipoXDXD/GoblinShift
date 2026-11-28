@@ -50,6 +50,14 @@ _GITHUB_LOGIN = r"^[A-Za-z0-9-]{1,39}$"
 _MAX_BIGINT = 2**63 - 1
 
 
+_PROVIDER_BY_ISSUER = {GOOGLE_ISSUER: ProviderName.GOOGLE, GITHUB_ISSUER: ProviderName.GITHUB}
+
+
+def provider_for_issuer(issuer: str) -> ProviderName | None:
+    """O provedor de login da conta; None para a conta do operador (`gs-admin`), que não entra."""
+    return _PROVIDER_BY_ISSUER.get(issuer)
+
+
 class InvalidProviderIdentityError(ValueError):
     """O provedor devolveu uma identidade que não passa no modelo estrito."""
 

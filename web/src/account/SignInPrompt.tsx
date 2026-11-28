@@ -6,6 +6,7 @@ import { Heading, type HeadingLevel } from "../components/a11y/Heading";
 import { TEXT } from "../text";
 import { safeReturnTo } from "./signIn";
 import { SignInLinks } from "./SignInLinks";
+import { useMe } from "./useMe";
 
 const T = TEXT.account.signIn;
 
@@ -25,6 +26,8 @@ export function SignInPrompt({
 }: SignInPromptProps): ReactElement {
   const titleId = useId();
   const { pathname, search } = useLocation();
+  // Na reautenticação, o provedor da sessão; sem o /me (carregando ou falha), os dois.
+  const { data: account } = useMe();
   return (
     <section
       aria-labelledby={titleId}
@@ -36,7 +39,11 @@ export function SignInPrompt({
           {reauth ? T.reauthTitle : T.promptTitle}
         </Heading>
         <p>{reauth ? T.reauthBody : T.promptBody}</p>
-        <SignInLinks returnTo={safeReturnTo(pathname, search)} reauth={reauth} />
+        <SignInLinks
+          returnTo={safeReturnTo(pathname, search)}
+          reauth={reauth}
+          provider={account?.provider ?? null}
+        />
       </div>
     </section>
   );
