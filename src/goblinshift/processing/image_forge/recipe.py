@@ -28,7 +28,7 @@ from goblinshift.processing.image_forge.plan import ForgePlan, plan_from_v1, pla
 from goblinshift.processing.image_forge.preparation import Prepared, prepare
 from goblinshift.processing.image_forge.rejection import ImageRejected
 from goblinshift.processing.names import safe_stem
-from goblinshift.processing.previews import PendingPreview, attach_previews, write_previews
+from goblinshift.processing.previews import PendingPreview, process_each, report_with_previews
 from goblinshift.processing.recipe import (
     DetailValue,
     InputFile,
@@ -101,16 +101,14 @@ def forge(
 ) -> Report:
     """O pipeline das duas versões sobre o plano."""
     require_max_inputs(inputs, max_inputs, "imagens")
-    items: list[ItemOk | ItemRejected] = []
-    pending: list[PendingPreview] = []
-    for source in inputs:
-        items.append(_forge_one(source, plan, limits, out, pending))
-        progress.item_done(source.position)
+    processed = process_each(
+        inputs, lambda source, pending: _forge_one(source, plan, limits, out, pending), progress
+    )
     details: dict[str, DetailValue] = {
         "resampling": RESAMPLING_NAME,
         "thumbnail_box": limits.thumbnail_box,
     }
-    return Report(attach_previews(items, write_previews(out, pending)), details=details)
+    return report_with_previews(processed, out, details=details)
 
 
 def _forge_one(
