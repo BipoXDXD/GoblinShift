@@ -373,6 +373,7 @@ export const TEXT = {
         dimensions: "Dimensões",
         format: "Formato",
         size: "Tamanho",
+        pdfSize: "Tamanho: sem compressão → com compressão",
         records: "Registros",
         pages: "Páginas",
         audio: "Áudio",

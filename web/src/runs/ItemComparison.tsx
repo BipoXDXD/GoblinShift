@@ -89,8 +89,16 @@ function linesOf(comparison: Comparison): readonly Line[] {
     case "pdf":
       return [
         line(T.pages, formatCount(comparison.pages_before), formatCount(comparison.pages_after)),
+        ...pdfSize(comparison.bytes_before ?? null, comparison.bytes_after ?? null),
       ];
   }
+}
+
+/** A linha de tamanho do PDF só com o par inteiro: sem compressão, nenhum dos dois vem. */
+function pdfSize(before: number | null, after: number | null): readonly Line[] {
+  return before === null || after === null
+    ? []
+    : [line(T.pdfSize, formatBytes(before), formatBytes(after))];
 }
 
 function line(label: string, before: string, after: string): Line {

@@ -114,6 +114,9 @@ const comparisonSchema = z
       kind: z.literal("pdf"),
       pages_before: z.number().int(),
       pages_after: z.number().int(),
+      /** Sem e com a compressão sem perdas (v2); ausentes ou nulos sem compressão. */
+      bytes_before: z.number().int().nullable().exactOptional(),
+      bytes_after: z.number().int().nullable().exactOptional(),
     }),
     z.object({
       kind: z.literal("image"),

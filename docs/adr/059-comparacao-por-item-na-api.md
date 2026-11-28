@@ -25,6 +25,7 @@ As receitas já medem antes e depois de cada entrada, mas a medida ficava só no
 - **Montagem na coleta:** `collect_outputs` monta a comparação a partir de `counts` e `details` e o worker grava `run_input.details.comparison`. O executor e o `report.json` não mudam.
 - **API:** `RunItemResponse.comparison` (aditivo), uma união discriminada por `kind` (`TableComparisonResponse`, `PdfComparisonResponse`, `ImageComparisonResponse`, `MediaComparisonResponse`), com os pisos na spec (`minimum`). A leitura do banco passa de novo por `comparison_from_json`: Run antiga (sem a chave) ou forma inválida responde `null`.
 - **Retenção:** some com `run_input.details` aos 30 dias, como avisos e contagens.
+- **PDF Press v2 com compressão (ADR 070):** o PDF compara também o tamanho, `bytes_before` (sem compressão) → `bytes_after` (com compressão), lidos de `bytes_before_compression` e `bytes_after_compression` em `counts`. O par só entra com as duas chaves; com uma só, as páginas ficam e o tamanho sai nulo. As duas chaves são opcionais em `comparison_from_json`, para que a linha gravada antes da v2 continue válida, e o par pela metade invalida a comparação, como no Media Mill. Na API, os dois campos são opcionais e anuláveis (aditivo).
 
 ## Alternativas descartadas
 

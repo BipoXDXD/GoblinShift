@@ -7026,6 +7026,30 @@
             "type": "integer",
             "minimum": 0.0,
             "title": "Pages After"
+          },
+          "bytes_before": {
+            "anyOf": [
+              {
+                "type": "integer",
+                "minimum": 0.0
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Bytes Before"
+          },
+          "bytes_after": {
+            "anyOf": [
+              {
+                "type": "integer",
+                "minimum": 0.0
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Bytes After"
           }
         },
         "type": "object",
@@ -7035,7 +7059,7 @@
           "pages_after"
         ],
         "title": "PdfComparisonResponse",
-        "description": "PDF Press: páginas da entrada → da saída."
+        "description": "PDF Press: páginas da entrada → da saída e, na v2 com compressão, o tamanho."
       },
       "Phase": {
         "type": "string",

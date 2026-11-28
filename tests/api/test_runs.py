@@ -1556,7 +1556,15 @@ IMAGE_COMPARISON = {
 
 
 TABLE_COMPARISON = {"kind": "table", "records_before": 10, "records_after": 7}
-PDF_COMPARISON = {"kind": "pdf", "pages_before": 12, "pages_after": 3}
+PDF_COMPARISON = {
+    "kind": "pdf",
+    "pages_before": 12,
+    "pages_after": 3,
+    "bytes_before": None,
+    "bytes_after": None,
+}
+# PDF Press v2 com compressão sem perdas (ADR 070).
+COMPRESSED_PDF_COMPARISON = {**PDF_COMPARISON, "bytes_before": 900, "bytes_after": 600}
 # Vídeo sem miniatura: o par de dimensões de saída é nulo.
 MEDIA_COMPARISON = {
     "kind": "media",
@@ -1571,8 +1579,14 @@ MEDIA_COMPARISON = {
 
 @pytest.mark.parametrize(
     "stored",
-    [TABLE_COMPARISON, PDF_COMPARISON, IMAGE_COMPARISON, MEDIA_COMPARISON],
-    ids=["table", "pdf", "image", "media"],
+    [
+        TABLE_COMPARISON,
+        PDF_COMPARISON,
+        COMPRESSED_PDF_COMPARISON,
+        IMAGE_COMPARISON,
+        MEDIA_COMPARISON,
+    ],
+    ids=["table", "pdf", "pdf-comprimido", "image", "media"],
 )
 def test_detalhe_traz_a_comparacao_por_item(
     client: TestClient,
@@ -1593,6 +1607,25 @@ def test_detalhe_traz_a_comparacao_por_item(
     [item] = client.get(f"{RUNS}/{run_id}", headers=account.headers).json()["items"]
 
     assert item["comparison"] == stored
+
+
+def test_comparacao_do_pdf_gravada_antes_da_v2_responde_o_tamanho_nulo(
+    client: TestClient, factory: sessionmaker[Session], storage: FileStorage
+) -> None:
+    account = Account(factory)
+    run_id = insert_finished_run(factory, account.id, BASE_TIME)
+    old_row = {"kind": "pdf", "pages_before": 12, "pages_after": 3}
+    details: dict[str, Any] = {
+        "warnings": [],
+        "counts": {},
+        "duplicate_of": None,
+        "comparison": old_row,
+    }
+    with_items(factory, storage, account.id, run_id, [{"outcome": "ok", "details": details}])
+
+    [item] = client.get(f"{RUNS}/{run_id}", headers=account.headers).json()["items"]
+
+    assert item["comparison"] == PDF_COMPARISON
 
 
 def test_detalhe_sem_comparacao_responde_nulo(

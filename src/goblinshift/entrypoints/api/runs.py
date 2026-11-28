@@ -219,11 +219,14 @@ class TableComparisonResponse(BaseModel):
 
 
 class PdfComparisonResponse(BaseModel):
-    """PDF Press: páginas da entrada → da saída."""
+    """PDF Press: páginas da entrada → da saída e, na v2 com compressão, o tamanho."""
 
     kind: Literal["pdf"]
     pages_before: int = Field(ge=0)
     pages_after: int = Field(ge=0)
+    # Sem e com a compressão sem perdas (ADR 070); os dois nulos quando não houve compressão.
+    bytes_before: int | None = Field(default=None, ge=0)
+    bytes_after: int | None = Field(default=None, ge=0)
 
 
 class ImageComparisonResponse(BaseModel):
@@ -751,7 +754,11 @@ def _comparison(comparison: ItemComparison | None) -> ItemComparisonResponse | N
             )
         case PdfComparison():
             return PdfComparisonResponse(
-                kind="pdf", pages_before=comparison.pages_before, pages_after=comparison.pages_after
+                kind="pdf",
+                pages_before=comparison.pages_before,
+                pages_after=comparison.pages_after,
+                bytes_before=comparison.bytes_before,
+                bytes_after=comparison.bytes_after,
             )
         case ImageComparison():
             return ImageComparisonResponse(

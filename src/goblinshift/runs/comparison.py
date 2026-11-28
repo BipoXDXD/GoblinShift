@@ -62,6 +62,10 @@ class PdfComparison:
 
     pages_before: int
     pages_after: int
+    # Tamanho antes e depois da compressão sem perdas (PDF Press v2, ADR 070): o par inteiro ou
+    # nenhum. Linhas gravadas antes da v2 não têm as chaves.
+    bytes_before: int | None = None
+    bytes_after: int | None = None
 
 
 @dataclass(frozen=True)
@@ -113,7 +117,8 @@ def comparison_from_json(raw: object) -> ItemComparison | None:
     if not isinstance(kind, str) or kind not in _PARSERS:
         return None
     cls, parse = _PARSERS[kind]
-    if raw.keys() != {"kind", *(field.name for field in fields(cls))}:
+    expected = {"kind", *(field.name for field in fields(cls))}
+    if not expected - _OPTIONAL_KEYS.get(kind, frozenset()) <= raw.keys() <= expected:
         return None
     try:
         return parse(_Fields(raw))
@@ -159,7 +164,7 @@ class _Fields:
             raise _InvalidFieldError from None
 
     def absent(self, key: str) -> bool:
-        return self._raw[key] is None
+        return self._raw.get(key) is None
 
 
 def _table(raw: _Fields) -> TableComparison:
@@ -167,7 +172,13 @@ def _table(raw: _Fields) -> TableComparison:
 
 
 def _pdf(raw: _Fields) -> PdfComparison:
-    return PdfComparison(raw.count("pages_before"), raw.count("pages_after"))
+    has_bytes = _pair_present(raw, "bytes_before", "bytes_after")
+    return PdfComparison(
+        raw.count("pages_before"),
+        raw.count("pages_after"),
+        raw.count("bytes_before") if has_bytes else None,
+        raw.count("bytes_after") if has_bytes else None,
+    )
 
 
 def _image(raw: _Fields) -> ImageComparison:
@@ -207,6 +218,9 @@ def _pair_present(raw: _Fields, first: str, second: str) -> bool:
 
 type _Parser = Callable[[_Fields], ItemComparison]
 
+# Chaves que uma linha antiga pode não ter; as demais são obrigatórias.
+_OPTIONAL_KEYS: dict[str, frozenset[str]] = {KIND_PDF: frozenset({"bytes_before", "bytes_after"})}
+
 _PARSERS: dict[str, tuple[type[ItemComparison], _Parser]] = {
     KIND_TABLE: (TableComparison, _table),
     KIND_PDF: (PdfComparison, _pdf),
@@ -223,12 +237,21 @@ def _csv_candidate(counts: Mapping[str, int], _details: Mapping[str, object]) ->
     }
 
 
+# Chaves de `counts` que o PDF Press v2 põe no item quando comprime (`pdf_press.recipe`).
+_PDF_BYTES_BEFORE, _PDF_BYTES_AFTER = "bytes_before_compression", "bytes_after_compression"
+
+
 def _pdf_candidate(counts: Mapping[str, int], _details: Mapping[str, object]) -> dict[str, object]:
-    return {
+    candidate: dict[str, object] = {
         "kind": KIND_PDF,
         "pages_before": counts.get("pages"),
         "pages_after": counts.get("output_pages"),
     }
+    # Só com as duas chaves da compressão; com uma só, as páginas ficam e o tamanho não entra.
+    if _PDF_BYTES_BEFORE in counts and _PDF_BYTES_AFTER in counts:
+        candidate["bytes_before"] = counts[_PDF_BYTES_BEFORE]
+        candidate["bytes_after"] = counts[_PDF_BYTES_AFTER]
+    return candidate
 
 
 # As chaves de `details` do Image Forge têm o mesmo nome dos campos da comparação.

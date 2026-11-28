@@ -413,6 +413,33 @@ describe("Execução: detalhe por arquivo", () => {
       expect(definitions(group)).toEqual([["Páginas", "12 → para 5"]]);
     });
 
+    it("PDF comprimido mostra a linha de tamanho", async () => {
+      const group = await comparisonOf({
+        kind: "pdf",
+        pages_before: 3,
+        pages_after: 3,
+        bytes_before: 5_242_880,
+        bytes_after: 838_861,
+      });
+
+      expect(definitions(group)).toEqual([
+        ["Páginas", "3 → para 3"],
+        ["Tamanho: sem compressão → com compressão", "5 MiB → para 819,2 KiB"],
+      ]);
+    });
+
+    it("PDF sem compressão não mostra a linha de tamanho", async () => {
+      const group = await comparisonOf({
+        kind: "pdf",
+        pages_before: 3,
+        pages_after: 1,
+        bytes_before: null,
+        bytes_after: null,
+      });
+
+      expect(definitions(group)).toEqual([["Páginas", "3 → para 1"]]);
+    });
+
     it("vídeo com miniatura e áudio: o vídeo contra a miniatura, depois o áudio", async () => {
       const group = await comparisonOf({
         kind: "media",

@@ -52,6 +52,7 @@ EXAMPLES: list[ItemComparison] = [
     PdfComparison(3, 0),
     ImageComparison(2, 2, 1, 1, ImageFormat.PNG, ImageFormat.PNG, 10, 7),
     MediaComparison(640, 360, None, None, AudioCodec.OPUS, AudioFormat.FLAC),
+    PdfComparison(3, 3, 900, 600),
 ]
 
 
@@ -82,6 +83,33 @@ def test_pdf_compara_paginas_de_entrada_e_de_saida() -> None:
         "pdf-press", {"pages": 12, "output_pages": 5}, {"pdf_version": "1.7"}
     )
     assert comparison == PdfComparison(12, 5)
+
+
+def test_pdf_comprimido_compara_paginas_e_tamanho() -> None:
+    counts = {
+        "pages": 3,
+        "output_pages": 3,
+        "bytes_before_compression": 900,
+        "bytes_after_compression": 600,
+    }
+    assert comparison_from_report("pdf-press", counts, {}) == PdfComparison(3, 3, 900, 600)
+
+
+def test_pdf_sem_compressao_compara_so_paginas() -> None:
+    assert comparison_from_report("pdf-press", {"pages": 3, "output_pages": 1}, {}) == (
+        PdfComparison(3, 1)
+    )
+
+
+def test_pdf_com_par_de_bytes_pela_metade_mantem_as_paginas() -> None:
+    counts = {"pages": 3, "output_pages": 1, "bytes_before_compression": 9}
+    assert comparison_from_report("pdf-press", counts, {}) == PdfComparison(3, 1)
+
+
+def test_json_antigo_do_pdf_sem_bytes_continua_valido() -> None:
+    assert comparison_from_json({"kind": "pdf", "pages_before": 2, "pages_after": 2}) == (
+        PdfComparison(2, 2)
+    )
 
 
 def test_imagem_compara_dimensoes_formato_e_tamanho_de_entrada() -> None:
@@ -217,6 +245,15 @@ def test_json_so_tem_inteiros_e_valores_das_listas_fechadas(comparison: ItemComp
         {"kind": "table", "records_before": 1, "records_after": 1, "extra": 1},
         {"records_before": 1, "records_after": 1},
         {"kind": "pdf", "pages_before": 1, "pages_after": False},
+        {"kind": "pdf", "pages_before": 1, "pages_after": 1, "bytes_before": 9},
+        {
+            "kind": "pdf",
+            "pages_before": 1,
+            "pages_after": 1,
+            "bytes_before": None,
+            "bytes_after": 9,
+        },
+        {"kind": "pdf", "pages_before": 1, "pages_after": 1, "bytes_before": -1, "bytes_after": 9},
         {
             "kind": "media",
             "width_before": 640,

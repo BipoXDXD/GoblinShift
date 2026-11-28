@@ -737,7 +737,7 @@ export interface components {
         };
         /**
          * PdfComparisonResponse
-         * @description PDF Press: páginas da entrada → da saída.
+         * @description PDF Press: páginas da entrada → da saída e, na v2 com compressão, o tamanho.
          */
         PdfComparisonResponse: {
             /**
@@ -749,6 +749,10 @@ export interface components {
             pages_before: number;
             /** Pages After */
             pages_after: number;
+            /** Bytes Before */
+            bytes_before?: number | null;
+            /** Bytes After */
+            bytes_after?: number | null;
         };
         /**
          * Phase
