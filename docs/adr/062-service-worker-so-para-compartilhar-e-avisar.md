@@ -1,0 +1,61 @@
+# ADR 062. Service worker só para compartilhar e avisar
+
+- **Estado:** Aceito (2026-11-28, plano `paridade-plataforma-e-50mb`, Tarefa 9; D6 = a)
+- **Plano:** [2.2](../GoblinShiftPlan.md#s2-2) (Bancada) e [3.6](../GoblinShiftPlan.md#s3-6) (Nginx da SPA)
+- **Relacionado:** #564, Tarefas 8 (aviso de término) e 10 (`share_target`)
+
+## Contexto
+
+O "Compartilhar" do celular (Android/Chrome) só entrega arquivos a um PWA instalado com
+`share_target` no manifest. O navegador manda os arquivos num `POST` multipart para a URL do
+`share_target`, e alguém precisa recebê-los. O aviso de término (Tarefa 8) mostra a notificação
+pelo `registration.showNotification`, e o clique nela só chega a um service worker
+(`notificationclick`).
+
+Até aqui a SPA não tinha service worker. O `index.html` sai com `Cache-Control: no-cache`, e um
+deploy novo vale na próxima navegação.
+
+## Decisão
+
+- **Um service worker fino** (`web/src/sw.ts`, publicado como `/sw.js`, escopo `/`):
+  - intercepta só o `POST /compartilhar` da própria origem. Grava os arquivos na Cache API
+    (`gs-share`, `web/src/share/inbox.ts`) e responde `303 /compartilhar?id=<id>`;
+  - trata `notificationclick`: foca a aba que já mostra `data.url` ou abre uma nova. Um
+    `data.url` fora deste site abre a Oficina;
+  - não guarda cache de página nem de asset e não responde nenhum outro pedido. O deploy segue
+    valendo na próxima navegação, como hoje. `install` chama `skipWaiting` e `activate` chama
+    `clients.claim`: a versão nova não tem estado para migrar.
+- **Caixa de entrada com prazo:** cada compartilhamento vale 1 h (`SHARE_TTL_MS`) e é lido uma vez
+  só (`takeShared` apaga). Um compartilhamento novo apaga os vencidos. Os arquivos ficam só no
+  aparelho e só vão ao servidor pelo fluxo normal da Bancada (intenções, cotas, `PUT` do conteúdo),
+  depois do login.
+- **Build:** o `sw.ts` é uma entrada a mais do Vite e sai como `dist/sw.js`, sem hash. O
+  `tsconfig.sw.json` o confere com `lib: ["ES2023", "WebWorker"]`. O registro
+  (`registerServiceWorker`) só roda no build de produção e só onde há `navigator.serviceWorker`.
+  A falha no registro não vai ao console.
+- **Nginx:** `location = /sw.js` sai sem cache e dá 404 quando o arquivo falta.
+  `location = /compartilhar` serve a SPA no `GET`. O `POST` só chega ao Nginx sem service worker
+  (primeira visita, registro que falhou): o 405 do estático e o 413 de um corpo acima de 64k vão
+  para `303 /?compartilhamento=indisponivel`, e a Oficina explica o motivo. A CSP
+  `default-src 'self'` já cobre `worker-src`.
+- **Modo de exibição (D6 = a):** `"display": "minimal-ui"`. Com `"browser"` o Chrome não instala
+  o PWA e o `share_target` não registra. O `minimal-ui` mantém voltar e recarregar, de que o
+  vaivém do OAuth e as rotas profundas precisam.
+
+## Alternativas descartadas
+
+- **Workbox ou `vite-plugin-pwa`:** dependência nova e um cache de assets que precisaria de
+  estratégia de atualização. Um deploy deixaria de valer na próxima navegação.
+- **Receber os arquivos no servidor** (uma rota `POST /compartilhar` na API): seria outra rota de
+  upload, fora do fluxo de intenções e cotas, e aceitaria arquivo de quem não tem sessão.
+- **`"display": "standalone"`:** aparência de app, mas sem voltar no desktop, e o vaivém do OAuth
+  fica menos claro.
+
+## Consequências
+
+- O iOS não suporta `share_target`, e lá o "Compartilhar" não lista o GoblinShift. A página de
+  acessibilidade (Tarefa 16) diz isso.
+- A Política de Privacidade precisa citar a Cache API do aparelho (Tarefa 17, no PR 6 de
+  `privacidade-e-docs`).
+- Mudar o `sw.ts` vale na próxima navegação depois do deploy: o navegador confere o `/sw.js`
+  (sem cache) a cada navegação.

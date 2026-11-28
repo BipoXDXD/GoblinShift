@@ -223,8 +223,17 @@ def test_auth_nao_traduz_413_nem_falha_de_upstream() -> None:
     assert not any(line.startswith(("error_page 413", "error_page 502")) for line in directives)
 
 
+# Named locations que redirecionam a navegação, não respondem erro: o POST do compartilhamento sem
+# service worker vai para a Oficina (ADR 062, tests/test_nginx_share_target.py).
+REDIRECT_LOCATIONS = frozenset({"location @share_unavailable"})
+
+
 def _named_error_locations() -> list[str]:
-    return sorted(name for name in _location_blocks() if name.startswith("location @"))
+    return sorted(
+        name
+        for name in _location_blocks()
+        if name.startswith("location @") and name not in REDIRECT_LOCATIONS
+    )
 
 
 @pytest.mark.parametrize("location", _named_error_locations())
