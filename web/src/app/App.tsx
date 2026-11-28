@@ -1,15 +1,14 @@
-import { MutationCache, QueryCache, QueryClient, QueryClientProvider } from "@tanstack/react-query";
+import { QueryClientProvider } from "@tanstack/react-query";
 import { useState, type ReactElement } from "react";
 import { createBrowserRouter, RouterProvider } from "react-router";
 
-import { refreshAccountOn } from "../account/useMe";
 import { ApiClientProvider } from "../api/ApiClientContext";
 import { createApiClient } from "../api/client";
 import { readCsrfCookie } from "../api/csrf";
-import { queryRetryDelay, shouldRetryQuery } from "../api/queryRetry";
 import { createServerClock } from "../api/serverClock";
 import { SITE_NOTICE } from "../notice/siteNotice";
 import { createContentUploader } from "../upload/xhr";
+import { createAppQueryClient } from "./queryClient";
 import { createRoutes } from "./routes";
 
 /** Tentativas de um envio que recebe 429 RATE_LIMITED, contando a primeira. */
@@ -19,7 +18,7 @@ const UPLOAD_RATE_LIMIT_FALLBACK_MS = 2_000;
 
 export function App(): ReactElement {
   // Um cliente e um router por montagem: testes e Strict Mode não compartilham cache nem histórico.
-  const [queryClient] = useState(createQueryClient);
+  const [queryClient] = useState(createAppQueryClient);
   // O "agora" de tudo que compara datas do servidor: o relógio local corrigido pelo `Date` das
   // respostas da API (D9).
   const [clock] = useState(() => createServerClock(Date.now));
@@ -47,6 +46,7 @@ export function App(): ReactElement {
             fallbackDelayMs: UPLOAD_RATE_LIMIT_FALLBACK_MS,
             random: Math.random,
           },
+          fetchSample: (input, init) => window.fetch(input, init),
         },
         now: clock.now,
         notice: SITE_NOTICE,
@@ -60,25 +60,4 @@ export function App(): ReactElement {
       </QueryClientProvider>
     </ApiClientProvider>
   );
-}
-
-/**
- * Leituras com o retry só de falha transitória, e o /me relido quando qualquer chamada mostra que a
- * sessão acabou ou que os termos mudaram (useMe.ts).
- */
-function createQueryClient(): QueryClient {
-  const client: QueryClient = new QueryClient({
-    queryCache: new QueryCache({
-      onError: (error, query) => {
-        refreshAccountOn(client)(error, query.queryKey);
-      },
-    }),
-    mutationCache: new MutationCache({
-      onError: (error) => {
-        refreshAccountOn(client)(error);
-      },
-    }),
-    defaultOptions: { queries: { retry: shouldRetryQuery, retryDelay: queryRetryDelay } },
-  });
-  return client;
 }

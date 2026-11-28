@@ -1,10 +1,21 @@
 import { describe, expect, it } from "vitest";
 
-import { acceptTermsPath, runPath, signInPath, withoutTrailingSlash, workbenchPath } from "./paths";
+import {
+  acceptTermsPath,
+  runPath,
+  signInPath,
+  withoutTrailingSlash,
+  workbenchPath,
+  workbenchSamplePath,
+} from "./paths";
 
 describe("paths", () => {
   it("monta a rota da Bancada da receita", () => {
     expect(workbenchPath("csv-janitor")).toBe("/bancada/csv-janitor");
+  });
+
+  it("monta a Bancada que abre com o arquivo de exemplo", () => {
+    expect(workbenchSamplePath("image-forge")).toBe("/bancada/image-forge?exemplo=1");
   });
 
   it("escapa o id da execução", () => {

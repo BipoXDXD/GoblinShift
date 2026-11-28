@@ -5,7 +5,7 @@ import { Link } from "react-router";
 import { SignInPrompt } from "../account/SignInPrompt";
 import { isSignedOut, useMe } from "../account/useMe";
 import { useApiClient } from "../api/ApiClientContext";
-import { PATHS } from "../app/paths";
+import { PATHS, workbenchSamplePath } from "../app/paths";
 import { EmptyState } from "../components/feedback/EmptyState";
 import { FailureNotice } from "../components/feedback/FailureNotice";
 import { buttonClassName } from "../components/ui/Button";
@@ -61,6 +61,11 @@ function RecentBody({ data, error }: RecentBodyProps): ReactElement {
     return (
       <EmptyState title={T.empty} headingLevel={3}>
         <p>{T.recentEmptyHint}</p>
+        {/* Primeiro uso (D4): o mesmo exemplo do botão da abertura, no Image Forge. */}
+        <p>
+          {T.firstTime.question}{" "}
+          <Link to={workbenchSamplePath("image-forge")}>{T.firstTime.link}</Link>
+        </p>
       </EmptyState>
     );
   }

@@ -179,6 +179,25 @@ export function findRecipe(id: string): RecipeModule | null {
   return BY_ID.get(id) ?? null;
 }
 
+/**
+ * As receitas cujo `accept` cobre todos os nomes, pela extensão (o compartilhamento só tem os
+ * nomes antes de abrir a Bancada). `accept: null` (Downloads Detox) aceita qualquer arquivo.
+ */
+export function recipesAccepting(names: readonly string[]): RecipeId[] {
+  return RECIPE_LIST.filter((recipe) => {
+    if (recipe.accept === null) {
+      return true;
+    }
+    const extensions = new Set(recipe.accept.split(",").filter((entry) => entry.startsWith(".")));
+    return names.every((name) => extensions.has(extensionOf(name)));
+  }).map((recipe) => recipe.id);
+}
+
+function extensionOf(name: string): string {
+  const dot = name.lastIndexOf(".");
+  return dot <= 0 ? "" : name.slice(dot).toLowerCase();
+}
+
 /** A receita de um id já conferido (a rota da Bancada de cada receita). */
 export function recipeOf(id: RecipeId): RecipeModule {
   return RECIPES[id];

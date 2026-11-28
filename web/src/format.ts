@@ -1,11 +1,13 @@
 import { TEXT } from "./text";
 
-const UNITS = ["KiB", "MiB", "GiB", "TiB", "PiB"] as const;
+// Base 1024 com rótulo sem "i" (ADR 062): "50 MB" é o teto de 50 MiB, e nenhum arquivo que o
+// sistema mostre com até "50 MB" (base 1000 no Finder) passa dele.
+const UNITS = ["KB", "MB", "GB", "TB", "PB"] as const;
 const STEP = 1_024;
 const exactBytes = new Intl.NumberFormat(TEXT.locale, { style: "unit", unit: "byte" });
 const roundedSize = new Intl.NumberFormat(TEXT.locale, { maximumFractionDigits: 1 });
 
-/** Tamanho com unidades binárias, como os limites da API e dos Termos. */
+/** Tamanho em base 1024, rotulado KB, MB e GB em toda a interface. */
 export function formatBytes(bytes: number): string {
   if (bytes < STEP) {
     return exactBytes.format(bytes);
@@ -22,11 +24,16 @@ export function formatBytes(bytes: number): string {
   return `${roundedSize.format(value)} ${unit}`;
 }
 
-/** Exibe os bytes exatos se o arredondamento esconder o excesso. */
+/**
+ * Exibe os bytes exatos se o arredondamento esconder o excesso, sem perder o teto arredondado
+ * que a interface anuncia ("50 MB (52.428.800 bytes)").
+ */
 export function formatByteComparison(bytes: number, limit: number): readonly [string, string] {
   const size = formatBytes(bytes);
   const max = formatBytes(limit);
-  return size === max ? [exactBytes.format(bytes), exactBytes.format(limit)] : [size, max];
+  return size === max
+    ? [exactBytes.format(bytes), `${max} (${exactBytes.format(limit)})`]
+    : [size, max];
 }
 
 /** Instante (ISO 8601 com fuso) no fuso e no formato da pessoa. */

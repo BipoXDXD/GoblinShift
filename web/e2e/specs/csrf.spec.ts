@@ -62,9 +62,14 @@ test("sem o cookie de CSRF, a API recusa, a tela pede para recarregar e a sessã
 
   await acesso.signOut();
 
-  await expect(acesso.section("Sessão").getByRole("alert")).toHaveText(
-    /A verificação de segurança da sessão falhou\. Recarregue a página/,
-  );
+  // A seção também tem a região assertiva (vazia) da falha ao copiar o identificador: o filtro
+  // pelo texto mira o ProblemAlert sem violar o strict mode.
+  await expect(
+    acesso
+      .section("Sessão")
+      .getByRole("alert")
+      .filter({ hasText: "A verificação de segurança da sessão falhou." }),
+  ).toHaveText(/A verificação de segurança da sessão falhou\. Recarregue a página/);
   expect(fakeApi.account.csrfFailures).toEqual(["POST /auth/logout"]);
   await expect(page).toHaveURL(/\/acesso$/);
   expect((await context.cookies()).map((cookie) => cookie.name)).toEqual(["__Host-gs_session"]);

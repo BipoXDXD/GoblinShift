@@ -701,6 +701,8 @@ export interface components {
             id: string;
             /** Display Name */
             display_name: string;
+            /** @description O provedor de login da conta: a reautenticação oferece só ele. Nulo na conta do operador, que não entra pelo navegador. */
+            provider: components["schemas"]["ProviderName"] | null;
             /** Scopes */
             scopes: components["schemas"]["Scope"][];
             /**
@@ -834,6 +836,11 @@ export interface components {
             /** Total */
             total: number;
         };
+        /**
+         * ProviderName
+         * @enum {string}
+         */
+        ProviderName: "google" | "github";
         /** ReceivedContent */
         ReceivedContent: {
             /**
@@ -1961,7 +1968,7 @@ export interface operations {
                         name: string;
                         /**
                          * Size
-                         * @description Bytes: até 32 MiB, ou 256 MiB para vídeo (.mp4, .mov, .webm); o lote soma até 512 MiB.
+                         * @description Bytes: até 50 MiB, ou 256 MiB para vídeo (.mp4, .mov, .webm); o lote soma até 512 MiB.
                          */
                         size: number;
                     }[];

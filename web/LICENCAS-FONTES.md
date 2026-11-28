@@ -109,3 +109,15 @@ DAMAGES, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING
 FROM, OUT OF THE USE OR INABILITY TO USE THE FONT SOFTWARE OR FROM
 OTHER DEALINGS IN THE FONT SOFTWARE.
 ```
+
+## Arquivos de exemplo da Bancada
+
+Os arquivos de `src/workbench/samples/` alimentam o botão "Testar com arquivo de exemplo" de cada Bancada (decisão D4 do plano de paridade da plataforma). Todos são feitos pelo próprio projeto, por `scripts/make_samples.py`, e ficam sob **CC0 1.0** (domínio público, <https://creativecommons.org/publicdomain/zero/1.0/>): podem ser baixados, alterados e redistribuídos sem aviso. O teste `tests/test_make_samples.py` confere que gerar de novo não muda os bytes (o vídeo é conferido pelo `ffprobe`, porque o ffmpeg muda o fluxo entre versões) e que cada arquivo tem no máximo 200 KB.
+
+| Arquivo                           | Receita         | Origem                                                                                         |
+| --------------------------------- | --------------- | ---------------------------------------------------------------------------------------------- |
+| `exemplo-clientes.csv`            | CSV Janitor     | Texto escrito no script: espaços nas pontas, linhas duplicadas e a coluna `observacao` vazia   |
+| `exemplo-oficina.jpg`             | Image Forge     | A Rúbia do elenco (`src/assets/art/goblins/rubia-1280w.webp`) sobre um degradê, em 2400 × 1600 |
+| `exemplo-downloads/` (6 arquivos) | Downloads Detox | JPEG, PNG, CSV, TXT e ZIP desenhados pelo script; `estoque(1).csv` é cópia de `estoque.csv`    |
+| `exemplo-a.pdf` e `exemplo-b.pdf` | PDF Press       | 2 e 3 páginas geradas com o pikepdf, com a Helvetica padrão do PDF (nada embutido)             |
+| `exemplo-clipe.webm`              | Media Mill      | 3 s de `testsrc` e um seno de 440 Hz, gerados pelo ffmpeg (VP8 e Opus)                         |

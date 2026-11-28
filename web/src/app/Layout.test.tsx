@@ -255,6 +255,35 @@ describe("Layout: login recusado", () => {
     expect(screen.queryByText(new RegExp(REF))).toBeNull();
   });
 
+  it("?login_error=reauth_stale mostra como sair do Google", async () => {
+    setup(() => jsonResponse(meBody()), `/?login_error=reauth_stale#ref=${REF}`);
+
+    const alert = await screen.findByRole("alert");
+    expect(alert).toHaveTextContent(
+      "O Google confirmou sua conta sem pedir a senha, então a confirmação não vale. Saia da conta Google neste navegador e entre de novo.",
+    );
+    expect(within(alert).getByText(`Código do pedido para suporte: ${REF}`)).toBeVisible();
+    expect(alert).not.toHaveTextContent(/Não foi possível entrar/);
+  });
+
+  it("?login_error=failed continua com a mensagem genérica", async () => {
+    setup(() => problemResponse(401, "AUTHENTICATION_REQUIRED"), "/?login_error=failed");
+
+    const alert = await screen.findByRole("alert");
+    expect(alert).toHaveTextContent(/^Não foi possível entrar\./);
+    expect(alert).not.toHaveTextContent(/Google confirmou/);
+  });
+
+  it("o aviso de reauth_stale também toma o foco inicial", async () => {
+    setup(() => jsonResponse(meBody()), "/?login_error=reauth_stale");
+
+    const alert = await screen.findByRole("alert");
+    await screen.findByRole("heading", { level: 1, name: HOME_TITLE });
+    await act(() => Promise.resolve());
+
+    expect(alert).toHaveFocus();
+  });
+
   it.each(["/?login_error=outro", "/?login_error=", "/"])(
     "%s não mostra erro de login",
     async (path) => {

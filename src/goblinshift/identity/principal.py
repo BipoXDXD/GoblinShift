@@ -36,8 +36,8 @@ class Principal:
     """Credencial já autenticada: sessão web ou chave de API.
 
     A sessão usa as permissões da conta, isto é, todos os escopos (1.6); a chave, só os seus.
-    `session_id` e `authenticated_at` (login no provedor, base da autenticação recente de 10 min)
-    existem só na sessão.
+    `session_id` e `authenticated_at` (hora do login no provedor, base só da autenticação recente
+    de 10 min; o teto absoluto conta da abertura da sessão) existem só na sessão.
     """
 
     owner_id: UUID
