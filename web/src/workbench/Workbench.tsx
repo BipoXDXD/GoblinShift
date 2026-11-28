@@ -303,7 +303,9 @@ export function Workbench({
               }}
               notice={pickNotice?.tone === "info" ? pickNotice.message : null}
               extraAction={
-                entries.length === 0 && (
+                // Com o compartilhado à espera da decisão, a amostra iria no mesmo lote.
+                entries.length === 0 &&
+                shared.pending.length === 0 && (
                   <Button
                     type="button"
                     variant="secondary"
