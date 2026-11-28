@@ -136,8 +136,7 @@ CAUSE_COLUMNS: tuple[str, ...] = (
     "maintenance_missing_governor_tripped",
     "maintenance_objects_marked_missing",
     "maintenance_objects_missing_unreadable",
-    "maintenance_purge_files_not_removed",
-    "maintenance_candidates_left_on_disk",
+    "maintenance_file_removals_pending",
     "maintenance_missing_sweep_failed",
     "maintenance_tmp_parts_sweep_failed",
     "maintenance_failed_cycles",
@@ -247,8 +246,8 @@ SPAN_CAUSES: tuple[_SpanCause, ...] = (
     ),
     _SpanCause(
         "causa-arquivos-nao-removidos",
-        "Arquivo ficou no disco depois de a exclusão ser confirmada no banco, e nada repete a "
-        "remoção. O log do processo traz a chave; veja o runbook.",
+        "Arquivo segue no disco depois de a exclusão ser confirmada no banco: a remoção pela "
+        "outbox falhou em três voltas ou mais. O log do processo traz a chave; veja o runbook.",
         period_minutes=10,
         silence_minutes=180,
         destination=DestinationKey.WARNING,

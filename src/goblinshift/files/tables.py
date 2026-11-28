@@ -202,3 +202,12 @@ transfer_slot = Table(
     Index(None, "owner_id"),
     CheckConstraint("direction IN ('upload', 'download')", name="direction"),
 )
+
+# Outbox de remoção (#442, 17b): a chave entra na mesma transação que tira o arquivo de uso e sai
+# depois que o arquivo deixa o disco. A manutenção repete o que ficou (`retry_file_removals`).
+file_removal = Table(
+    "file_removal",
+    metadata,
+    Column("storage_key", Text, primary_key=True),
+    Column("requested_at", DateTime(timezone=True), nullable=False, server_default=func.now()),
+)

@@ -46,6 +46,7 @@ STEPS: dict[str, dict[str, int]] = {
     "expire_unused_uploads": {"unused_uploads_expired": 21},
     "expire_artifacts": {"artifacts_expired": 22},
     "purge_deleted_objects": {"objects_purged": 7, "bytes_purged": 23, "purge_limit_reached": 1},
+    "retry_file_removals": {"file_removals_retried": 35, "file_removals_retry_failed": 36},
     "reconcile_capacity": {"capacity_pools_corrected": 24, "capacity_objects_adopted": 25},
     "delete_expired_idempotency_records": {"idempotency_records_removed": 26},
     "forget_upload_request_keys": {"upload_request_keys_forgotten": 33},

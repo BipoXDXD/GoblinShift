@@ -43,7 +43,11 @@ from goblinshift.files.missing import (
     sweep_missing_objects,
 )
 from goblinshift.files.objects import holders_with_open_uses, release_expired_downloads
-from goblinshift.files.retention import file_backlog, remove_file_after_commit
+from goblinshift.files.retention import (
+    file_backlog,
+    file_removals_pending,
+    remove_files_after_commit,
+)
 from goblinshift.files.states import HolderKind
 from goblinshift.files.storage import FileStorage, ObjectTamperedError
 from goblinshift.platform.telemetry import exception_fields
@@ -106,6 +110,9 @@ DOWNLOAD_HOLDS_RELEASED = "download_holds_released"
 # cannot_connect_now): o banco não vai responder ao passo seguinte desta volta.
 _CONNECTION_EXCEPTION_CLASS = "08"
 _SERVER_STOPPING_SQLSTATES = frozenset({"57P01", "57P02", "57P03"})
+# Idade mínima da linha da outbox de remoção antes da repetição: a remoção em curso, entre o commit
+# de quem registrou a chave e o `unlink`, termina bem antes disso.
+FILE_REMOVAL_RETRY_AFTER = timedelta(minutes=1)
 
 
 @dataclass(frozen=True)
@@ -263,8 +270,8 @@ class Maintenance:
         self._candidates_left_on_disk = 0
         # Arquivos que a retenção tirou de uso e não conseguiu remover do disco no ciclo em curso.
         # Em atributo porque vêm de dois passos (uploads incompletos e expurgo): a contagem de um
-        # não some se o outro falhar. Com o banco já confirmado, nada repete a remoção: o alerta de
-        # causa lê isto (3.7).
+        # não some se o outro falhar. A chave fica na outbox, e `retry_file_removals` a repete nas
+        # voltas seguintes; o alerta de causa lê o que continua pendente (`file_removals_pending`).
         self._files_left_on_disk = 0
 
     def run_cycle(self, should_stop: Callable[[], bool] = _never) -> dict[str, int]:
@@ -329,6 +336,7 @@ class Maintenance:
             _Step("expire_unused_uploads", self.expire_unused_uploads),
             _Step("expire_artifacts", self.expire_artifacts),
             _Step("purge_deleted_objects", self.purge_deleted_objects),
+            _Step("retry_file_removals", self.retry_file_removals),
             # Depois do expurgo: o que acabou de ser liberado já sai das somas dos pools.
             _Step("reconcile_capacity", self.reconcile_capacity),
             # A ordem importa: a Run sai antes das linhas de arquivos que o histórico dela
@@ -594,9 +602,9 @@ class Maintenance:
             )
             if keys is None:
                 continue
-            for key in keys:
-                if not remove_file_after_commit(self._storage, key):
-                    self._candidates_left_on_disk += 1
+            with self._factory() as session:
+                left = remove_files_after_commit(session, self._storage, keys)
+            self._candidates_left_on_disk += len(left)
             discarded += 1
         return {"candidates_discarded": discarded}
 
@@ -699,6 +707,20 @@ class Maintenance:
             "objects_purged": report.objects,
             "bytes_purged": report.bytes,
             "purge_limit_reached": int(report.limit_reached),
+        }
+
+    def retry_file_removals(self) -> dict[str, int]:
+        """Repete a remoção do que ficou na outbox: queda ou recusa do disco depois do commit."""
+        with self._factory() as session:
+            retry = file_retention.retry_file_removals(
+                session,
+                self._storage,
+                older_than=FILE_REMOVAL_RETRY_AFTER,
+                limit=self._config.retention_batch_size,
+            )
+        return {
+            "file_removals_retried": retry.removed,
+            "file_removals_retry_failed": len(retry.failed_keys),
         }
 
     def reconcile_capacity(self) -> dict[str, int]:
@@ -886,6 +908,7 @@ class Maintenance:
             return {
                 **history_backlog(session, now),
                 **file_backlog(session, now),
+                "file_removals_pending": file_removals_pending(session),
                 "reservations_to_remove": capacity.released_backlog(session, now),
                 "runs_stuck_stopping": stuck,
                 "storage_global_reserved_bytes": storage.storage_reserved_bytes,

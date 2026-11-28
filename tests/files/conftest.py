@@ -17,7 +17,9 @@ def factory(db_settings: Settings) -> Iterator[sessionmaker[Session]]:
     run_migrations(db_settings, "head")
     engine = make_engine(db_settings)
     with engine.begin() as conn:
-        conn.execute(text("TRUNCATE app_user, stored_object RESTART IDENTITY CASCADE"))
+        conn.execute(
+            text("TRUNCATE app_user, stored_object, file_removal RESTART IDENTITY CASCADE")
+        )
         restore_capacity_seed(conn)
     yield make_session_factory(engine)
     engine.dispose()
