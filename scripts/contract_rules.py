@@ -224,12 +224,14 @@ _RULES = (
         "VALIDATION_FAILED",
         _only_errors(("body.items", "invalid")),
     ),
-    # O conteúdo tem de ter o tamanho declarado na intenção, que a spec do PUT não conhece.
+    # O conteúdo tem de ter o tamanho declarado na intenção, que a spec do PUT não conhece; acima de
+    # `MAX_FILE_BYTES` (só vídeo), também a assinatura de MP4, MOV ou WebM, que bytes gerados
+    # ao acaso não têm.
     _Rule(
         "PUT /api/v1/uploads/{upload_id}/content",
         _UNPROCESSABLE,
         "VALIDATION_FAILED",
-        _only_errors(("body", "size_mismatch")),
+        _only_errors(("body", "size_mismatch"), ("body", "signature_mismatch")),
     ),
     _Rule(
         "PUT /api/v1/uploads/{upload_id}/content",

@@ -11,6 +11,7 @@ from fastapi.testclient import TestClient
 from sqlalchemy import func, update
 from sqlalchemy.orm import Session, sessionmaker
 
+from goblinshift.files.limits import MAX_FILE_BYTES
 from goblinshift.files.retention import NAME_AFTER, anonymize_deleted_uploads, expire_unused_uploads
 from goblinshift.files.states import TransferDirection
 from goblinshift.files.tables import upload
@@ -294,6 +295,21 @@ def test_corpo_menor_que_o_declarado_responde_422_e_falha_o_upload(
 
     body = assert_problem(response, 422, "VALIDATION_FAILED")
     assert [(e["field"], e["code"]) for e in body["errors"]] == [("body", "size_mismatch")]
+    assert client.get(upload_url(item), headers=auth).json()["state"] == "failed"
+
+
+def test_put_de_mp4_grande_que_nao_e_video_da_422_signature_mismatch(
+    client: TestClient, factory: sessionmaker[Session]
+) -> None:
+    _, auth = new_account(factory)
+    item = create_upload(client, auth, name="clip.mp4", size=MAX_FILE_BYTES + 1)
+
+    response = client.put(
+        item["content"]["url"], content=b"\x00" * 100, headers={**auth, **OCTET_STREAM}
+    )
+
+    body = assert_problem(response, 422, "VALIDATION_FAILED")
+    assert [(e["field"], e["code"]) for e in body["errors"]] == [("body", "signature_mismatch")]
     assert client.get(upload_url(item), headers=auth).json()["state"] == "failed"
 
 

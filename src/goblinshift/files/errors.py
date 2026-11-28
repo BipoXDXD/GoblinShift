@@ -98,6 +98,19 @@ class UploadContentTooLargeError(UploadSizeMismatchError):
     """
 
 
+class UploadSignatureMismatchError(FilesError):
+    """Acima do teto comum, o conteúdo não é MP4, MOV nem WebM pela assinatura (→ 422).
+
+    Só vídeo usa o teto maior, e a extensão declarada é indício, não validação (3.6). O upload
+    terminou `failed`. Não é subclasse do erro de tamanho: o tamanho pode até bater.
+    """
+
+    def __init__(self) -> None:
+        super().__init__(
+            "conteúdo não é MP4, MOV nem WebM pela assinatura; o upload terminou failed"
+        )
+
+
 class InputNotAvailableError(FilesError):
     """Algum upload citado não está disponível (→ 422 `INPUT_NOT_AVAILABLE`).
 
