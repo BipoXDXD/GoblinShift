@@ -11,9 +11,11 @@ from goblinshift.processing.csv_janitor import (
     Filter,
     FilterOp,
     FormulaGuard,
+    InputEncoding,
     InvalidParametersError,
     Params,
     params_from_mapping,
+    params_v2_from_mapping,
 )
 
 
@@ -110,3 +112,42 @@ def test_combinacoes_invalidas_sao_recusadas_antes_de_ler_tabelas(
 
 def test_cinco_filtros_sao_aceitos() -> None:
     assert len(Params(filters=(Filter("a", FilterOp.IS_EMPTY),) * 5).filters) == 5
+
+
+@pytest.mark.parametrize(
+    "raw",
+    [{"input_encoding": "latin-1"}, {"output_bom": True}, {"collapse_whitespace_columns": []}],
+)
+def test_parser_da_v1_recusa_opcoes_da_v2(raw: dict[str, object]) -> None:
+    with pytest.raises(InvalidParametersError, match="opções desconhecidas"):
+        params_from_mapping(raw)
+
+
+def test_parser_da_v2_converte_as_opcoes_novas() -> None:
+    raw: dict[str, object] = {
+        "input_encoding": "latin-1",
+        "output_bom": True,
+        "collapse_whitespace_columns": ["a", "b"],
+        "trim_columns": ["a"],
+    }
+
+    assert params_v2_from_mapping(raw) == Params(
+        input_encoding=InputEncoding.LATIN_1,
+        output_bom=True,
+        collapse_whitespace_columns=("a", "b"),
+        trim_columns=("a",),
+    )
+
+
+@pytest.mark.parametrize(
+    "raw",
+    [
+        {"output_bom": "true"},
+        {"input_encoding": "utf-16"},
+        {"collapse_whitespace_columns": "a"},
+        {"inventado": 1},
+    ],
+)
+def test_parser_da_v2_recusa_tipo_errado_e_opcao_desconhecida(raw: dict[str, object]) -> None:
+    with pytest.raises(InvalidParametersError):
+        params_v2_from_mapping(raw)

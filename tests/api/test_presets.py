@@ -119,9 +119,10 @@ def test_criar_responde_201_com_location_etag_e_o_corpo_do_contrato(
 ) -> None:
     account = Account(factory)
 
-    response = client.post(
-        PRESETS, json=preset_body("Mensal", trim_columns=["a"]), headers=account.headers
-    )
+    # A versão atual: a v1 do csv-janitor está deprecated e traria o `Sunset`.
+    payload = {**preset_body("Mensal", trim_columns=["a"]), "recipe_version": 2}
+
+    response = client.post(PRESETS, json=payload, headers=account.headers)
 
     assert response.status_code == 201, response.text
     body = response.json()

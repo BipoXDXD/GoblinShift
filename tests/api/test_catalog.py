@@ -22,17 +22,21 @@ CATALOG_PATH = "/api/v1/catalog"
 VERSION_KEYS = {"version", "status", "limits", "defaults", "parameters_schema"}
 DETAIL_KEYS = {"recipe_id", *VERSION_KEYS, "sunset_at"}
 SUNSET = datetime(2027, 1, 15, 12, 30, tzinfo=UTC)
+# O csv-janitor v1 como atual: base dos catálogos falsos destes testes, que montam cada estado.
+CSV_JANITOR_V1_CURRENT = replace(
+    CATALOG.get_version("csv-janitor", 1), status=VersionStatus.CURRENT, sunset_at=None
+)
 
 
 def bearer(token: str) -> dict[str, str]:
     return {"Authorization": f"Bearer {token}"}
 
 
-def version_of(body: dict[str, object], recipe_id: str) -> dict[str, object]:
+def version_of(body: dict[str, object], recipe_id: str, number: int = 1) -> dict[str, object]:
     recipes = body["recipes"]
     assert isinstance(recipes, list)
     [recipe] = [recipe for recipe in recipes if recipe["recipe_id"] == recipe_id]
-    [version] = recipe["versions"]
+    [version] = [version for version in recipe["versions"] if version["version"] == number]
     assert isinstance(version, dict)
     return version
 
@@ -99,15 +103,15 @@ def test_limites_do_detox_incluem_o_teto_de_bytes_do_lote() -> None:
 
 def test_schema_dos_parametros_e_o_mesmo_da_variante_de_post_runs() -> None:
     body = catalog_response(CATALOG).model_dump(mode="json")
-    schema = version_of(body, "csv-janitor")["parameters_schema"]
+    schema = version_of(body, "csv-janitor", 2)["parameters_schema"]
 
-    assert schema == CATALOG.get_version("csv-janitor", 1).parameters_schema()
+    assert schema == CATALOG.get_version("csv-janitor", 2).parameters_schema()
     assert isinstance(schema, dict)
     assert "$defs" not in schema
 
 
 def test_versao_retirada_fica_fora_e_a_deprecated_aparece_com_o_estado() -> None:
-    v1 = CATALOG.get_version("csv-janitor", 1)
+    v1 = CSV_JANITOR_V1_CURRENT
     catalog = Catalog(
         [
             replace(v1, status=VersionStatus.RETIRED),
@@ -125,8 +129,18 @@ def test_versao_retirada_fica_fora_e_a_deprecated_aparece_com_o_estado() -> None
     ]
 
 
+def test_csv_janitor_lista_a_v1_deprecated_e_a_v2_atual() -> None:
+    body = catalog_response(CATALOG).model_dump(mode="json")
+
+    [recipe] = [recipe for recipe in body["recipes"] if recipe["recipe_id"] == "csv-janitor"]
+    assert [(v["version"], v["status"]) for v in recipe["versions"]] == [
+        (1, "deprecated"),
+        (2, "current"),
+    ]
+
+
 def test_receita_so_com_versoes_retiradas_nao_aparece() -> None:
-    v1 = CATALOG.get_version("csv-janitor", 1)
+    v1 = CSV_JANITOR_V1_CURRENT
     catalog = Catalog([replace(v1, status=VersionStatus.RETIRED)])
 
     assert catalog_response(catalog).model_dump(mode="json") == {"recipes": []}
@@ -248,7 +262,7 @@ def version_path(recipe_id: str, version: int | str) -> str:
 
 def with_deprecated_csv_janitor(monkeypatch: pytest.MonkeyPatch) -> None:
     """Catálogo da rota com o csv-janitor v1 deprecated e uma v2 atual."""
-    v1 = CATALOG.get_version("csv-janitor", 1)
+    v1 = CSV_JANITOR_V1_CURRENT
     catalog = Catalog(
         [
             replace(v1, status=VersionStatus.DEPRECATED, sunset_at=SUNSET),
@@ -279,7 +293,7 @@ def test_detalhe_tem_os_mesmos_dados_da_versao_na_listagem() -> None:
 
 
 def test_detalhe_de_versao_deprecated_traz_a_data_de_desligamento() -> None:
-    v1 = CATALOG.get_version("csv-janitor", 1)
+    v1 = CSV_JANITOR_V1_CURRENT
     deprecated = replace(v1, status=VersionStatus.DEPRECATED, sunset_at=SUNSET)
 
     body = version_detail_response(deprecated).model_dump(mode="json")
@@ -289,7 +303,7 @@ def test_detalhe_de_versao_deprecated_traz_a_data_de_desligamento() -> None:
 
 
 def test_sunset_em_http_date_so_para_versao_deprecated() -> None:
-    v1 = CATALOG.get_version("csv-janitor", 1)
+    v1 = CSV_JANITOR_V1_CURRENT
 
     assert deprecation_headers(v1) == {}
     assert deprecation_headers(replace(v1, status=VersionStatus.DEPRECATED, sunset_at=SUNSET)) == {
@@ -298,7 +312,7 @@ def test_sunset_em_http_date_so_para_versao_deprecated() -> None:
 
 
 def test_sunset_converte_a_data_para_gmt() -> None:
-    v1 = CATALOG.get_version("csv-janitor", 1)
+    v1 = CSV_JANITOR_V1_CURRENT
     brasilia = datetime(2027, 1, 15, 9, 30, tzinfo=timezone(timedelta(hours=-3)))
 
     headers = deprecation_headers(replace(v1, status=VersionStatus.DEPRECATED, sunset_at=brasilia))
@@ -312,11 +326,11 @@ def test_get_detalhe_responde_200_com_o_corpo_da_versao(
 ) -> None:
     issued = new_key(factory, new_user(factory), scopes=frozenset({Scope.FILES_READ}))
 
-    response = client.get(version_path("csv-janitor", 1), headers=bearer(issued.token))
+    response = client.get(version_path("csv-janitor", 2), headers=bearer(issued.token))
 
     assert response.status_code == 200, response.text
     assert response.json() == version_detail_response(
-        CATALOG.get_version("csv-janitor", 1)
+        CATALOG.get_version("csv-janitor", 2)
     ).model_dump(mode="json")
     assert "sunset" not in response.headers
     assert response.headers["cache-control"] == "private, no-cache"
@@ -343,7 +357,7 @@ def test_get_detalhe_de_versao_deprecated_traz_o_header_sunset(
 def test_get_detalhe_de_versao_retirada_continua_legivel(
     client: TestClient, factory: sessionmaker[Session], monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    v1 = CATALOG.get_version("csv-janitor", 1)
+    v1 = CSV_JANITOR_V1_CURRENT
     retired = replace(v1, status=VersionStatus.RETIRED, sunset_at=SUNSET)
     monkeypatch.setattr(catalog_route, "CATALOG", Catalog([retired]))
     issued = new_key(factory, new_user(factory))
@@ -358,7 +372,7 @@ def test_get_detalhe_de_versao_retirada_continua_legivel(
 @pytest.mark.integration
 @pytest.mark.parametrize(
     ("recipe_id", "version"),
-    [("csv-janitor", 2), ("pdf-inexistente", 1)],
+    [("csv-janitor", 3), ("pdf-inexistente", 1)],
     ids=["versao-inexistente", "receita-inexistente"],
 )
 def test_get_detalhe_inexistente_responde_404(
@@ -408,3 +422,25 @@ def test_get_detalhe_revalida_com_etag(client: TestClient, factory: sessionmaker
     assert revalidated.status_code == 304
     assert revalidated.content == b""
     assert other.headers["etag"] != first.headers["etag"]
+
+
+@pytest.mark.integration
+def test_post_runs_com_o_csv_janitor_v1_do_catalogo_real_traz_o_sunset(
+    client: TestClient, factory: sessionmaker[Session]
+) -> None:
+    issued = new_key(factory, new_user(factory))
+    payload = {"recipe_id": "csv-janitor", "recipe_version": 1, "parameters": {}}
+
+    deprecated = client.post(
+        "/api/v1/runs?validate_only=true", json=payload, headers=bearer(issued.token)
+    )
+    current = client.post(
+        "/api/v1/runs?validate_only=true",
+        json={**payload, "recipe_version": 2},
+        headers=bearer(issued.token),
+    )
+
+    assert deprecated.status_code == 200, deprecated.text
+    assert deprecated.headers["sunset"] == "Mon, 01 Mar 2027 00:00:00 GMT"
+    assert current.status_code == 200, current.text
+    assert "sunset" not in current.headers

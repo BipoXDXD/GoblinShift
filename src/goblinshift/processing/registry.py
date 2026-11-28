@@ -49,6 +49,10 @@ class _Bound[P]:
 _CSV_JANITOR_V1: _Bound[csv_janitor.Params] = _Bound(
     csv_janitor.params_from_mapping, csv_janitor_recipe.CsvJanitor()
 )
+# A mesma receita nas duas versões; muda só o parser, e o da v1 recusa as opções da v2.
+_CSV_JANITOR_V2: _Bound[csv_janitor.Params] = _Bound(
+    csv_janitor.params_v2_from_mapping, csv_janitor_recipe.CsvJanitor()
+)
 _IMAGE_FORGE_V1: _Bound[image_forge.Params] = _Bound(
     image_forge.params_from_mapping, ImageForgeV1()
 )
@@ -62,6 +66,7 @@ _PDF_PRESS_V1: _Bound[pdf_press.Params] = _Bound(pdf_press.params_from_mapping, 
 RECIPES: Mapping[RecipeKey, RegisteredRecipe] = MappingProxyType(
     {
         (csv_janitor_recipe.RECIPE_ID, csv_janitor_recipe.VERSION): _CSV_JANITOR_V1,
+        (csv_janitor_recipe.RECIPE_ID, csv_janitor_recipe.VERSION_2): _CSV_JANITOR_V2,
         (image_forge.RECIPE_ID, image_forge.VERSION): _IMAGE_FORGE_V1,
         (downloads_detox.RECIPE_ID, downloads_detox.VERSION): _DOWNLOADS_DETOX_V1,
         (media_mill.RECIPE_ID, media_mill.VERSION): _MEDIA_MILL_V1,

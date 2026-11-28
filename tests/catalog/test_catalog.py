@@ -26,8 +26,10 @@ from goblinshift.processing.csv_janitor import (
     Filter,
     FilterOp,
     FormulaGuard,
+    InputEncoding,
     Params,
     params_from_mapping,
+    params_v2_from_mapping,
 )
 from goblinshift.processing.registry import RECIPES
 
@@ -172,7 +174,7 @@ def test_combinacao_invalida_vira_erro_no_campo(raw: Any, location: str) -> None
 
 def test_versao_inexistente_e_recusada() -> None:
     with pytest.raises(UnknownRecipeVersionError):
-        CATALOG.resolve("csv-janitor", 2, {})
+        CATALOG.resolve("csv-janitor", 3, {})
     with pytest.raises(UnknownRecipeVersionError):
         CATALOG.get_version("nada", 1)
 
@@ -187,7 +189,7 @@ def test_versao_retirada_continua_legivel_mas_nao_resolve() -> None:
 
 
 def test_versao_atual_publica_limites_efetivos() -> None:
-    version = CATALOG.get_version("csv-janitor", 1)
+    version = CATALOG.get_version("csv-janitor", 2)
 
     assert version.status is VersionStatus.CURRENT
     assert version.limits == {
@@ -235,11 +237,12 @@ def test_schema_da_variante_fixa_receita_e_versao_e_recusa_campos_extras() -> No
 # --- Receitas da fatia 5 -------------------------------------------------------------------
 
 
-def test_catalogo_lista_as_receitas_implementadas_na_versao_1() -> None:
+def test_catalogo_lista_as_receitas_implementadas() -> None:
     keys = {(version.recipe_id, version.version) for version in CATALOG.list_versions()}
 
     assert keys == {
         ("csv-janitor", 1),
+        ("csv-janitor", 2),
         ("image-forge", 1),
         ("downloads-detox", 1),
         ("pdf-press", 1),
@@ -311,7 +314,7 @@ SUNSET = datetime(2027, 1, 15, tzinfo=UTC)
 
 
 def test_versao_deprecated_carrega_a_data_de_desligamento() -> None:
-    current = CATALOG.get_version("csv-janitor", 1)
+    current = CATALOG.get_version("csv-janitor", 2)
 
     deprecated = replace(current, status=VersionStatus.DEPRECATED, sunset_at=SUNSET)
 
@@ -319,21 +322,21 @@ def test_versao_deprecated_carrega_a_data_de_desligamento() -> None:
 
 
 def test_versao_deprecated_sem_data_de_desligamento_e_recusada() -> None:
-    current = CATALOG.get_version("csv-janitor", 1)
+    current = CATALOG.get_version("csv-janitor", 2)
 
     with pytest.raises(ValueError, match="sunset_at"):
         replace(current, status=VersionStatus.DEPRECATED)
 
 
 def test_versao_atual_nao_tem_data_de_desligamento() -> None:
-    current = CATALOG.get_version("csv-janitor", 1)
+    current = CATALOG.get_version("csv-janitor", 2)
 
     with pytest.raises(ValueError, match="sunset_at"):
         replace(current, sunset_at=SUNSET)
 
 
 def test_versao_retirada_pode_guardar_a_data_em_que_saiu() -> None:
-    current = CATALOG.get_version("csv-janitor", 1)
+    current = CATALOG.get_version("csv-janitor", 2)
 
     retired = replace(current, status=VersionStatus.RETIRED, sunset_at=SUNSET)
 
@@ -341,7 +344,7 @@ def test_versao_retirada_pode_guardar_a_data_em_que_saiu() -> None:
 
 
 def test_data_de_desligamento_sem_fuso_e_recusada() -> None:
-    current = CATALOG.get_version("csv-janitor", 1)
+    current = CATALOG.get_version("csv-janitor", 2)
 
     with pytest.raises(ValueError, match="fuso"):
         replace(current, status=VersionStatus.DEPRECATED, sunset_at=datetime(2027, 1, 15))
@@ -357,3 +360,64 @@ def test_detox_aceita_com_preserve_o_name_prefix_default_enviado() -> None:
 def test_detox_recusa_com_preserve_outro_name_prefix() -> None:
     with pytest.raises(InvalidParametersError):
         CATALOG.resolve("downloads-detox", 1, {"name_mode": "preserve", "name_prefix": "doc"})
+
+
+# --- csv-janitor v2 (plano de paridade, Tarefa 5) --------------------------------------------
+
+
+def test_csv_janitor_v2_resolve_os_defaults_novos() -> None:
+    resolved = CATALOG.resolve("csv-janitor", 2, {})
+
+    assert resolved == {
+        **DEFAULTS,
+        "collapse_whitespace_columns": [],
+        "input_encoding": "utf-8",
+        "output_bom": False,
+    }
+
+
+def test_csv_janitor_v1_recusa_opcao_da_v2_no_campo() -> None:
+    with pytest.raises(InvalidParametersError) as error:
+        CATALOG.resolve("csv-janitor", 1, {"output_bom": True})
+
+    assert [field.location for field in error.value.errors] == [("output_bom",)]
+
+
+def test_csv_janitor_v1_fica_deprecated_com_sunset_e_v2_e_a_atual() -> None:
+    v1 = CATALOG.get_version("csv-janitor", 1)
+    v2 = CATALOG.get_version("csv-janitor", 2)
+
+    assert v1.status is VersionStatus.DEPRECATED
+    assert v1.sunset_at == datetime(2027, 3, 1, tzinfo=UTC)
+    assert v2.status is VersionStatus.CURRENT
+    assert v2.limits == v1.limits
+
+
+def test_csv_janitor_v2_vira_os_params_da_biblioteca() -> None:
+    raw = {
+        "input_encoding": "windows-1252",
+        "output_bom": True,
+        "collapse_whitespace_columns": ["a"],
+    }
+
+    assert params_v2_from_mapping(CATALOG.resolve("csv-janitor", 2, raw)) == Params(
+        input_encoding=InputEncoding.WINDOWS_1252,
+        output_bom=True,
+        collapse_whitespace_columns=("a",),
+    )
+
+
+@pytest.mark.parametrize(
+    ("raw", "location"),
+    [
+        ({"input_encoding": "ascii"}, "input_encoding"),
+        ({"output_bom": "sim"}, "output_bom"),
+        ({"collapse_whitespace_columns": ["a", "a"]}, "collapse_whitespace_columns"),
+        ({"collapse_whitespace_columns": [""]}, "collapse_whitespace_columns.0"),
+    ],
+)
+def test_csv_janitor_v2_recusa_opcao_nova_invalida_no_campo(raw: Any, location: str) -> None:
+    with pytest.raises(InvalidParametersError) as error:
+        CATALOG.resolve("csv-janitor", 2, raw)
+
+    assert [".".join(field.location) for field in error.value.errors] == [location]

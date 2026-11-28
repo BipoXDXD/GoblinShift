@@ -16,6 +16,7 @@ from goblinshift.processing.csv_janitor.params import (
     InvalidParametersError,
     Params,
     params_from_mapping,
+    params_v2_from_mapping,
 )
 from goblinshift.processing.csv_janitor.results import (
     Counts,
@@ -45,4 +46,5 @@ __all__ = [
     "WarningCode",
     "clean_table",
     "params_from_mapping",
+    "params_v2_from_mapping",
 ]

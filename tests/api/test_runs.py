@@ -443,10 +443,9 @@ def test_versao_atual_nao_traz_o_header_sunset(
     client: TestClient, factory: sessionmaker[Session], storage: FileStorage
 ) -> None:
     account = Account(factory)
+    payload = {**body(ready_inputs(factory, storage, account.id)), "recipe_version": 2}
 
-    response = post_run(
-        client, account, body(ready_inputs(factory, storage, account.id)), str(uuid.uuid4())
-    )
+    response = post_run(client, account, payload, str(uuid.uuid4()))
 
     assert response.status_code == 202
     assert "sunset" not in response.headers
@@ -1300,12 +1299,16 @@ def test_openapi_publica_a_variante_do_catalogo(client: TestClient) -> None:
     operation = spec["paths"][RUNS]["post"]
     schema = operation["requestBody"]["content"]["application/json"]["schema"]
     variants = schema["allOf"][1]["oneOf"]
-    assert [v["properties"]["recipe_id"]["const"] for v in variants] == [
-        "csv-janitor",
-        "image-forge",
-        "downloads-detox",
-        "pdf-press",
-        "media-mill",
+    assert [
+        (v["properties"]["recipe_id"]["const"], v["properties"]["recipe_version"]["const"])
+        for v in variants
+    ] == [
+        ("csv-janitor", 1),
+        ("csv-janitor", 2),
+        ("image-forge", 1),
+        ("downloads-detox", 1),
+        ("pdf-press", 1),
+        ("media-mill", 1),
     ]
     assert schema["unevaluatedProperties"] is False
     assert operation["operationId"] == "createRun"

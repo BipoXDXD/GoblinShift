@@ -139,11 +139,26 @@ _KNOWN_OPTIONS = frozenset(
         "formula_guard",
     }
 )
+# A v2 aceita tudo da v1 e mais estas; a v1 continua recusando-as (versão congelada, 1.6).
+_KNOWN_OPTIONS_V2 = _KNOWN_OPTIONS | {
+    "input_encoding",
+    "output_bom",
+    "collapse_whitespace_columns",
+}
 
 
 def params_from_mapping(raw: Mapping[str, object]) -> Params:
-    """Converte a configuração decodificada de JSON; recusa campos desconhecidos e tipos errados."""
-    if not set(raw) <= _KNOWN_OPTIONS:
+    """Configuração da v1 decodificada de JSON; recusa campos desconhecidos e tipos errados."""
+    return _build(raw, _KNOWN_OPTIONS)
+
+
+def params_v2_from_mapping(raw: Mapping[str, object]) -> Params:
+    """Configuração da v2: a da v1 mais codificação de entrada, BOM na saída e colapso."""
+    return _build(raw, _KNOWN_OPTIONS_V2)
+
+
+def _build(raw: Mapping[str, object], known: frozenset[str]) -> Params:
+    if not set(raw) <= known:
         raise InvalidParametersError("opções desconhecidas")
     output_columns = raw.get("output_columns")
     return Params(
@@ -159,6 +174,11 @@ def params_from_mapping(raw: Mapping[str, object]) -> Params:
         if output_columns is None
         else _strings(output_columns, "output_columns"),
         formula_guard=_enum(FormulaGuard, raw.get("formula_guard", "none"), "formula_guard"),
+        input_encoding=_enum(InputEncoding, raw.get("input_encoding", "utf-8"), "input_encoding"),
+        output_bom=_bool(raw.get("output_bom", False), "output_bom"),
+        collapse_whitespace_columns=_strings(
+            raw.get("collapse_whitespace_columns", []), "collapse_whitespace_columns"
+        ),
     )
 
 
@@ -198,6 +218,12 @@ def _enum[E: StrEnum](kind: type[E], raw: object, option: str) -> E:
 def _string(raw: object, option: str) -> str:
     if not isinstance(raw, str):
         raise InvalidParametersError(f"{option} deve ser texto")
+    return raw
+
+
+def _bool(raw: object, option: str) -> bool:
+    if not isinstance(raw, bool):
+        raise InvalidParametersError(f"{option} deve ser verdadeiro ou falso")
     return raw
 
 

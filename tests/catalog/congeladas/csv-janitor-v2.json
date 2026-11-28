@@ -1,0 +1,206 @@
+{
+  "defaults": {
+    "case_rules": [],
+    "collapse_whitespace_columns": [],
+    "deduplicate_by": [],
+    "filters": [],
+    "formula_guard": "none",
+    "input_delimiter": ",",
+    "input_encoding": "utf-8",
+    "output_bom": false,
+    "output_columns": null,
+    "output_delimiter": ",",
+    "trim_columns": []
+  },
+  "variant_schema": {
+    "properties": {
+      "parameters": {
+        "additionalProperties": false,
+        "properties": {
+          "case_rules": {
+            "items": {
+              "additionalProperties": false,
+              "properties": {
+                "column": {
+                  "maxLength": 1024,
+                  "minLength": 1,
+                  "type": "string"
+                },
+                "mode": {
+                  "enum": [
+                    "lower",
+                    "upper"
+                  ],
+                  "title": "CaseMode",
+                  "type": "string"
+                }
+              },
+              "required": [
+                "column",
+                "mode"
+              ],
+              "title": "CaseRuleParameters",
+              "type": "object"
+            },
+            "maxItems": 100,
+            "title": "Case Rules",
+            "type": "array"
+          },
+          "collapse_whitespace_columns": {
+            "items": {
+              "maxLength": 1024,
+              "minLength": 1,
+              "type": "string"
+            },
+            "maxItems": 100,
+            "title": "Collapse Whitespace Columns",
+            "type": "array"
+          },
+          "deduplicate_by": {
+            "items": {
+              "maxLength": 1024,
+              "minLength": 1,
+              "type": "string"
+            },
+            "maxItems": 100,
+            "title": "Deduplicate By",
+            "type": "array"
+          },
+          "filters": {
+            "items": {
+              "additionalProperties": false,
+              "properties": {
+                "column": {
+                  "maxLength": 1024,
+                  "minLength": 1,
+                  "type": "string"
+                },
+                "op": {
+                  "enum": [
+                    "eq",
+                    "ne",
+                    "contains",
+                    "is_empty"
+                  ],
+                  "title": "FilterOp",
+                  "type": "string"
+                },
+                "value": {
+                  "anyOf": [
+                    {
+                      "maxLength": 4096,
+                      "type": "string"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ],
+                  "default": null,
+                  "title": "Value"
+                }
+              },
+              "required": [
+                "column",
+                "op"
+              ],
+              "title": "FilterParameters",
+              "type": "object"
+            },
+            "maxItems": 5,
+            "title": "Filters",
+            "type": "array"
+          },
+          "formula_guard": {
+            "default": "none",
+            "enum": [
+              "none",
+              "tab_prefix"
+            ],
+            "title": "FormulaGuard",
+            "type": "string"
+          },
+          "input_delimiter": {
+            "default": ",",
+            "enum": [
+              ",",
+              ";",
+              "\t"
+            ],
+            "title": "Delimiter",
+            "type": "string"
+          },
+          "input_encoding": {
+            "default": "utf-8",
+            "description": "Codificação declarada dos arquivos de entrada; a saída é sempre UTF-8.",
+            "enum": [
+              "utf-8",
+              "windows-1252",
+              "latin-1"
+            ],
+            "title": "InputEncoding",
+            "type": "string"
+          },
+          "output_bom": {
+            "default": false,
+            "title": "Output Bom",
+            "type": "boolean"
+          },
+          "output_columns": {
+            "anyOf": [
+              {
+                "items": {
+                  "maxLength": 1024,
+                  "minLength": 1,
+                  "type": "string"
+                },
+                "maxItems": 100,
+                "minItems": 1,
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Output Columns"
+          },
+          "output_delimiter": {
+            "default": ",",
+            "enum": [
+              ",",
+              ";",
+              "\t"
+            ],
+            "title": "Delimiter",
+            "type": "string"
+          },
+          "trim_columns": {
+            "items": {
+              "maxLength": 1024,
+              "minLength": 1,
+              "type": "string"
+            },
+            "maxItems": 100,
+            "title": "Trim Columns",
+            "type": "array"
+          }
+        },
+        "title": "CsvJanitorV2Parameters",
+        "type": "object"
+      },
+      "recipe_id": {
+        "const": "csv-janitor"
+      },
+      "recipe_version": {
+        "const": 2
+      }
+    },
+    "required": [
+      "recipe_id",
+      "recipe_version",
+      "parameters"
+    ],
+    "title": "csv-janitor v2",
+    "type": "object"
+  }
+}

@@ -38,7 +38,7 @@ def test_parametro_invalido_vira_erro_no_campo_sob_parameters() -> None:
 
 def test_versao_desconhecida_vira_erro_no_campo_recipe_version() -> None:
     with pytest.raises(InvalidPresetError) as error:
-        parse_draft("x", "csv-janitor", 2, {})
+        parse_draft("x", "csv-janitor", 3, {})
 
     assert locations(error) == ["recipe_version"]
 

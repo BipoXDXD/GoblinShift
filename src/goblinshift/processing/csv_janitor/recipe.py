@@ -36,6 +36,7 @@ from goblinshift.processing.recipe import (
 
 RECIPE_ID = "csv-janitor"
 VERSION = 1
+VERSION_2 = 2
 MAX_TABLES = 5
 OUTPUT_EXTENSION = ".csv"
 FALLBACK_STEM = "tabela"

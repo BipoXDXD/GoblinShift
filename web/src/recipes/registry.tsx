@@ -34,10 +34,13 @@ export interface RecipeForm {
   readonly renderFields: (props: RecipeFormProps<RecipeId>) => ReactElement;
 }
 
+/** As versões de cada receita no contrato, num tipo mapeado para `RecipeModule` variar só em K. */
+type RecipeVersions = { readonly [K in RecipeId]: RecipeCommandFor<K>["recipe_version"] };
+
 /** O que a Bancada precisa de cada receita: o formulário escrito à mão e como apontar seus erros. */
 export interface RecipeModule<K extends RecipeId = RecipeId> {
   readonly id: K;
-  readonly version: RecipeCommandFor<K>["recipe_version"];
+  readonly version: RecipeVersions[K];
   readonly title: string;
   /** Atributo `accept` do input de arquivos; `null` aceita qualquer tipo. */
   readonly accept: string | null;

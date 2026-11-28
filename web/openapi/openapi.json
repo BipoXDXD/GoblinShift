@@ -2338,6 +2338,195 @@
                       {
                         "properties": {
                           "recipe_id": {
+                            "const": "csv-janitor"
+                          },
+                          "recipe_version": {
+                            "const": 2
+                          },
+                          "parameters": {
+                            "properties": {
+                              "input_delimiter": {
+                                "type": "string",
+                                "enum": [
+                                  ",",
+                                  ";",
+                                  "\t"
+                                ],
+                                "title": "Delimiter",
+                                "default": ","
+                              },
+                              "output_delimiter": {
+                                "type": "string",
+                                "enum": [
+                                  ",",
+                                  ";",
+                                  "\t"
+                                ],
+                                "title": "Delimiter",
+                                "default": ","
+                              },
+                              "trim_columns": {
+                                "items": {
+                                  "type": "string",
+                                  "maxLength": 1024,
+                                  "minLength": 1
+                                },
+                                "type": "array",
+                                "maxItems": 100,
+                                "title": "Trim Columns"
+                              },
+                              "case_rules": {
+                                "items": {
+                                  "properties": {
+                                    "column": {
+                                      "type": "string",
+                                      "maxLength": 1024,
+                                      "minLength": 1
+                                    },
+                                    "mode": {
+                                      "type": "string",
+                                      "enum": [
+                                        "lower",
+                                        "upper"
+                                      ],
+                                      "title": "CaseMode"
+                                    }
+                                  },
+                                  "additionalProperties": false,
+                                  "type": "object",
+                                  "required": [
+                                    "column",
+                                    "mode"
+                                  ],
+                                  "title": "CaseRuleParameters"
+                                },
+                                "type": "array",
+                                "maxItems": 100,
+                                "title": "Case Rules"
+                              },
+                              "filters": {
+                                "items": {
+                                  "properties": {
+                                    "column": {
+                                      "type": "string",
+                                      "maxLength": 1024,
+                                      "minLength": 1
+                                    },
+                                    "op": {
+                                      "type": "string",
+                                      "enum": [
+                                        "eq",
+                                        "ne",
+                                        "contains",
+                                        "is_empty"
+                                      ],
+                                      "title": "FilterOp"
+                                    },
+                                    "value": {
+                                      "anyOf": [
+                                        {
+                                          "type": "string",
+                                          "maxLength": 4096
+                                        },
+                                        {
+                                          "type": "null"
+                                        }
+                                      ],
+                                      "title": "Value"
+                                    }
+                                  },
+                                  "additionalProperties": false,
+                                  "type": "object",
+                                  "required": [
+                                    "column",
+                                    "op"
+                                  ],
+                                  "title": "FilterParameters"
+                                },
+                                "type": "array",
+                                "maxItems": 5,
+                                "title": "Filters"
+                              },
+                              "deduplicate_by": {
+                                "items": {
+                                  "type": "string",
+                                  "maxLength": 1024,
+                                  "minLength": 1
+                                },
+                                "type": "array",
+                                "maxItems": 100,
+                                "title": "Deduplicate By"
+                              },
+                              "output_columns": {
+                                "anyOf": [
+                                  {
+                                    "items": {
+                                      "type": "string",
+                                      "maxLength": 1024,
+                                      "minLength": 1
+                                    },
+                                    "type": "array",
+                                    "maxItems": 100,
+                                    "minItems": 1
+                                  },
+                                  {
+                                    "type": "null"
+                                  }
+                                ],
+                                "title": "Output Columns"
+                              },
+                              "formula_guard": {
+                                "type": "string",
+                                "enum": [
+                                  "none",
+                                  "tab_prefix"
+                                ],
+                                "title": "FormulaGuard",
+                                "default": "none"
+                              },
+                              "input_encoding": {
+                                "type": "string",
+                                "enum": [
+                                  "utf-8",
+                                  "windows-1252",
+                                  "latin-1"
+                                ],
+                                "title": "InputEncoding",
+                                "description": "Codificação declarada dos arquivos de entrada; a saída é sempre UTF-8.",
+                                "default": "utf-8"
+                              },
+                              "output_bom": {
+                                "type": "boolean",
+                                "title": "Output Bom",
+                                "default": false
+                              },
+                              "collapse_whitespace_columns": {
+                                "items": {
+                                  "type": "string",
+                                  "maxLength": 1024,
+                                  "minLength": 1
+                                },
+                                "type": "array",
+                                "maxItems": 100,
+                                "title": "Collapse Whitespace Columns"
+                              }
+                            },
+                            "additionalProperties": false,
+                            "type": "object",
+                            "title": "CsvJanitorV2Parameters"
+                          }
+                        },
+                        "type": "object",
+                        "required": [
+                          "recipe_id",
+                          "recipe_version",
+                          "parameters"
+                        ],
+                        "title": "csv-janitor v2"
+                      },
+                      {
+                        "properties": {
+                          "recipe_id": {
                             "const": "image-forge"
                           },
                           "recipe_version": {
@@ -3255,6 +3444,195 @@
                         ]
                       },
                       {
+                        "title": "csv-janitor v2",
+                        "type": "object",
+                        "properties": {
+                          "recipe_id": {
+                            "const": "csv-janitor"
+                          },
+                          "recipe_version": {
+                            "const": 2
+                          },
+                          "parameters": {
+                            "additionalProperties": false,
+                            "properties": {
+                              "input_delimiter": {
+                                "enum": [
+                                  ",",
+                                  ";",
+                                  "\t"
+                                ],
+                                "title": "Delimiter",
+                                "type": "string",
+                                "default": ","
+                              },
+                              "output_delimiter": {
+                                "enum": [
+                                  ",",
+                                  ";",
+                                  "\t"
+                                ],
+                                "title": "Delimiter",
+                                "type": "string",
+                                "default": ","
+                              },
+                              "trim_columns": {
+                                "items": {
+                                  "maxLength": 1024,
+                                  "minLength": 1,
+                                  "type": "string"
+                                },
+                                "maxItems": 100,
+                                "title": "Trim Columns",
+                                "type": "array"
+                              },
+                              "case_rules": {
+                                "items": {
+                                  "additionalProperties": false,
+                                  "properties": {
+                                    "column": {
+                                      "maxLength": 1024,
+                                      "minLength": 1,
+                                      "type": "string"
+                                    },
+                                    "mode": {
+                                      "enum": [
+                                        "lower",
+                                        "upper"
+                                      ],
+                                      "title": "CaseMode",
+                                      "type": "string"
+                                    }
+                                  },
+                                  "required": [
+                                    "column",
+                                    "mode"
+                                  ],
+                                  "title": "CaseRuleParameters",
+                                  "type": "object"
+                                },
+                                "maxItems": 100,
+                                "title": "Case Rules",
+                                "type": "array"
+                              },
+                              "filters": {
+                                "items": {
+                                  "additionalProperties": false,
+                                  "properties": {
+                                    "column": {
+                                      "maxLength": 1024,
+                                      "minLength": 1,
+                                      "type": "string"
+                                    },
+                                    "op": {
+                                      "enum": [
+                                        "eq",
+                                        "ne",
+                                        "contains",
+                                        "is_empty"
+                                      ],
+                                      "title": "FilterOp",
+                                      "type": "string"
+                                    },
+                                    "value": {
+                                      "anyOf": [
+                                        {
+                                          "maxLength": 4096,
+                                          "type": "string"
+                                        },
+                                        {
+                                          "type": "null"
+                                        }
+                                      ],
+                                      "title": "Value"
+                                    }
+                                  },
+                                  "required": [
+                                    "column",
+                                    "op"
+                                  ],
+                                  "title": "FilterParameters",
+                                  "type": "object"
+                                },
+                                "maxItems": 5,
+                                "title": "Filters",
+                                "type": "array"
+                              },
+                              "deduplicate_by": {
+                                "items": {
+                                  "maxLength": 1024,
+                                  "minLength": 1,
+                                  "type": "string"
+                                },
+                                "maxItems": 100,
+                                "title": "Deduplicate By",
+                                "type": "array"
+                              },
+                              "output_columns": {
+                                "anyOf": [
+                                  {
+                                    "items": {
+                                      "maxLength": 1024,
+                                      "minLength": 1,
+                                      "type": "string"
+                                    },
+                                    "maxItems": 100,
+                                    "minItems": 1,
+                                    "type": "array"
+                                  },
+                                  {
+                                    "type": "null"
+                                  }
+                                ],
+                                "title": "Output Columns"
+                              },
+                              "formula_guard": {
+                                "enum": [
+                                  "none",
+                                  "tab_prefix"
+                                ],
+                                "title": "FormulaGuard",
+                                "type": "string",
+                                "default": "none"
+                              },
+                              "input_encoding": {
+                                "description": "Codificação declarada dos arquivos de entrada; a saída é sempre UTF-8.",
+                                "enum": [
+                                  "utf-8",
+                                  "windows-1252",
+                                  "latin-1"
+                                ],
+                                "title": "InputEncoding",
+                                "type": "string",
+                                "default": "utf-8"
+                              },
+                              "output_bom": {
+                                "default": false,
+                                "title": "Output Bom",
+                                "type": "boolean"
+                              },
+                              "collapse_whitespace_columns": {
+                                "items": {
+                                  "maxLength": 1024,
+                                  "minLength": 1,
+                                  "type": "string"
+                                },
+                                "maxItems": 100,
+                                "title": "Collapse Whitespace Columns",
+                                "type": "array"
+                              }
+                            },
+                            "title": "CsvJanitorV2Parameters",
+                            "type": "object"
+                          }
+                        },
+                        "required": [
+                          "recipe_id",
+                          "recipe_version",
+                          "parameters"
+                        ]
+                      },
+                      {
                         "title": "image-forge v1",
                         "type": "object",
                         "properties": {
@@ -4027,6 +4405,195 @@
                               }
                             },
                             "title": "CsvJanitorV1Parameters",
+                            "type": "object"
+                          }
+                        },
+                        "required": [
+                          "recipe_id",
+                          "recipe_version",
+                          "parameters"
+                        ]
+                      },
+                      {
+                        "title": "csv-janitor v2",
+                        "type": "object",
+                        "properties": {
+                          "recipe_id": {
+                            "const": "csv-janitor"
+                          },
+                          "recipe_version": {
+                            "const": 2
+                          },
+                          "parameters": {
+                            "additionalProperties": false,
+                            "properties": {
+                              "input_delimiter": {
+                                "enum": [
+                                  ",",
+                                  ";",
+                                  "\t"
+                                ],
+                                "title": "Delimiter",
+                                "type": "string",
+                                "default": ","
+                              },
+                              "output_delimiter": {
+                                "enum": [
+                                  ",",
+                                  ";",
+                                  "\t"
+                                ],
+                                "title": "Delimiter",
+                                "type": "string",
+                                "default": ","
+                              },
+                              "trim_columns": {
+                                "items": {
+                                  "maxLength": 1024,
+                                  "minLength": 1,
+                                  "type": "string"
+                                },
+                                "maxItems": 100,
+                                "title": "Trim Columns",
+                                "type": "array"
+                              },
+                              "case_rules": {
+                                "items": {
+                                  "additionalProperties": false,
+                                  "properties": {
+                                    "column": {
+                                      "maxLength": 1024,
+                                      "minLength": 1,
+                                      "type": "string"
+                                    },
+                                    "mode": {
+                                      "enum": [
+                                        "lower",
+                                        "upper"
+                                      ],
+                                      "title": "CaseMode",
+                                      "type": "string"
+                                    }
+                                  },
+                                  "required": [
+                                    "column",
+                                    "mode"
+                                  ],
+                                  "title": "CaseRuleParameters",
+                                  "type": "object"
+                                },
+                                "maxItems": 100,
+                                "title": "Case Rules",
+                                "type": "array"
+                              },
+                              "filters": {
+                                "items": {
+                                  "additionalProperties": false,
+                                  "properties": {
+                                    "column": {
+                                      "maxLength": 1024,
+                                      "minLength": 1,
+                                      "type": "string"
+                                    },
+                                    "op": {
+                                      "enum": [
+                                        "eq",
+                                        "ne",
+                                        "contains",
+                                        "is_empty"
+                                      ],
+                                      "title": "FilterOp",
+                                      "type": "string"
+                                    },
+                                    "value": {
+                                      "anyOf": [
+                                        {
+                                          "maxLength": 4096,
+                                          "type": "string"
+                                        },
+                                        {
+                                          "type": "null"
+                                        }
+                                      ],
+                                      "title": "Value"
+                                    }
+                                  },
+                                  "required": [
+                                    "column",
+                                    "op"
+                                  ],
+                                  "title": "FilterParameters",
+                                  "type": "object"
+                                },
+                                "maxItems": 5,
+                                "title": "Filters",
+                                "type": "array"
+                              },
+                              "deduplicate_by": {
+                                "items": {
+                                  "maxLength": 1024,
+                                  "minLength": 1,
+                                  "type": "string"
+                                },
+                                "maxItems": 100,
+                                "title": "Deduplicate By",
+                                "type": "array"
+                              },
+                              "output_columns": {
+                                "anyOf": [
+                                  {
+                                    "items": {
+                                      "maxLength": 1024,
+                                      "minLength": 1,
+                                      "type": "string"
+                                    },
+                                    "maxItems": 100,
+                                    "minItems": 1,
+                                    "type": "array"
+                                  },
+                                  {
+                                    "type": "null"
+                                  }
+                                ],
+                                "title": "Output Columns"
+                              },
+                              "formula_guard": {
+                                "enum": [
+                                  "none",
+                                  "tab_prefix"
+                                ],
+                                "title": "FormulaGuard",
+                                "type": "string",
+                                "default": "none"
+                              },
+                              "input_encoding": {
+                                "description": "Codificação declarada dos arquivos de entrada; a saída é sempre UTF-8.",
+                                "enum": [
+                                  "utf-8",
+                                  "windows-1252",
+                                  "latin-1"
+                                ],
+                                "title": "InputEncoding",
+                                "type": "string",
+                                "default": "utf-8"
+                              },
+                              "output_bom": {
+                                "default": false,
+                                "title": "Output Bom",
+                                "type": "boolean"
+                              },
+                              "collapse_whitespace_columns": {
+                                "items": {
+                                  "maxLength": 1024,
+                                  "minLength": 1,
+                                  "type": "string"
+                                },
+                                "maxItems": 100,
+                                "title": "Collapse Whitespace Columns",
+                                "type": "array"
+                              }
+                            },
+                            "title": "CsvJanitorV2Parameters",
                             "type": "object"
                           }
                         },

@@ -10,7 +10,7 @@ describe("tipos de receita derivados de POST /runs", () => {
 
   it("RecipeCommand tira as entradas e mantém a variante", () => {
     expectTypeOf<RecipeCommand>().not.toHaveProperty("input_upload_ids");
-    expectTypeOf<RecipeCommandFor<"csv-janitor">["recipe_version"]>().toEqualTypeOf<1>();
+    expectTypeOf<RecipeCommandFor<"csv-janitor">["recipe_version"]>().toEqualTypeOf<1 | 2>();
   });
 
   it("RecipeParameters é o objeto de parâmetros da variante", () => {
