@@ -81,13 +81,14 @@ _FAILED_STEP_COUNTS = (STEPS_FAILED, ACCOUNT_STEPS_FAILED)
 # Prazo do laço da retenção da auditoria em cada ciclo de contas (#442, 50b): os lotes repetem
 # até a fila de vencidos acabar ou o prazo passar, e o resto fica para o ciclo seguinte.
 AUDIT_RETENTION_TIME_BUDGET = timedelta(seconds=20)
-# Acúmulos da retenção (1.7, ADR 028) cujo crescimento seguido avisa (#442, 21b): a retenção que
-# atrasa sem exceção (lote pequeno, linha presa por trava) não cai em nenhuma outra causa.
+# Acúmulos da retenção (1.7) cujo crescimento seguido avisa (#442, 21b): a retenção que atrasa
+# sem exceção (lote pequeno, linha presa por trava) não cai em nenhuma outra causa. Fica de fora
+# `request_windows` (ADR 028): conta a tabela inteira, janelas vivas inclusive, e cresce com o
+# tráfego; as vencidas só se contariam por `window_start`, que não tem índice.
 RETENTION_BACKLOGS = (
     "runs_to_delete",
     "uploads_to_delete",
     "idempotency_records_expired",
-    "request_windows",
 )
 BACKLOG_GROWTH_ALERT_CYCLES = 3
 RETENTION_BACKLOG_GROWING = "retention_backlog_growing"

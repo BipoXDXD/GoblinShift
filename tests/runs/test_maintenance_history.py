@@ -287,6 +287,26 @@ def test_fila_com_tentativa_viva_nao_conta_como_parada(
     assert counts["queue_stalled_runs"] == 0
 
 
+def test_fila_com_tentativa_de_lease_vencido_conta_como_parada(
+    factory: sessionmaker[Session], storage: FileStorage, work_root: Path
+) -> None:
+    # Tentativa aberta cujo lease venceu: o worker dela morreu, e a fila atrás está parada.
+    queue_run(factory, storage, create_user(factory, "ana"))
+    claimed = claim(factory, storage)
+    with unit_of_work(factory) as session:
+        session.execute(
+            update(attempt)
+            .where(attempt.c.id == claimed.attempt_id)
+            .values(lease_expires_at=func.now() - timedelta(seconds=1))
+        )
+    waiting = queue_run(factory, storage, create_user(factory, "bia"))
+    eligible_since(factory, waiting, 30)
+
+    stalled = maintenance(factory, storage, work_root).measure()["queue_stalled_runs"]
+
+    assert stalled == 1
+
+
 def test_retry_wait_vencido_sem_worker_conta(
     factory: sessionmaker[Session], storage: FileStorage, work_root: Path
 ) -> None:

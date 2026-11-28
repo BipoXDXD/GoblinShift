@@ -3,8 +3,10 @@
 Sem banco: os ciclos são funções falsas, e o span vai para um `InMemorySpanExporter`.
 """
 
+import io
+import json
 import logging
-from collections.abc import Iterator
+from collections.abc import Callable, Iterator
 
 import pytest
 from opentelemetry.sdk.trace import TracerProvider
@@ -228,21 +230,28 @@ def test_volta_grava_a_tendencia_no_span(
 
 
 def test_tres_voltas_de_acumulo_logam_o_alerta_com_a_chave(
-    provider: TracerProvider, caplog: pytest.LogCaptureFixture
+    provider: TracerProvider, listen: Callable[[logging.Logger], io.StringIO]
 ) -> None:
+    # A linha formatada pelo JsonFormatter de produção: campo fora da allowlist sairia descartado.
+    stream = listen(logging.getLogger("goblinshift.maintenance"))
     trend = BacklogTrend()
-    with caplog.at_level(logging.WARNING, logger="goblinshift.maintenance"):
-        for value in (1, 2, 3, 4):
-            run_cycles(
-                provider.get_tracer("t"),
-                (("contas", lambda value=value: {"request_windows": value}),),
-                trend=trend,
-            )
+    for value in (1, 2, 3, 4):
+        run_cycles(
+            provider.get_tracer("t"),
+            (("execuções", lambda value=value: {"uploads_to_delete": value}),),
+            trend=trend,
+        )
 
-    alerts = [
-        record
-        for record in caplog.records
-        if getattr(record, "fields", {}).get("alert") == "retention_backlog_growing"
-    ]
-    [only] = alerts
-    assert only.fields["backlogs"] == ["request_windows"]  # type: ignore[attr-defined]
+    lines = [json.loads(line) for line in stream.getvalue().splitlines()]
+    [only] = [line for line in lines if line.get("alert") == "retention_backlog_growing"]
+    assert only["backlogs"] == ["uploads_to_delete"]
+    assert only["cycles"] == 3
+
+
+def test_janelas_do_limite_de_requisicoes_nao_contam_como_acumulo() -> None:
+    # `request_windows` conta as janelas vivas: cresce com o tráfego, não com a retenção atrasada.
+    trend = BacklogTrend()
+    for value in (10, 20, 30, 40):
+        result = trend.observe({"request_windows": value})
+
+    assert result == 0
