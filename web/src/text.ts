@@ -812,6 +812,8 @@ export const TEXT = {
       emptyHint: "Crie uma chave para usar a API em scripts.",
       newKey: "Nova chave",
       formHeading: "Nova chave de API",
+      // Texto pendente de aprovação do dono (F1).
+      choicesKept: "Suas escolhas foram mantidas. Confira e crie a chave.",
       scopes: "Escopos",
       scopeLabels: {
         "files:read": "Ler arquivos",

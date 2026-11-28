@@ -1,5 +1,6 @@
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { useEffect, useId, useRef, useState, type ReactElement, type SubmitEvent } from "react";
+import { useSearchParams } from "react-router";
 
 import { useApiClient } from "../api/ApiClientContext";
 import { ErrorSummary, type FormIssue } from "../components/a11y/ErrorSummary";
@@ -10,6 +11,12 @@ import { Button } from "../components/ui/Button";
 import { TEXT } from "../text";
 import { API_KEYS_QUERY_KEY, createApiKey, SCOPES, type CreatedApiKey, type Scope } from "./api";
 import { KEY_DAYS, KEY_LIMITS, parseNewKey, type NewKeyErrors } from "./keys";
+import {
+  isReauthRequired,
+  newKeyChoicesToSearch,
+  withoutNewKeyChoices,
+  type NewKeyChoices,
+} from "./newKeyParams";
 
 const T = TEXT.account.keys;
 const NO_ERRORS: NewKeyErrors = { scopes: null, days: null };
@@ -18,17 +25,23 @@ interface NewKeyFormProps {
   /** Recebe a chave criada; o segredo fica só no estado de quem mostra, nunca no cache. */
   readonly onCreated: (key: CreatedApiKey) => void;
   readonly onCancel: () => void;
+  /** Escolhas que voltaram do login de novo; sem elas, nenhum escopo e a validade inicial. */
+  readonly initial?: NewKeyChoices | undefined;
 }
 
-/** Escopos e validade da chave nova; o servidor exige login recente (REAUTH_REQUIRED). */
-export function NewKeyForm({ onCreated, onCancel }: NewKeyFormProps): ReactElement {
+/**
+ * Escopos e validade da chave nova; o servidor exige login recente (REAUTH_REQUIRED). Nesse caso as
+ * escolhas (nunca o segredo) vão para a URL da tela, e o convite para entrar as leva no `return_to`.
+ */
+export function NewKeyForm({ onCreated, onCancel, initial }: NewKeyFormProps): ReactElement {
   const client = useApiClient();
   const queryClient = useQueryClient();
   const headingId = useId();
   const heading = useRef<HTMLHeadingElement>(null);
   const ids = { scopes: useId(), days: useId() };
-  const [scopes, setScopes] = useState<ReadonlySet<Scope>>(new Set());
-  const [days, setDays] = useState(String(KEY_DAYS.initial));
+  const [, setSearchParams] = useSearchParams();
+  const [scopes, setScopes] = useState<ReadonlySet<Scope>>(() => new Set(initial?.scopes ?? []));
+  const [days, setDays] = useState(initial?.days ?? String(KEY_DAYS.initial));
   const [errors, setErrors] = useState<NewKeyErrors>(NO_ERRORS);
   const [attempt, setAttempt] = useState(0);
   // "Nova chave" some quando o formulário abre: sem isto, o foco cairia no <body>.
@@ -42,8 +55,21 @@ export function NewKeyForm({ onCreated, onCancel }: NewKeyFormProps): ReactEleme
     gcTime: 0,
     onSuccess: async (key) => {
       create.reset();
+      // As escolhas de um REAUTH anterior saem da URL: a chave já existe.
+      setSearchParams(withoutNewKeyChoices, { replace: true });
       onCreated(key);
       await queryClient.invalidateQueries({ queryKey: API_KEYS_QUERY_KEY });
+    },
+    // O que foi enviado, não o estado atual: é o que o servidor recusou. O roteador aplica a URL
+    // numa transição, então o link de entrar pode nascer com a URL velha e se corrigir logo depois.
+    onError: (error, command) => {
+      if (isReauthRequired(error)) {
+        setSearchParams(
+          (current) =>
+            newKeyChoicesToSearch({ scopes: command.scopes, days: String(command.days) }, current),
+          { replace: true },
+        );
+      }
     },
   });
 
@@ -90,6 +116,7 @@ export function NewKeyForm({ onCreated, onCancel }: NewKeyFormProps): ReactEleme
       <h3 id={headingId} ref={heading} tabIndex={-1} className="font-semibold text-fg">
         {T.formHeading}
       </h3>
+      {initial !== undefined && <p className="text-sm text-fg-muted">{T.choicesKept}</p>}
       <ErrorSummary issues={issues} attempt={attempt} headingLevel={4} />
       <FieldGroup id={ids.scopes} legend={T.scopes} error={errors.scopes}>
         <div className="flex flex-col gap-1">

@@ -1,8 +1,8 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Ban, CircleCheck, Clock } from "lucide-react";
-import { useId, useRef, useState, type ReactElement, type Ref } from "react";
+import { useEffect, useId, useRef, useState, type ReactElement, type Ref } from "react";
 import { flushSync } from "react-dom";
-import { Link } from "react-router";
+import { Link, useSearchParams } from "react-router";
 
 import { useApiClient } from "../api/ApiClientContext";
 import { ApiError } from "../api/response";
@@ -24,6 +24,7 @@ import {
 } from "./api";
 import { keyStatus, type KeyStatus } from "./keys";
 import { NewKeyForm } from "./NewKeyForm";
+import { newKeyChoicesFromSearch, withoutNewKeyChoices } from "./newKeyParams";
 import { NewKeyReveal } from "./NewKeyReveal";
 
 const T = TEXT.account.keys;
@@ -34,6 +35,9 @@ const T = TEXT.account.keys;
  *
  * Cada bloco que some leva o foco a um destino fixo (WCAG 2.4.3): fechar o formulário ou a chave
  * criada volta a "Nova chave"; revogar volta ao título da seção, porque o Revogar some.
+ *
+ * Na volta do login de novo (REAUTH_REQUIRED), a URL traz as escolhas da chave nova: o formulário
+ * abre preenchido uma vez e a URL fica limpa.
  */
 export function ApiKeysSection({ now }: { readonly now: () => number }): ReactElement {
   const headingId = useId();
@@ -42,7 +46,16 @@ export function ApiKeysSection({ now }: { readonly now: () => number }): ReactEl
     queryKey: API_KEYS_QUERY_KEY,
     queryFn: ({ signal }) => listApiKeys(client, signal),
   });
-  const [formOpen, setFormOpen] = useState(false);
+  const [searchParams, setSearchParams] = useSearchParams();
+  const [restored, setRestored] = useState(() => newKeyChoicesFromSearch(searchParams));
+  const [formOpen, setFormOpen] = useState(restored !== null);
+  const restoredOnMount = useRef(restored !== null);
+  useEffect(() => {
+    if (restoredOnMount.current) {
+      restoredOnMount.current = false;
+      setSearchParams(withoutNewKeyChoices, { replace: true });
+    }
+  }, [setSearchParams]);
   const [created, setCreated] = useState<CreatedApiKey | null>(null);
   const heading = useRef<HTMLHeadingElement>(null);
   const newKey = useRef<HTMLButtonElement>(null);
@@ -82,13 +95,16 @@ export function ApiKeysSection({ now }: { readonly now: () => number }): ReactEl
         )}
         {formOpen && (
           <NewKeyForm
+            initial={restored ?? undefined}
             onCreated={(key) => {
               setFormOpen(false);
+              setRestored(null);
               setCreated(key);
             }}
             onCancel={() => {
               closeAndFocusNewKey(() => {
                 setFormOpen(false);
+                setRestored(null);
               });
             }}
           />
