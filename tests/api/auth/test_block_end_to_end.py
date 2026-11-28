@@ -117,7 +117,7 @@ def test_block_fecha_sessao_chave_execucao_e_login_da_conta(
         assert client.get(ME).status_code == 200
         assert api_client.get(ME, headers=key_headers).status_code == 200
 
-        gs_admin(capsys, "block", "--user", str(user_id))
+        gs_admin(capsys, "block", "--user", str(user_id), "--yes")
 
         assert_problem(client.get(ME), 401, "AUTHENTICATION_REQUIRED")
         assert_problem(api_client.get(ME, headers=key_headers), 401, "AUTHENTICATION_REQUIRED")

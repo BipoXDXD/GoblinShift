@@ -14,6 +14,8 @@ from goblinshift.identity import (
     LoginRefusal,
     LoginRefused,
     UnknownAccountError,
+    account_impact,
+    approve_account,
     authenticate_api_key,
     block_account,
     request_account_deletion,
@@ -135,14 +137,78 @@ def test_liberar_reativa_a_conta_sem_ressuscitar_chaves(factory: sessionmaker[Se
         assert authenticate_api_key(session, issued.token, NOW, hasher=HASHER) is None
 
 
-def test_liberar_conta_pendente_tira_a_marca_de_espera(factory: sessionmaker[Session]) -> None:
+def test_aprovar_conta_pendente_tira_a_marca_de_espera(factory: sessionmaker[Session]) -> None:
     pending = new_user(factory, blocked=True)
 
     with unit_of_work(factory) as session:
-        assert unblock_account(session, pending) is True
+        assert approve_account(session, pending) is True
 
     row = account_row(factory, pending)
     assert (row["status"], row["awaiting_approval"]) == ("active", False)
+
+
+def test_liberar_nao_aprova_conta_pendente(factory: sessionmaker[Session]) -> None:
+    pending = new_user(factory, blocked=True)
+
+    with unit_of_work(factory) as session:
+        assert unblock_account(session, pending) is False
+
+    row = account_row(factory, pending)
+    assert (row["status"], row["awaiting_approval"]) == ("blocked", True)
+
+
+def test_aprovar_nao_libera_bloqueio_por_abuso(factory: sessionmaker[Session]) -> None:
+    user_id = new_user(factory)
+    with unit_of_work(factory) as session:
+        block_account(session, user_id, NOW)
+
+    with unit_of_work(factory) as session:
+        assert approve_account(session, user_id) is False
+
+    assert account_row(factory, user_id)["status"] == "blocked"
+
+
+def test_aprovar_nao_ativa_conta_pendente_com_exclusao_pedida(
+    factory: sessionmaker[Session],
+) -> None:
+    pending = new_user(factory, blocked=True)
+    with unit_of_work(factory) as session:
+        request_account_deletion(session, pending, NOW)
+
+    with unit_of_work(factory) as session:
+        assert approve_account(session, pending) is False
+
+    assert account_row(factory, pending)["status"] == "blocked"
+
+
+def test_impacto_conta_so_as_credenciais_que_ainda_valem(factory: sessionmaker[Session]) -> None:
+    user_id = new_user(factory)
+    new_key(factory, user_id, now=NOW)
+    revoked = new_key(factory, user_id, now=NOW)
+    new_web_session(factory, user_id)
+    with unit_of_work(factory) as session:
+        session.execute(
+            update(api_key).where(api_key.c.public_id == revoked.public_id).values(revoked_at=NOW)
+        )
+
+    with factory() as session:
+        impact = account_impact(session, user_id, NOW)
+        expired = account_impact(session, user_id, NOW + timedelta(days=400))
+
+    assert impact is not None
+    assert (impact.status, impact.awaiting_approval, impact.deletion_requested) == (
+        "active",
+        False,
+        False,
+    )
+    assert (impact.active_keys, impact.active_sessions) == (1, 1)
+    assert expired is not None
+    assert (expired.active_keys, expired.active_sessions) == (0, 0)
+
+
+def test_impacto_de_conta_inexistente_e_none(factory: sessionmaker[Session]) -> None:
+    with factory() as session:
+        assert account_impact(session, uuid7(), NOW) is None
 
 
 def test_liberar_conta_inexistente_devolve_false(factory: sessionmaker[Session]) -> None:

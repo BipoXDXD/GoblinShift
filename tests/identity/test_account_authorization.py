@@ -29,6 +29,7 @@ from goblinshift.identity import (
     LoginRefused,
     Scope,
     UnknownAccountError,
+    approve_account,
     authenticate_api_key,
     authenticate_session,
     block_account,
@@ -78,13 +79,13 @@ def test_unblock_nao_ativa_conta_com_exclusao_pedida(factory: sessionmaker[Sessi
     assert status_of(factory, user_id) == "blocked"
 
 
-def test_unblock_ativa_a_conta_pendente(factory: sessionmaker[Session]) -> None:
+def test_approve_ativa_a_conta_pendente(factory: sessionmaker[Session]) -> None:
     user_id = new_user(factory, blocked=True)
 
     with unit_of_work(factory) as session:
-        unblocked = unblock_account(session, user_id)
+        approved = approve_account(session, user_id)
 
-    assert unblocked is True
+    assert approved is True
     assert status_of(factory, user_id) == "active"
 
 

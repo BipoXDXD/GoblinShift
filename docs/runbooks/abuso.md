@@ -99,11 +99,15 @@ SQL
 ## 3. Bloquear
 
 ```bash
-gs_admin block --user "$owner_id"
+gs_admin block --user "$owner_id" --dry-run
+# stderr: "conta <id> (<nome>): ativa; N chave(s) ativa(s), M sessão(ões) ativa(s), execução ativa <id>"
+gs_admin block --user "$owner_id" --yes
 # stderr: "conta <id> bloqueada" e, se havia execução ativa, "execução <id>: canceled"
 ```
 
-O `block` marca a conta como `blocked`, revoga todas as sessões e chaves, grava `ACCOUNT_BLOCKED` na auditoria e cancela a execução não terminal. Novos logins da mesma identidade (Google ou GitHub) são recusados. Se o comando cair no meio, **rode de novo**: repetir completa o que faltou.
+Confira no `--dry-run` que o nome e as contagens são da conta do caso antes do `--yes`. Sem `--yes` (nem `--dry-run`), o `block` imprime o mesmo resumo, sai com 2 e não grava nada: um `owner_id` trocado não revoga as credenciais de outra pessoa.
+
+O `block --yes` marca a conta como `blocked`, revoga todas as sessões e chaves, grava `ACCOUNT_BLOCKED` na auditoria e cancela a execução não terminal. Novos logins da mesma identidade (Google ou GitHub) são recusados. Se o comando cair no meio, **rode de novo**: repetir completa o que faltou.
 
 O `owner_id` aparece na linha de comando do `block` e, portanto, no log do sudo. Isso é aceitável: o `owner_id` sozinho não liga a conta à telemetria, porque os eventos só trazem o `user.hash`, e o hash depende do segredo do servidor, que não está no log. Quem lê o log do sudo descobre que uma conta foi bloqueada, mas não quais requisições ela fez. O hash, que faz essa ligação, nunca vai para a linha de comando (passo 1).
 
@@ -157,7 +161,13 @@ O bloqueio **não apaga nada**: ele só tira o acesso.
 gs_admin unblock --user "$owner_id"
 ```
 
-Sessões e chaves continuam revogadas: a pessoa entra de novo e emite chaves novas. Conta com exclusão pedida não é liberada (saída 1).
+Sessões e chaves continuam revogadas: a pessoa entra de novo e emite chaves novas. Conta com exclusão pedida não é liberada (saída 1). O `unblock` só desfaz o bloqueio por abuso: na conta pendente do cadastro fechado ele sai com 1 e sugere o `approve` (abaixo), para que um id trocado não aprove quem estava na fila.
+
+A conta pendente ([ADR 023](../adr/023-cadastro-fechado-ate-a-abertura.md)) se libera com `approve`, que grava `ACCOUNT_APPROVED` na auditoria; numa conta bloqueada por abuso ele sai com 1 e não muda nada:
+
+```bash
+gs_admin approve --user "$owner_id"
+```
 
 ## 7. Responder à denúncia
 
@@ -197,7 +207,7 @@ SQL
 |---|---|---|
 | Nenhuma linha em `app_user` | A conta já foi purgada (`DELETE /me`); a auditoria sobrevive 90 dias | Não há bloqueio a rever. Responda de forma neutra |
 | `deletion_requested_at` preenchido | O titular pediu a exclusão, e o pedido é irrevogável | O `unblock` sai com 1. Explique que a conta está em exclusão, sem dar detalhes de conteúdo |
-| `status` = `blocked` e `ja_teve_sessao` falso | Conta pendente do cadastro fechado ([ADR 023](../adr/023-cadastro-fechado-ate-a-abertura.md)), não um bloqueio por abuso | Liberar é aprovar o cadastro: decida pela fila de pendentes (`gs_admin list-users --pending`), não pelo passo 6 por reflexo |
+| `status` = `blocked` e `ja_teve_sessao` falso | Conta pendente do cadastro fechado ([ADR 023](../adr/023-cadastro-fechado-ate-a-abertura.md)), não um bloqueio por abuso | Liberar é aprovar o cadastro: decida pela fila de pendentes (`gs_admin list-users --pending`) e use `gs_admin approve`; o `unblock` do passo 6 sai com 1 nessa conta |
 | `status` = `blocked` e `ja_teve_sessao` verdadeiro | Bloqueio de verdade | Revise a ficha do caso (passo 2) e o `ACCOUNT_BLOCKED` acima. Se foi engano, passo 6 |
 | `status` = `active` | A conta já foi liberada desde a recusa | Peça para a pessoa entrar de novo |
 

@@ -36,7 +36,7 @@ from goblinshift.identity.keys import (
     secret_matches,
 )
 from goblinshift.identity.principal import InvalidScopesError, Principal, Scope
-from goblinshift.identity.tables import api_key, app_user
+from goblinshift.identity.tables import api_key, app_user, web_session
 from goblinshift.platform.telemetry import UserHasher
 from goblinshift.processing.names import has_unsafe_char
 
@@ -311,19 +311,104 @@ def block_account(session: Session, owner_id: UUID, now: datetime) -> bool:
 
 
 def unblock_account(session: Session, owner_id: UUID) -> bool:
-    """Libera a conta (inclusive a pendente do cadastro fechado); False se não existir.
+    """Desfaz o bloqueio por abuso; False se a conta não existir ou estiver pendente.
 
-    Conta com exclusão pedida também dá False: o pedido do titular é irrevogável e a purga já
-    está a caminho, então ela nunca volta a `active`. Sessões e chaves revogadas no bloqueio
-    continuam revogadas: a pessoa entra de novo.
+    A pendente do cadastro fechado (`awaiting_approval`) só sai pelo `approve_account`: um id
+    trocado no `unblock` não libera quem nunca foi aprovado. Conta com exclusão pedida também dá
+    False: o pedido do titular é irrevogável e a purga já está a caminho, então ela nunca volta a
+    `active`. Sessões e chaves revogadas no bloqueio continuam revogadas: a pessoa entra de novo.
     """
     unblocked = session.execute(
         update(app_user)
-        .where(app_user.c.id == owner_id, app_user.c.deletion_requested_at.is_(None))
-        .values(status=ACTIVE_STATUS, awaiting_approval=False)
+        .where(
+            app_user.c.id == owner_id,
+            app_user.c.deletion_requested_at.is_(None),
+            app_user.c.awaiting_approval.is_(False),
+        )
+        .values(status=ACTIVE_STATUS)
         .returning(app_user.c.id)
     ).first()
     return unblocked is not None
+
+
+def approve_account(session: Session, owner_id: UUID) -> bool:
+    """Libera a conta pendente do cadastro fechado (ADR 023); False se ela não estiver pendente.
+
+    Só age com `awaiting_approval`: a bloqueada por abuso tem o mesmo `status` e continua
+    bloqueada, e a com exclusão pedida nunca volta a `active`.
+    """
+    approved = session.execute(
+        update(app_user)
+        .where(
+            app_user.c.id == owner_id,
+            app_user.c.deletion_requested_at.is_(None),
+            app_user.c.awaiting_approval.is_(True),
+        )
+        .values(status=ACTIVE_STATUS, awaiting_approval=False)
+        .returning(app_user.c.id)
+    ).first()
+    return approved is not None
+
+
+@dataclass(frozen=True)
+class AccountImpact:
+    """O que um comando destrutivo do `gs-admin` atingiria, mostrado antes do `--yes`."""
+
+    display_name: str
+    status: str
+    awaiting_approval: bool
+    deletion_requested: bool
+    active_keys: int
+    active_sessions: int
+
+
+def account_impact(session: Session, owner_id: UUID, now: datetime) -> AccountImpact | None:
+    """Estado da conta e as credenciais que ainda valem em `now`; None se ela não existir.
+
+    Só lê. A execução ativa fica de fora: `runs` está acima de `identity` nas camadas, e o
+    `gs-admin` a junta ao resumo.
+    """
+    active_keys = (
+        select(func.count())
+        .select_from(api_key)
+        .where(
+            api_key.c.owner_id == owner_id,
+            api_key.c.revoked_at.is_(None),
+            api_key.c.expires_at > now,
+        )
+        .scalar_subquery()
+    )
+    active_sessions = (
+        select(func.count())
+        .select_from(web_session)
+        .where(
+            web_session.c.user_id == owner_id,
+            web_session.c.revoked_at.is_(None),
+            web_session.c.idle_expires_at > now,
+            web_session.c.absolute_expires_at > now,
+        )
+        .scalar_subquery()
+    )
+    row = session.execute(
+        select(
+            app_user.c.display_name,
+            app_user.c.status,
+            app_user.c.awaiting_approval,
+            app_user.c.deletion_requested_at,
+            active_keys.label("active_keys"),
+            active_sessions.label("active_sessions"),
+        ).where(app_user.c.id == owner_id)
+    ).first()
+    if row is None:
+        return None
+    return AccountImpact(
+        display_name=row.display_name,
+        status=row.status,
+        awaiting_approval=row.awaiting_approval,
+        deletion_requested=row.deletion_requested_at is not None,
+        active_keys=row.active_keys,
+        active_sessions=row.active_sessions,
+    )
 
 
 def request_account_deletion(session: Session, owner_id: UUID, now: datetime) -> None:

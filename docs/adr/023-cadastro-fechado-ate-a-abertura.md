@@ -11,7 +11,7 @@ O ADR 012 abre o serviço a qualquer conta Google ou GitHub, mas a abertura púb
 ## Decisão
 
 - `GS_SIGNUP_MODE=closed` é o padrão até a fatia 8. Uma identidade `(issuer, subject)` desconhecida cria a conta com `status = 'blocked'` e o login é recusado com o mesmo erro genérico de qualquer outra recusa (sem enumeração).
-- O administrador libera a conta com `gs-admin unblock --user <id>`; `gs-admin list-users --pending` mostra as contas bloqueadas que nunca tiveram sessão.
+- O administrador libera a conta com `gs-admin approve --user <id>` (até o #442, `unblock`, que agora só desfaz o bloqueio por abuso e sai com 1 na conta pendente); `gs-admin list-users --pending` mostra as contas bloqueadas que nunca tiveram sessão.
 - `GS_SIGNUP_MODE=open` faz a identidade nova nascer `active`. Abrir na fatia 8 é trocar a variável.
 - No Google, o app fica em "Em teste" com usuários de teste, o que fecha o login também do lado do provedor; no GitHub não há equivalente, e o modo fechado basta.
 
@@ -32,4 +32,4 @@ O ADR 012 abre o serviço a qualquer conta Google ou GitHub, mas a abertura púb
 
 - `tests/test_settings_secrets.py`: o padrão é fechado e só `closed` e `open` são aceitos.
 - Frente A da fatia 6: `resolve_login` com `signup_open=False` devolve `LoginRefused.PENDING_APPROVAL` para identidade nova, e o callback responde o mesmo redirect genérico.
-- Frente C da fatia 6: `gs-admin unblock` libera a conta e o login seguinte completa.
+- Frente C da fatia 6: `gs-admin unblock` (desde o #442, `approve`) libera a conta e o login seguinte completa.
