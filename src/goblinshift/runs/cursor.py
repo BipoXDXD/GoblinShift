@@ -1,8 +1,12 @@
 """Cursor opaco da listagem de execuções (docs/GoblinShiftPlan.md, 1.6 e 3.3).
 
-O cursor carrega a posição de keyset `(created_at, id)`, os filtros, a direção e o dono da consulta
-que o gerou, e vale 24 horas. É assinado com HMAC-SHA256 para que o cliente não forje posições nem
-troque filtros sem a API perceber; não é cifrado, porque só contém o que o próprio dono já viu.
+O cursor carrega a posição de keyset `(created_at, id)`, os filtros e a direção da consulta que o
+gerou, e vale 24 horas. É assinado com HMAC-SHA256 para que o cliente não forje posições nem troque
+filtros sem a API perceber; não é cifrado, porque só contém o que o próprio dono já viu.
+
+O dono da consulta não vai no payload: o id interno da conta acabaria em query strings, logs de
+navegador e históricos. Ele entra só na mensagem assinada (`owner_id.bytes "." body`), e o cursor de
+outra conta falha na assinatura. A versão 1, com o dono no escopo em claro, não é mais aceita.
 
 Formato: `base64url(payload JSON) "." base64url(HMAC)`, sem padding.
 """
@@ -21,7 +25,7 @@ CURSOR_TTL = timedelta(hours=24)
 # Só existe a ordem "mais recentes primeiro"; a direção entra no cursor para que uma ordem nova
 # no futuro não aceite cursores emitidos para a antiga.
 DIRECTION_DESC = "desc"
-_FORMAT_VERSION = 1
+_FORMAT_VERSION = 2
 _SEPARATOR = "."
 
 
@@ -30,7 +34,7 @@ class InvalidCursorError(ValueError):
 
 
 class CursorScopeMismatchError(InvalidCursorError):
-    """O cursor foi emitido para outros filtros, outra direção ou outra conta."""
+    """O cursor foi emitido para outros filtros ou outra direção."""
 
 
 @dataclass(frozen=True)
@@ -42,7 +46,12 @@ class Position:
 
 
 def encode_cursor(
-    position: Position, scope: Mapping[str, str | None], *, secret: bytes, now: datetime
+    position: Position,
+    scope: Mapping[str, str | None],
+    *,
+    owner_id: UUID,
+    secret: bytes,
+    now: datetime,
 ) -> str:
     payload = {
         "v": _FORMAT_VERSION,
@@ -53,17 +62,22 @@ def encode_cursor(
         "x": int((now + CURSOR_TTL).timestamp()),
     }
     body = _b64encode(json.dumps(payload, sort_keys=True, separators=(",", ":")).encode())
-    return f"{body}{_SEPARATOR}{_b64encode(_sign(body, secret))}"
+    return f"{body}{_SEPARATOR}{_b64encode(_sign(body, owner_id, secret))}"
 
 
 def decode_cursor(
-    token: str, scope: Mapping[str, str | None], *, secret: bytes, now: datetime
+    token: str,
+    scope: Mapping[str, str | None],
+    *,
+    owner_id: UUID,
+    secret: bytes,
+    now: datetime,
 ) -> Position:
     """Confere assinatura, validade e escopo antes de confiar em qualquer campo do cursor."""
     body, separator, signature = token.partition(_SEPARATOR)
     if not separator or not body.isascii() or not body or not signature:
         raise InvalidCursorError("cursor malformado")
-    if not hmac.compare_digest(_b64decode(signature), _sign(body, secret)):
+    if not hmac.compare_digest(_b64decode(signature), _sign(body, owner_id, secret)):
         raise InvalidCursorError("assinatura do cursor não confere")
     payload = _parse_payload(_b64decode(body))
     if now.timestamp() > payload.expires_at:
@@ -105,12 +119,14 @@ def _parse_payload(raw: bytes) -> _Payload:
 
 
 def _is_current_version(raw: object) -> bool:
-    # `True == 1` e `1.0 == 1` em Python, mas `encode_cursor` só emite o inteiro.
+    # `2.0 == 2` em Python, mas `encode_cursor` só emite o inteiro.
     return isinstance(raw, int) and not isinstance(raw, bool) and raw == _FORMAT_VERSION
 
 
-def _sign(body: str, secret: bytes) -> bytes:
-    return hmac.new(secret, body.encode("ascii"), hashlib.sha256).digest()
+def _sign(body: str, owner_id: UUID, secret: bytes) -> bytes:
+    # O dono entra na mensagem assinada, não no payload: amarra o cursor à conta sem expô-la.
+    message = owner_id.bytes + _SEPARATOR.encode("ascii") + body.encode("ascii")
+    return hmac.new(secret, message, hashlib.sha256).digest()
 
 
 def _b64encode(raw: bytes) -> str:

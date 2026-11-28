@@ -1,5 +1,6 @@
 """O cursor da listagem vale só para a conta que o recebeu (docs/GoblinShiftPlan.md, 1.6)."""
 
+import base64
 from contextlib import nullcontext
 from datetime import UTC, datetime, timedelta
 from types import SimpleNamespace
@@ -13,7 +14,7 @@ from sqlalchemy.orm import Session
 from goblinshift.entrypoints.api.app import create_app
 from goblinshift.entrypoints.api.dependencies import get_session
 from goblinshift.platform.settings import Settings
-from goblinshift.runs.cursor import CursorScopeMismatchError
+from goblinshift.runs.cursor import CursorScopeMismatchError, InvalidCursorError
 from goblinshift.runs.queries import RunFilters, list_runs
 from tests.api.simulated_session import SimulatedSessions
 from tests.api.support import assert_problem
@@ -81,8 +82,19 @@ def _cursor_of(owner_id: UUID) -> str:
 def test_cursor_de_uma_conta_e_recusado_na_listagem_de_outra() -> None:
     cursor = _cursor_of(uuid7())
 
-    with pytest.raises(CursorScopeMismatchError):
+    # A conta entra na assinatura, não no escopo: o erro é de assinatura, não de filtros.
+    with pytest.raises(InvalidCursorError) as caught:
         _list(uuid7(), [], cursor)
+    assert not isinstance(caught.value, CursorScopeMismatchError)
+
+
+def test_cursor_nao_carrega_o_id_da_conta_em_claro() -> None:
+    owner_id = uuid7()
+    body = _cursor_of(owner_id).split(".")[0]
+    raw = base64.urlsafe_b64decode(body + "=" * (-len(body) % 4))
+
+    assert str(owner_id).encode() not in raw
+    assert owner_id.hex.encode() not in raw
 
 
 def test_cursor_continua_valendo_para_a_propria_conta() -> None:

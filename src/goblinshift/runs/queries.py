@@ -211,11 +211,11 @@ def list_runs(
     """
     if not 1 <= limit <= MAX_PAGE_SIZE:
         raise ValueError(f"limit fora de [1, {MAX_PAGE_SIZE}]")
-    # Com o dono no escopo, o cursor de uma conta não vale na listagem de outra.
-    scope = {**filters.cursor_scope(), "owner_id": str(owner_id)}
+    # O dono entra na assinatura do cursor, não no escopo: o de uma conta não vale na de outra.
+    scope = filters.cursor_scope()
     query = _select_views().where(run.c.owner_id == owner_id, *_filter_conditions(filters))
     if cursor is not None:
-        after = decode_cursor(cursor, scope, secret=secret, now=now)
+        after = decode_cursor(cursor, scope, owner_id=owner_id, secret=secret, now=now)
         query = query.where(tuple_(run.c.created_at, run.c.id) < (after.created_at, after.run_id))
     rows = session.execute(
         query.order_by(run.c.created_at.desc(), run.c.id.desc()).limit(limit + 1)
@@ -224,7 +224,9 @@ def list_runs(
     if len(rows) <= limit:
         return RunPage(items, None)
     last = items[-1]
-    next_cursor = encode_cursor(Position(last.created_at, last.id), scope, secret=secret, now=now)
+    next_cursor = encode_cursor(
+        Position(last.created_at, last.id), scope, owner_id=owner_id, secret=secret, now=now
+    )
     return RunPage(items, next_cursor)
 
 
