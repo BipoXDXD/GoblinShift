@@ -157,7 +157,8 @@ def create_app(
     app.add_middleware(ConcurrencyLimitMiddleware, limit=MAX_CONCURRENT_REQUESTS)
     install_problem_handlers(app)
     # Cookie de login (ADR 025): só o marcador do estado do Authlib, cujo conteúdo fica em
-    # `login_state`. Middleware ASGI puro, que não toca respostas fora de `/auth`.
+    # `login_state`. Middleware ASGI puro; só regrava o cookie quando a sessão de login muda, o que
+    # só as rotas de `/auth` fazem.
     app.add_middleware(
         SessionMiddleware,
         secret_key=web_identity.login_cookie_key.decode(),

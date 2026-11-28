@@ -67,7 +67,7 @@ class WebIdentityConfig:
     oauth_http_timeout_s: float
     # HMAC do token CSRF (double-submit assinado, ligado à sessão).
     csrf_key: bytes = field(repr=False)
-    # Assina o cookie `__Secure-gs_login`, que leva só o marcador do estado do login (ADR 025).
+    # Assina o cookie `__Host-gs_login`, que leva só o marcador do estado do login (ADR 025).
     login_cookie_key: bytes = field(repr=False)
     # Chave anterior do CSRF, só durante a troca do segredo (ADR 025); fora dela, None.
     csrf_previous_key: bytes | None = field(default=None, repr=False)

@@ -274,7 +274,7 @@ isso não pedimos consentimento para eles, e o serviço não funciona sem eles.
 |---|---|---|
 | `__Host-gs_session` | Mantém você conectado. Contém um identificador aleatório; é `HttpOnly`, `Secure` e `SameSite=Lax` | Até 30 minutos sem uso ou 8 horas após o login; apagado no logout |
 | `__Host-gs_csrf` | Protege contra ações feitas em seu nome por outros sites (CSRF). `Secure` e `SameSite=Strict` | Trocado a cada sessão |
-| `__Secure-gs_login` | Existe só durante o login: guarda, assinada, só uma chave que aponta para o estado do login enquanto você está no Google ou no GitHub. É `HttpOnly`, `Secure` e `SameSite=Lax`, e o navegador só o envia às rotas de login (`/auth`) | 10 minutos; o estado a que ele aponta também expira em 10 minutos |
+| `__Host-gs_login` | Existe só durante o login: guarda, assinada, só uma chave que aponta para o estado do login enquanto você está no Google ou no GitHub. É `HttpOnly`, `Secure` e `SameSite=Lax`, e só as rotas de login (`/auth`) o usam | 10 minutos; o estado a que ele aponta também expira em 10 minutos |
 
 Não usamos cookies de publicidade nem de analytics. Se a Cloudflare identificar tráfego suspeito,
 ela pode gravar um cookie técnico próprio de segurança (como `__cf_bm` ou `cf_clearance`), usado

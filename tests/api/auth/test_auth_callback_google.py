@@ -133,7 +133,7 @@ def test_callback_apaga_o_estado_e_o_marcador(
     login(client, fake, "google")
 
     assert count_rows(factory, login_state) == 0
-    assert "__Secure-gs_login" not in client.cookies
+    assert "__Host-gs_login" not in client.cookies
 
 
 def test_login_emite_sessao_nova_e_revoga_a_anterior(
@@ -361,12 +361,12 @@ def test_callback_com_state_reusado_e_recusado(
 ) -> None:
     open_signup(login_app)
     started = start_login(client, "google")
-    marker = client.cookies["__Secure-gs_login"]
+    marker = client.cookies["__Host-gs_login"]
     callback = fake.consent(started.headers["location"])
     assert client.get(callback).status_code == 303
 
     # Mesmo com o cookie de login antigo de volta, o estado já foi consumido.
-    client.cookies.set("__Secure-gs_login", marker, path="/auth")
+    client.cookies.set("__Host-gs_login", marker, path="/")
     response = client.get(callback)
 
     assert_login_failed(response)

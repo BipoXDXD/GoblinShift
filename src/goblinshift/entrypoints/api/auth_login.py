@@ -5,7 +5,7 @@ O `redirect_uri` sai de `WebIdentityConfig.public_origin`, nunca do header `Host
 
 O Authlib cuida do protocolo: Authorization Code com PKCE S256, `state` e, no Google, `nonce` e
 a validação do ID token (assinatura RS256 pela JWKS, `iss`, `aud`, `exp`, `nonce`). O `state`
-fica em `login_state` e só vale no navegador que tem o marcador no cookie `__Secure-gs_login`.
+fica em `login_state` e só vale no navegador que tem o marcador no cookie `__Host-gs_login`.
 Toda recusa (provedor, state, token, conta bloqueada ou pendente) responde o mesmo redirect
 genérico, sem dizer qual foi o caso; o log do servidor registra só o provedor e o tipo da falha.
 O redirect leva no fragmento um código de referência, o `request_id` do callback (o mesmo do
