@@ -55,7 +55,7 @@ class FilterParameters(BaseModel):
 
     @model_validator(mode="after")
     def _value_matches_operator(self) -> Self:
-        _enforce(self.to_filter)
+        check_library_rules(self.to_filter)
         return self
 
     def to_filter(self) -> Filter:
@@ -82,30 +82,32 @@ class CsvJanitorV1Parameters(BaseModel):
     @field_validator("trim_columns")
     @classmethod
     def _trim_columns_rules(cls, columns: list[str]) -> list[str]:
-        _enforce(lambda: Params(trim_columns=tuple(columns)))
+        check_library_rules(lambda: Params(trim_columns=tuple(columns)))
         return columns
 
     @field_validator("case_rules")
     @classmethod
     def _case_rules_rules(cls, rules: list[CaseRuleParameters]) -> list[CaseRuleParameters]:
-        _enforce(lambda: Params(case_rules=tuple(rule.to_rule() for rule in rules)))
+        check_library_rules(lambda: Params(case_rules=tuple(rule.to_rule() for rule in rules)))
         return rules
 
     @field_validator("deduplicate_by")
     @classmethod
     def _deduplicate_by_rules(cls, columns: list[str]) -> list[str]:
-        _enforce(lambda: Params(deduplicate_by=tuple(columns)))
+        check_library_rules(lambda: Params(deduplicate_by=tuple(columns)))
         return columns
 
     @field_validator("output_columns")
     @classmethod
     def _output_columns_rules(cls, columns: list[str] | None) -> list[str] | None:
-        _enforce(lambda: Params(output_columns=None if columns is None else tuple(columns)))
+        check_library_rules(
+            lambda: Params(output_columns=None if columns is None else tuple(columns))
+        )
         return columns
 
     @model_validator(mode="after")
     def _whole_configuration_rules(self) -> Self:
-        _enforce(self.to_params)
+        check_library_rules(self.to_params)
         return self
 
     def to_params(self) -> Params:
@@ -121,8 +123,11 @@ class CsvJanitorV1Parameters(BaseModel):
         )
 
 
-def _enforce(build: Callable[[], object]) -> None:
-    """Traduz a recusa da biblioteca no `ValueError` que o Pydantic põe no campo validado."""
+def check_library_rules(build: Callable[[], object]) -> None:
+    """Roda `build` e traduz a recusa da biblioteca no `ValueError` que o Pydantic põe no campo.
+
+    Público porque os modelos das versões seguintes (csv_janitor_v2) validam do mesmo jeito.
+    """
     try:
         build()
     except InvalidParametersError as error:

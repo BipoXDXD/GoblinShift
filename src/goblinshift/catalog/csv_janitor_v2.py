@@ -15,7 +15,7 @@ from goblinshift.catalog.csv_janitor_v1 import (
     MAX_COLUMNS,
     ColumnName,
     CsvJanitorV1Parameters,
-    _enforce,
+    check_library_rules,
 )
 from goblinshift.processing.csv_janitor import InputEncoding, Params
 
@@ -34,7 +34,7 @@ class CsvJanitorV2Parameters(CsvJanitorV1Parameters):
     @field_validator("collapse_whitespace_columns")
     @classmethod
     def _collapse_whitespace_columns_rules(cls, columns: list[str]) -> list[str]:
-        _enforce(lambda: Params(collapse_whitespace_columns=tuple(columns)))
+        check_library_rules(lambda: Params(collapse_whitespace_columns=tuple(columns)))
         return columns
 
     def to_params(self) -> Params:
