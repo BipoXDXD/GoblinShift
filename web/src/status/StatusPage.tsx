@@ -3,6 +3,7 @@ import { CircleCheck, CircleHelp, CircleX, TriangleAlert, type LucideIcon } from
 import type { ReactElement } from "react";
 
 import { useApiClient } from "../api/ApiClientContext";
+import { ApiError } from "../api/response";
 import { FocusHeading } from "../components/a11y/FocusHeading";
 import { formatTime } from "../format";
 import { TEXT } from "../text";
@@ -40,6 +41,26 @@ const PROCESSING_TONES: Record<ProcessingLevel, Tone> = {
   stalled: "danger",
 };
 
+/** O servidor não respondeu, ou respondeu com 5xx. */
+const SERVER_ERROR_MIN = 500;
+
+/**
+ * Leitura que falhou: `down` quando a API não está de pé (rede, timeout, 5xx); `unread` quando ela
+ * respondeu mas não deu para ler o estado (429, corpo fora da spec), sem afirmar que caiu.
+ */
+type Failure = "down" | "unread";
+
+function failureOf(error: unknown): Failure {
+  if (!(error instanceof ApiError)) {
+    return "down";
+  }
+  const { failure } = error;
+  if (failure.kind === "network" || failure.kind === "timeout") {
+    return "down";
+  }
+  return failure.status >= SERVER_ERROR_MIN ? "down" : "unread";
+}
+
 const QUEUE_TONES: Record<QueueLevel, Tone> = {
   free: "success",
   busy: "warning",
@@ -54,8 +75,8 @@ interface Row {
 
 /**
  * /estado: a API, o processamento e a fila em níveis, sem contagens (D9). Pública, como os textos
- * legais: serve justamente quando o login falha. Qualquer falha da leitura (rede, 503) é a API fora
- * do ar; aí processamento e fila ficam sem leitura.
+ * legais: serve justamente quando o login falha. Rede, timeout ou 5xx é a API fora do ar, e aí
+ * processamento e fila ficam sem leitura; 429 ou corpo fora da spec deixam as três sem leitura.
  */
 export function StatusPage(): ReactElement {
   const client = useApiClient();
@@ -67,17 +88,17 @@ export function StatusPage(): ReactElement {
     refetchInterval: REFRESH_MS,
     refetchIntervalInBackground: false,
   });
-  const down = query.isError;
-  const status = down ? undefined : query.data;
+  const failure = query.isError ? failureOf(query.error) : undefined;
+  const status = failure === undefined ? query.data : undefined;
 
   return (
     <article className="mx-auto flex w-full max-w-3xl flex-col gap-6">
       <FocusHeading>{T.title}</FocusHeading>
-      {status === undefined && !down ? (
+      {status === undefined && failure === undefined ? (
         <p className="text-fg-muted">{T.loading}</p>
       ) : (
         <dl className="flex flex-col divide-y divide-line-soft rounded-lg bg-surface shadow-card">
-          {rowsOf(status?.processing, status?.queue, down).map((row) => (
+          {rowsOf(status?.processing, status?.queue, failure).map((row) => (
             <div
               key={row.label}
               className="flex flex-wrap items-center justify-between gap-x-4 gap-y-2 px-4 py-3"
@@ -101,14 +122,10 @@ export function StatusPage(): ReactElement {
 function rowsOf(
   processing: ProcessingLevel | undefined,
   queue: QueueLevel | undefined,
-  down: boolean,
+  failure: Failure | undefined,
 ): readonly Row[] {
   return [
-    {
-      label: T.rows.api,
-      tone: down ? "danger" : "success",
-      text: down ? T.api.down : T.api.up,
-    },
+    apiRow(failure),
     {
       label: T.rows.processing,
       tone: processing === undefined ? "unknown" : PROCESSING_TONES[processing],
@@ -120,6 +137,17 @@ function rowsOf(
       text: queue === undefined ? T.unknown : T.queue[queue],
     },
   ];
+}
+
+function apiRow(failure: Failure | undefined): Row {
+  switch (failure) {
+    case undefined:
+      return { label: T.rows.api, tone: "success", text: T.api.up };
+    case "down":
+      return { label: T.rows.api, tone: "danger", text: T.api.down };
+    case "unread":
+      return { label: T.rows.api, tone: "unknown", text: T.unknown };
+  }
 }
 
 /** Nível em texto, com ícone e cor só de reforço (estado nunca só por cor). */

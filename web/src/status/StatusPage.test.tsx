@@ -121,6 +121,28 @@ describe("/estado", () => {
     expect(await screen.findByText("Fora do ar")).toBeInTheDocument();
   });
 
+  it.each([500, 502])("%i também vira API fora do ar", async (status) => {
+    renderPage(fakeApi({ [STATUS_ROUTE]: () => problemResponse(status, "SERVICE_UNAVAILABLE") }));
+
+    expect(await screen.findByText("Fora do ar")).toBeInTheDocument();
+  });
+
+  it.each([
+    [
+      "429 (a API respondeu, só recusou)",
+      () => problemResponse(429, "RATE_LIMITED", { headers: { "Retry-After": "1" } }),
+    ],
+    ["corpo fora da spec", () => jsonResponse(statusBody({ processing: "dormindo" }))],
+  ])("%s fica sem leitura, no tom neutro, sem dizer que caiu", async (_case, handler) => {
+    renderPage(fakeApi({ [STATUS_ROUTE]: handler }));
+
+    expect(await screen.findAllByText("Sem leitura")).toHaveLength(3);
+    expect(screen.queryByText("Fora do ar")).toBeNull();
+    for (const { value } of rows()) {
+      expect(value.firstElementChild).toHaveClass("bg-info-bg");
+    }
+  });
+
   it("relê a cada 30 s só com a aba visível", async () => {
     vi.useFakeTimers();
     notifyManager.setScheduler((callback) => {

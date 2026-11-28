@@ -20,9 +20,9 @@ const NAV_LINK =
 /** Valor exato com que o servidor volta de um login recusado (auth_login.py). */
 const LOGIN_FAILED = "failed";
 /**
- * Telas abertas a quem ainda não aceitou os termos vigentes: ler e aceitar os textos, ler a declaração de
- * acessibilidade, ver o estado do serviço e, como na API (ADR 029), reduzir o próprio acesso pelo Acesso (sair, revogar chaves,
- * excluir a conta).
+ * Telas abertas a quem ainda não aceitou os termos vigentes: ler e aceitar os textos, ler a
+ * declaração de acessibilidade, ver o estado do serviço e, como na API (ADR 029), reduzir o próprio
+ * acesso pelo Acesso (sair, revogar chaves, excluir a conta).
  */
 const TERMS_EXEMPT_PATHS: ReadonlySet<string> = new Set([
   PATHS.acceptTerms,
