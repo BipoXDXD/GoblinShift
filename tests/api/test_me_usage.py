@@ -9,11 +9,13 @@ from datetime import datetime, timedelta
 
 import pytest
 from fastapi.testclient import TestClient
-from sqlalchemy import insert
+from sqlalchemy import insert, update
 from sqlalchemy.orm import Session, sessionmaker
 
 from goblinshift.capacity import set_account_storage_max
-from goblinshift.identity import Scope
+from goblinshift.identity import ADMIN_ISSUER, Scope
+from goblinshift.identity.providers import GITHUB_ISSUER, GOOGLE_ISSUER
+from goblinshift.identity.tables import app_user
 from goblinshift.platform.db import unit_of_work
 from goblinshift.runs.acceptance import RUN_OUTPUT_CEILING_BYTES
 from goblinshift.runs.quotas import set_account_quota
@@ -29,7 +31,7 @@ ME = "/api/v1/me"
 RUNS = "/api/v1/runs"
 GIB = 1024**3
 MIB = 1024**2
-ME_KEYS = {"id", "display_name", "scopes", "via", "limits", "usage", "terms"}
+ME_KEYS = {"id", "display_name", "provider", "scopes", "via", "limits", "usage", "terms"}
 TERMS_KEYS = {"current_version", "accepted_version", "accepted_at", "acceptance_required"}
 LIMIT_KEYS = {
     "runs_per_24h",
@@ -71,6 +73,23 @@ def test_get_me_chaves_do_json_exatamente(
     assert body["limits"].keys() == LIMIT_KEYS
     assert body["usage"].keys() == USAGE_KEYS
     assert body["terms"].keys() == TERMS_KEYS
+
+
+@pytest.mark.parametrize(
+    ("issuer", "provider"),
+    [(GOOGLE_ISSUER, "google"), (GITHUB_ISSUER, "github"), (ADMIN_ISSUER, None)],
+)
+def test_me_traz_o_provedor_da_conta(
+    client: TestClient, factory: sessionmaker[Session], issuer: str, provider: str | None
+) -> None:
+    user_id, auth = new_account(factory)
+    with unit_of_work(factory) as session:
+        session.execute(update(app_user).where(app_user.c.id == user_id).values(issuer=issuer))
+
+    body = client.get(ME, headers=auth).json()
+
+    assert body.keys() == ME_KEYS
+    assert body["provider"] == provider
 
 
 def test_conta_nova_tem_limites_de_1_7_e_consumo_zero(

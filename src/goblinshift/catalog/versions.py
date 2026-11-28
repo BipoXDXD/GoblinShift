@@ -130,6 +130,15 @@ class RecipeVersion:
         }
 
 
+def frozen_view(version: RecipeVersion) -> dict[str, object]:
+    """O que não muda dentro de uma versão publicada (1.6): schema e defaults.
+
+    É o conteúdo dos snapshots de `tests/catalog/congeladas/`. `status`, `limits` e `sunset_at`
+    ficam de fora: mudam sem versão nova (os limites de 1.7 são fixados na Run, na aceitação).
+    """
+    return {"variant_schema": version.variant_schema(), "defaults": version.resolve({})}
+
+
 class Catalog:
     def __init__(self, versions: Iterable[RecipeVersion]) -> None:
         self._versions = {(v.recipe_id, v.version): v for v in versions}

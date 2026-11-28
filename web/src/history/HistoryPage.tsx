@@ -56,13 +56,12 @@ export function HistoryPage({ now }: HistoryPageProps): ReactElement {
   // O período conta a partir da abertura da tela: o cursor da API vale só para os mesmos filtros,
   // então o início do período não pode andar enquanto a lista está aberta.
   const [anchorMs] = useState(now);
-  const nowMs = useNow(now, AVAILABILITY_TICK_MS);
   return (
     <div className="flex flex-col gap-8">
       <FocusHeading focusKey={filtersToSearchParams(filters).toString()}>{T.title}</FocusHeading>
       <HistoryResults
         query={toRunListQuery(filters, anchorMs)}
-        nowMs={nowMs}
+        now={now}
         filters={filters}
         onApplyFilters={(next) => {
           setSearchParams(filtersToSearchParams(next));
@@ -74,8 +73,8 @@ export function HistoryPage({ now }: HistoryPageProps): ReactElement {
 
 interface HistoryResultsProps {
   readonly query: RunListQuery;
-  /** Relógio atual (anda com a tela aberta), para dizer se os resultados ainda valem. */
-  readonly nowMs: number;
+  /** Relógio do servidor, para dizer se os resultados ainda valem. */
+  readonly now: () => number;
   readonly filters: HistoryFilters;
   readonly onApplyFilters: (filters: HistoryFilters) => void;
 }
@@ -85,7 +84,7 @@ const FIRST_PAGE: string | null = null;
 
 function HistoryResults({
   query,
-  nowMs,
+  now,
   filters,
   onApplyFilters,
 }: HistoryResultsProps): ReactElement {
@@ -103,6 +102,8 @@ function HistoryResults({
     initialPageParam: FIRST_PAGE,
     getNextPageParam: (last: RunList) => last.next_cursor,
   });
+  // Anda com a tela aberta e se acerta a cada página recebida, cujo `Date` corrige o relógio.
+  const nowMs = useNow(now, AVAILABILITY_TICK_MS, runs.dataUpdatedAt);
 
   const rows = useRef<HTMLDivElement>(null);
   const announceTimer = useRef<ReturnType<typeof setTimeout>>(undefined);

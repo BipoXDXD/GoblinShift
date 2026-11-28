@@ -17,7 +17,7 @@ if [[ ! -f .env ]]; then
   email="admin@goblinshift.local"
   # OpenObserve exige maiúscula, minúscula, dígito e caractere especial; sem "$",
   # que o Compose interpretaria como variável.
-  password="$(openssl rand -base64 30 | tr -dc 'A-Za-z0-9' | head -c 28)Aa1_"
+  password="$(openssl rand -base64 30 | tr -dc 'A-Za-z0-9' | cut -c1-28)Aa1_"
   {
     echo "OPENOBSERVE_ROOT_EMAIL=${email}"
     echo "OPENOBSERVE_ROOT_PASSWORD=${password}"

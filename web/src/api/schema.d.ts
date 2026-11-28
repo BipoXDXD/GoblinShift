@@ -701,6 +701,8 @@ export interface components {
             id: string;
             /** Display Name */
             display_name: string;
+            /** @description O provedor de login da conta: a reautenticação oferece só ele. Nulo na conta do operador, que não entra pelo navegador. */
+            provider: components["schemas"]["ProviderName"] | null;
             /** Scopes */
             scopes: components["schemas"]["Scope"][];
             /**
@@ -834,6 +836,11 @@ export interface components {
             /** Total */
             total: number;
         };
+        /**
+         * ProviderName
+         * @enum {string}
+         */
+        ProviderName: "google" | "github";
         /** ReceivedContent */
         ReceivedContent: {
             /**
@@ -1729,7 +1736,10 @@ export interface operations {
     createApiKey: {
         parameters: {
             query?: never;
-            header?: never;
+            header?: {
+                /** @description Opcional. Repetida na mesma conta, responde 409 com o id da chave que ela já emitiu; o segredo só aparece na primeira resposta. */
+                "Idempotency-Key"?: string;
+            };
             path?: never;
             cookie?: never;
         };
@@ -2493,6 +2503,15 @@ export interface operations {
                 content: {
                     "application/octet-stream": string;
                 };
+            };
+            /** @description Navegação do navegador que falhou: volta à tela da execução com ?falha=<code>. */
+            303: {
+                headers: {
+                    /** @description Tela da execução de origem: /execucoes/<uuid>?falha=<code>. */
+                    Location: string;
+                    [name: string]: unknown;
+                };
+                content?: never;
             };
             /** @description Unauthorized */
             401: {

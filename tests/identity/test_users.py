@@ -7,7 +7,13 @@ import pytest
 from sqlalchemy import func, insert, select, update
 from sqlalchemy.orm import Session, sessionmaker
 
-from goblinshift.identity import ExternalIdentity, LoginRefusal, LoginRefused, resolve_login
+from goblinshift.identity import (
+    ExternalIdentity,
+    LoginRefusal,
+    LoginRefused,
+    find_login_account,
+    resolve_login,
+)
 from goblinshift.identity.tables import app_user, web_session
 from goblinshift.platform.db import unit_of_work
 
@@ -121,6 +127,39 @@ def test_login_atualiza_o_nome_de_exibicao(factory: sessionmaker[Session]) -> No
     assert account_row(factory, GITHUB)["display_name"] == "octocat-novo"
 
 
+@pytest.mark.parametrize(
+    ("values", "reason"),
+    [
+        pytest.param(
+            {"deletion_requested_at": NOW}, LoginRefused.DELETION_REQUESTED, id="exclusao-pedida"
+        ),
+        pytest.param(
+            {"status": "blocked", "awaiting_approval": False},
+            LoginRefused.BLOCKED,
+            id="bloqueada-por-abuso",
+        ),
+        pytest.param(
+            {"status": "blocked", "awaiting_approval": True},
+            LoginRefused.PENDING_APPROVAL,
+            id="pendente",
+        ),
+    ],
+)
+def test_login_de_conta_indisponivel_nao_muda_o_nome(
+    factory: sessionmaker[Session], values: dict[str, object], reason: LoginRefused
+) -> None:
+    user_id = active_account(factory, GITHUB)
+    set_account(factory, user_id, **values)
+    renamed = ExternalIdentity(GITHUB.issuer, GITHUB.subject, "nome-do-provedor")
+
+    result = resolve(factory, renamed, signup_open=True)
+
+    assert refused(result) is reason
+    assert isinstance(result, LoginRefusal)
+    assert result.account_id == user_id
+    assert account_row(factory, GITHUB)["display_name"] == "octocat"
+
+
 def test_pendente_que_tenta_de_novo_continua_pendente(factory: sessionmaker[Session]) -> None:
     resolve(factory, GOOGLE, signup_open=False)
 
@@ -169,3 +208,34 @@ def test_mesmo_sujeito_em_provedores_diferentes_sao_contas_diferentes(
 
     assert google != github
     assert count_accounts(factory) == 2
+
+
+def find(factory: sessionmaker[Session], identity: ExternalIdentity) -> UUID | None:
+    with unit_of_work(factory) as session:
+        return find_login_account(session, identity)
+
+
+def test_find_login_account_acha_a_conta_pela_identidade(factory: sessionmaker[Session]) -> None:
+    google = active_account(factory, GOOGLE)
+    active_account(factory, GITHUB)
+
+    assert find(factory, GOOGLE) == google
+
+
+def test_find_login_account_nao_cria_conta(factory: sessionmaker[Session]) -> None:
+    assert find(factory, GOOGLE) is None
+    assert count_accounts(factory) == 0
+
+
+def test_find_login_account_separa_os_provedores(factory: sessionmaker[Session]) -> None:
+    active_account(factory, GOOGLE)
+
+    assert find(factory, ExternalIdentity(GITHUB.issuer, GOOGLE.subject, "x")) is None
+
+
+def test_find_login_account_separa_os_sujeitos_do_mesmo_provedor(
+    factory: sessionmaker[Session],
+) -> None:
+    active_account(factory, GOOGLE)
+
+    assert find(factory, ExternalIdentity(GOOGLE.issuer, "outro-sujeito", "x")) is None

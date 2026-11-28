@@ -271,3 +271,52 @@ describe("upload de conteúdo por XHR: inatividade", () => {
     await rejection;
   });
 });
+
+describe("upload de conteúdo por XHR: relógio do servidor", () => {
+  const SERVER_DATE = "Wed, 14 Oct 2026 15:00:00 GMT";
+
+  function setupWithClock() {
+    const xhr = new FakeXhr();
+    const observeServerDate = vi.fn<(dateHeader: string | null) => void>();
+    const uploader = createContentUploader({
+      createXhr: () => xhr,
+      csrfToken: () => null,
+      now: () => NOW_MS,
+      observeServerDate,
+    });
+    const pending = uploader
+      .upload({ content, file: new Blob(["abcd"]), onProgress: () => undefined })
+      .catch(() => undefined);
+    return { xhr, observeServerDate, pending };
+  }
+
+  it.each([
+    [200, received],
+    [429, rateLimited],
+  ] as const)("entrega o Date da resposta (%i) ao relógio", async (status, body) => {
+    const { xhr, observeServerDate, pending } = setupWithClock();
+
+    xhr.respond(status, body, { Date: SERVER_DATE });
+    await pending;
+
+    expect(observeServerDate).toHaveBeenCalledExactlyOnceWith(SERVER_DATE);
+  });
+
+  it("entrega null quando a resposta vem sem Date", async () => {
+    const { xhr, observeServerDate, pending } = setupWithClock();
+
+    xhr.respond(200, received);
+    await pending;
+
+    expect(observeServerDate).toHaveBeenCalledExactlyOnceWith(null);
+  });
+
+  it("não observa nada numa falha de rede, que não tem resposta", async () => {
+    const { xhr, observeServerDate, pending } = setupWithClock();
+
+    xhr.failNetwork();
+    await pending;
+
+    expect(observeServerDate).not.toHaveBeenCalled();
+  });
+});

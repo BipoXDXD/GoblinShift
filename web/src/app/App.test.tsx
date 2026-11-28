@@ -1,11 +1,14 @@
 import { act, render, screen, within } from "@testing-library/react";
-import { describe, expect, it, vi } from "vitest";
+import { describe, expect, it, onTestFinished, vi } from "vitest";
 
 import { installAnnounceClock, untilFakeClock } from "../test/announceClock";
 import { preloadRoutes } from "../test/appRoutes";
-import { problemResponse } from "../test/fakeApi";
+import { jsonResponse, problemResponse, runBody } from "../test/fakeApi";
+import { TEXT } from "../text";
 
 import { App } from "./App";
+
+const HOUR_MS = 60 * 60 * 1_000;
 
 describe("App", () => {
   it("renderiza a rota inicial", async () => {
@@ -139,6 +142,38 @@ describe("App", () => {
       new Request(input).url.endsWith("/api/v1/catalog"),
     );
     expect(catalogCalls).toHaveLength(1);
+  });
+
+  it("o histórico diz expirado pelo relógio do servidor quando o local está 3 h atrasado", async () => {
+    await preloadRoutes("/historico");
+    const localMs = Date.parse("2026-10-14T12:00:00Z");
+    vi.useFakeTimers({ toFake: ["Date"] });
+    onTestFinished(() => {
+      vi.useRealTimers();
+    });
+    vi.setSystemTime(localMs);
+    const serverDate = new Date(localMs + 3 * HOUR_MS).toUTCString();
+    const fetchMock = vi.fn<typeof fetch>((input) => {
+      const response = new Request(input).url.includes("/api/v1/runs?")
+        ? jsonResponse({
+            data: [
+              runBody({
+                status: "succeeded",
+                results_expire_at: new Date(localMs + HOUR_MS).toISOString(),
+              }),
+            ],
+            next_cursor: null,
+          })
+        : problemResponse(401, "AUTHENTICATION_REQUIRED");
+      response.headers.set("Date", serverDate);
+      return Promise.resolve(response);
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    window.history.pushState({}, "", "/historico");
+
+    render(<App />);
+
+    expect(await screen.findByText(TEXT.history.availability.expired)).toBeInTheDocument();
   });
 
   it("mostra página não encontrada para rota desconhecida", () => {

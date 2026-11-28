@@ -36,7 +36,8 @@ ROOT_STEP_COMMAND = (
 )
 ROOT_ONLY_TEST = "tests/executor_ctl/test_workarea.py"
 PLAYWRIGHT_RUN = re.compile(
-    r"npm run e2e(:notice|:webkit)?$|npx playwright test -c e2e\b|e2e-gvisor\.sh journeys"
+    r"npm run e2e(:notice|:notice-incident|:webkit)?$|npx playwright test -c e2e\b"
+    r"|e2e-gvisor\.sh journeys"
 )
 SKIP_CHECK = "npm run e2e:check-skips --"
 CONTRACT_SCRIPT = ROOT / "scripts" / "contract-test.sh"
