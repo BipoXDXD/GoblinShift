@@ -2,6 +2,8 @@
 // execução ou abre `data.url`. Sem `self`: o service worker passa o `clients` dele, e o teste um
 // falso.
 
+import { LOCAL_PATH } from "../app/localPath";
+
 interface NotificationWindow {
   readonly url: string;
   focus: () => Promise<unknown>;
@@ -40,7 +42,7 @@ function localTarget(data: unknown, origin: string): URL | null {
     return null;
   }
   const { url } = data;
-  if (typeof url !== "string" || !/^\/(?![/\\])/.test(url)) {
+  if (typeof url !== "string" || !LOCAL_PATH.test(url)) {
     return null;
   }
   const target = new URL(url, origin);

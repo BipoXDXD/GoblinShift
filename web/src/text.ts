@@ -143,6 +143,10 @@ export const TEXT = {
       `${names.length === 1 ? "1 arquivo recebido" : `${String(names.length)} arquivos recebidos`}: ${names.join(", ")}.`,
     chooseRecipe: "Escolha a receita para estes arquivos.",
     recipesLabel: "Receitas para estes arquivos",
+    receivedHeading: "Arquivos recebidos",
+    receivedHint: "Confira os arquivos que chegaram pelo Compartilhar antes de enviá-los.",
+    sendReceived: "Enviar os arquivos recebidos",
+    discardReceived: "Descartar",
     expired:
       "Os arquivos compartilhados expiraram ou já foram usados. Escolha os arquivos de novo.",
     unavailable:

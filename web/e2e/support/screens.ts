@@ -387,9 +387,9 @@ export const SCREENS: readonly Screen[] = [
     name: "Oficina com o compartilhamento indisponível",
     open: async (page: Page): Promise<void> => {
       await page.goto("/?compartilhamento=indisponivel");
-      await expect(page.getByRole("alert")).toContainText(
-        "Os arquivos compartilhados não chegaram",
-      );
+      await expect(
+        page.getByRole("status").filter({ hasText: "Os arquivos compartilhados não chegaram" }),
+      ).toBeVisible();
     },
   },
   {

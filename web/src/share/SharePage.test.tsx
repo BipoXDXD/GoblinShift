@@ -80,12 +80,18 @@ describe("página do compartilhamento", () => {
     expect(await screen.findByRole("alert")).toHaveTextContent(/expiraram ou já foram usados/);
   });
 
-  it("a Oficina explica quando o compartilhamento não chegou", async () => {
-    render("/?compartilhamento=indisponivel");
+  it("a Oficina explica, depois do título, quando o compartilhamento não chegou", async () => {
+    const { router } = render("/?compartilhamento=indisponivel");
 
-    expect(await screen.findByRole("alert")).toHaveTextContent(
-      /Os arquivos compartilhados não chegaram/,
-    );
+    const notice = await screen.findByText(/Os arquivos compartilhados não chegaram/);
+    const status = notice.closest('[role="status"]');
+    expect(status).not.toBeNull();
+    const heading = screen.getByRole("heading", { level: 1 });
+    expect(heading.compareDocumentPosition(notice) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    await waitFor(() => {
+      expect(currentUrl(router)).toBe("/");
+    });
+    expect(notice).toBeVisible();
   });
 
   it("a Oficina sem o parâmetro não mostra o aviso", async () => {

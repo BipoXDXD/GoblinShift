@@ -1,6 +1,7 @@
 import { generatePath } from "react-router";
 
 import type { RecipeId } from "../recipes/types";
+import { LOCAL_PATH } from "./localPath";
 
 // Todas as rotas da interface saem daqui: o idioma das URLs (D12) ainda não foi decidido, e trocá-lo
 // é mudar só estes textos. Os segmentos atuais são provisórios.
@@ -20,10 +21,6 @@ export const PATHS = {
   // Destino do `share_target` do manifest (ADR 064): o service worker recebe o POST e manda o GET.
   share: "/compartilhar",
 } as const;
-
-// Caminho deste site: uma barra e, depois dela, nem outra barra nem contrabarra. `//evil.com` e
-// `/\evil.com` o navegador lê como outro site.
-const LOCAL_PATH = /^\/(?![/\\])/;
 
 /**
  * O caminho sem a barra final (`/termos/` → `/termos`), ou `null` quando já está sem ela ou quando

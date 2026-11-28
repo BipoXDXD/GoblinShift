@@ -1,4 +1,5 @@
 import { screen, within } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import { peekSharedNames, SHARE_TTL_MS } from "../share/inbox";
@@ -36,19 +37,52 @@ function render(catalog: () => Response = catalogHandler()) {
     "GET /api/v1/catalog": catalog,
     "POST /api/v1/uploads": uploadIntentsHandler(),
   });
-  return renderRoutes({ routes: appRoutes(api.client), path: PATH, client: api.client });
+  return {
+    ...renderRoutes({ routes: appRoutes(api.client), path: PATH, client: api.client }),
+    api,
+  };
+}
+
+function uploadRequests(requests: readonly Request[]): Request[] {
+  return requests.filter((request) => new URL(request.url).pathname.startsWith("/api/v1/uploads"));
 }
 
 describe("Bancada aberta pelo compartilhamento", () => {
-  it("entra com os arquivos compartilhados, que saem da caixa de entrada", async () => {
+  it("mostra os arquivos recebidos e não envia nada antes do clique", async () => {
+    await seedShared(caches, [csv("clientes.csv"), csv("pedidos.csv")], { id: SHARE_ID });
+
+    const { api } = render();
+
+    const received = await screen.findByRole("region", { name: "Arquivos recebidos" });
+    expect(within(received).getByText("clientes.csv")).toBeVisible();
+    expect(within(received).getByText("pedidos.csv")).toBeVisible();
+    expect(await peekSharedNames(caches, SHARE_ID, Date.now())).toBe("expired");
+    expect(uploadRequests(api.requests)).toEqual([]);
+    expect(screen.getByText("A bancada está vazia")).toBeVisible();
+  });
+
+  it("descartar os arquivos recebidos não envia nada", async () => {
+    await seedShared(caches, [csv("clientes.csv")], { id: SHARE_ID });
+    const { api } = render();
+
+    await userEvent.click(await screen.findByRole("button", { name: "Descartar" }));
+
+    expect(screen.queryByRole("region", { name: "Arquivos recebidos" })).toBeNull();
+    expect(uploadRequests(api.requests)).toEqual([]);
+  });
+
+  it("entra com os arquivos compartilhados depois do clique em enviar", async () => {
     await seedShared(caches, [csv("clientes.csv"), csv("pedidos.csv")], { id: SHARE_ID });
 
     render();
+    await userEvent.click(
+      await screen.findByRole("button", { name: "Enviar os arquivos recebidos" }),
+    );
 
     const list = await screen.findByRole("list", { name: "Ordem de processamento" });
     expect(await within(list).findByText("clientes.csv")).toBeVisible();
     expect(within(list).getByText("pedidos.csv")).toBeVisible();
-    expect(await peekSharedNames(caches, SHARE_ID, Date.now())).toBe("expired");
+    expect(screen.queryByRole("region", { name: "Arquivos recebidos" })).toBeNull();
   });
 
   it("compartilhamento sobrevive ao login", async () => {

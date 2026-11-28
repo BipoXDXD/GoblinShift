@@ -25,8 +25,12 @@ deploy novo vale na próxima navegação.
   - não guarda cache de página nem de asset e não responde nenhum outro pedido. O deploy segue
     valendo na próxima navegação, como hoje. `install` chama `skipWaiting` e `activate` chama
     `clients.claim`: a versão nova não tem estado para migrar.
-- **Caixa de entrada com prazo:** cada compartilhamento vale 1 h (`SHARE_TTL_MS`) e é lido uma vez
-  só (`takeShared` apaga). Um compartilhamento novo apaga os vencidos. Os arquivos ficam só no
+- **Caixa de entrada com prazo e tetos:** cada compartilhamento vale 1 h (`SHARE_TTL_MS`) e é lido
+  uma vez só (`takeShared` apaga). Os vencidos são apagados a cada gravação, a cada leitura
+  (`peekSharedNames`, `takeShared`) e no `activate` do service worker. Os tetos são os do
+  servidor: até 100 arquivos, 50 MiB por arquivo (256 MiB para vídeo) e 512 MiB no total. Fora
+  deles nada é gravado; se um `put` falha (cota), o que já foi gravado daquele id é apagado. Nos
+  dois casos a resposta é o `303 /?compartilhamento=indisponivel`. Os arquivos ficam só no
   aparelho e só vão ao servidor pelo fluxo normal da Bancada (intenções, cotas, `PUT` do conteúdo),
   depois do login.
 - **Build:** o `sw.ts` tem um build próprio do Vite, em IIFE, depois do da página
@@ -39,11 +43,25 @@ deploy novo vale na próxima navegação.
 - **Nginx:** `location = /sw.js` sai sem cache e dá 404 quando o arquivo falta.
   `location = /compartilhar` serve a SPA no `GET`. O `POST` só chega ao Nginx sem service worker
   (primeira visita, registro que falhou): o 405 do estático e o 413 de um corpo acima de 64k vão
-  para `303 /?compartilhamento=indisponivel`, e a Oficina explica o motivo. A CSP
-  `default-src 'self'` já cobre `worker-src`.
+  para `303 /?compartilhamento=indisponivel`, e a Oficina explica o motivo. A CSP não muda: sem
+  `worker-src`, o navegador usa o `script-src 'self' 'wasm-unsafe-eval'`, que já permite o
+  `/sw.js` da própria origem.
 - **Modo de exibição (D6 = a):** `"display": "minimal-ui"`. Com `"browser"` o Chrome não instala
   o PWA e o `share_target` não registra. O `minimal-ui` mantém voltar e recarregar, de que o
   vaivém do OAuth e as rotas profundas precisam.
+
+## Ameaça: envio sem consentimento
+
+Qualquer site pode montar um formulário multipart com `action` em `/compartilhar` e enviá-lo do
+navegador da pessoa. O service worker não distingue esse POST do `share_target` (o navegador não
+marca a origem do formulário de forma confiável), e os arquivos entrariam na caixa de entrada. Se a
+Bancada os enviasse sozinha ao abrir, um site de fora subiria arquivos para a conta logada, gastando
+cota e criando execuções que a pessoa não pediu.
+
+**Mitigação:** o que vem do compartilhamento nunca dispara envio. A Bancada mostra os nomes em
+"Arquivos recebidos" e espera o clique em "Enviar os arquivos recebidos" (ou "Descartar"); só então
+os arquivos entram no lote, pelo mesmo caminho do seletor de arquivos. Os tetos e o prazo da caixa de
+entrada limitam o que um POST de fora consegue ocupar no aparelho.
 
 ## Alternativas descartadas
 

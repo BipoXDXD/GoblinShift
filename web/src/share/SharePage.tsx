@@ -1,9 +1,9 @@
-import { ChevronRight } from "lucide-react";
 import { useEffect, useId, useState, type ReactElement } from "react";
-import { Link, useNavigate, useSearchParams } from "react-router";
+import { useNavigate, useSearchParams } from "react-router";
 
 import { SHARE_ID_PARAM, workbenchPath, workbenchSharedPath } from "../app/paths";
 import { FocusHeading } from "../components/a11y/FocusHeading";
+import { RecipeCard } from "../recipes/RecipeCard";
 import { RECIPE_LIST, recipeOf, recipesAccepting } from "../recipes/registry";
 import type { RecipeId } from "../recipes/types";
 import { TEXT } from "../text";
@@ -11,7 +11,6 @@ import { ShareNotice } from "./ShareNotice";
 import { peekShared } from "./sharedInbox";
 
 const T = TEXT.share;
-const SUMMARIES: Readonly<Record<RecipeId, string>> = TEXT.home.summaries;
 
 type Shared =
   | { readonly kind: "loading" }
@@ -32,14 +31,17 @@ export function SharePage(): ReactElement {
   const [shared, setShared] = useState<Shared>({ kind: "loading" });
 
   useEffect(() => {
+    if (id === null) {
+      return;
+    }
     let active = true;
-    void (id === null ? Promise.resolve("expired" as const) : peekShared(id))
+    void peekShared(id)
       .catch(() => "expired" as const)
       .then((names) => {
         if (!active) {
           return;
         }
-        if (names === "expired" || id === null) {
+        if (names === "expired") {
           setShared({ kind: "expired" });
           return;
         }
@@ -61,7 +63,8 @@ export function SharePage(): ReactElement {
   return (
     <div className="flex flex-col gap-8">
       <FocusHeading>{T.title}</FocusHeading>
-      <ShareBody shared={shared} id={id} />
+      {/* Sem id não há o que ler: a página já abre como vencida. */}
+      <ShareBody shared={id === null ? { kind: "expired" } : shared} id={id} />
     </div>
   );
 }
@@ -111,31 +114,13 @@ function RecipeChoices({
         {T.recipesLabel}
       </h2>
       <ul aria-labelledby={labelId} className="grid gap-4 md:grid-cols-3 md:gap-6">
-        {recipes.map((recipeId) => {
-          const recipe = recipeOf(recipeId);
-          return (
-            <li
-              key={recipeId}
-              className="relative flex flex-col gap-3 rounded-lg bg-surface p-6 shadow-card transition hover:shadow-float"
-            >
-              <h3 className="font-display text-xl font-semibold text-fg">{recipe.title}</h3>
-              <p className="flex-1 text-fg-muted">{SUMMARIES[recipeId]}</p>
-              {/* O link cobre o cartão inteiro (card-link, base.css); o foco aparece no cartão. */}
-              <Link
-                to={
-                  shareId === null
-                    ? workbenchPath(recipeId)
-                    : workbenchSharedPath(recipeId, shareId)
-                }
-                className="card-link inline-flex min-h-11 items-center gap-1 font-semibold"
-              >
-                {TEXT.home.openWorkbench}{" "}
-                <span className="sr-only">{TEXT.home.openWorkbenchOf(recipe.title)}</span>
-                <ChevronRight aria-hidden="true" className="size-4" />
-              </Link>
-            </li>
-          );
-        })}
+        {recipes.map((recipeId) => (
+          <RecipeCard
+            key={recipeId}
+            recipeId={recipeId}
+            to={shareId === null ? workbenchPath(recipeId) : workbenchSharedPath(recipeId, shareId)}
+          />
+        ))}
       </ul>
     </section>
   );

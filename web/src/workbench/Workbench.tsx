@@ -39,6 +39,7 @@ import type { Preset } from "../presets/api";
 import type { RecipeForm, RecipeModule } from "../recipes/registry";
 import type { RecipeDraft, RecipeId, RecipeInput } from "../recipes/types";
 import { createRun } from "../runs/commands";
+import { SharedFilesPrompt } from "../share/SharedFilesPrompt";
 import { ShareNotice } from "../share/ShareNotice";
 import { useSharedFiles } from "../share/useSharedFiles";
 import { TEXT } from "../text";
@@ -91,7 +92,7 @@ export function Workbench({
   const client = useApiClient();
   const navigate = useNavigate();
   const batch = useUploadBatch(uploadServices);
-  const sharedExpired = useSharedFiles(sharedId, batch.add);
+  const shared = useSharedFiles(sharedId, batch.add);
   const [order, setOrder] = useState<readonly string[]>([]);
   const [draft, setDraft] = useState<RecipeDraft<RecipeId>>(form.initialDraft);
   const [attempt, setAttempt] = useState(0);
@@ -182,7 +183,7 @@ export function Workbench({
   return (
     <div className="flex flex-col gap-8">
       {notice}
-      {sharedExpired && <ShareNotice>{TEXT.share.expired}</ShareNotice>}
+      {shared.expired && <ShareNotice>{TEXT.share.expired}</ShareNotice>}
       <form noValidate onSubmit={onSubmit} className="flex flex-col gap-8">
         <ErrorSummary issues={issues} attempt={attempt} />
         {/* Duas colunas a partir de 1024 px (D9): arquivos fluida, parâmetros com largura fixa. A
@@ -201,6 +202,7 @@ export function Workbench({
               chosenCount={entries.length}
               onFiles={batch.add}
             />
+            <SharedFilesPrompt shared={shared} />
             {entries.length === 0 ? (
               <EmptyState
                 title={TEXT.workbench.noFilesYet}
