@@ -7,8 +7,8 @@ from pathlib import Path
 import pytest
 from pydantic import ValidationError
 
+from goblinshift.entrypoints.bootstrap import build_runner
 from goblinshift.entrypoints.maintenance import main as maintenance_main
-from goblinshift.entrypoints.worker import build_runner
 from goblinshift.entrypoints.worker import main as worker_main
 from goblinshift.platform.settings import LOCAL_EXECUTOR_IMAGE, ExecutorConfigError, Settings
 from goblinshift.runs.worker.executor_ctl_runner import ExecutorCtlRunner

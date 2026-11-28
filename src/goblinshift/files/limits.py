@@ -6,10 +6,11 @@ KIB = 1024
 MIB = 1024 * KIB
 GIB = 1024 * MIB
 
-MAX_FILE_BYTES = 32 * MIB
+# Teto do arquivo comum: "50 MB" na interface, 50 MiB na API e nos docs técnicos (ADR 062).
+MAX_FILE_BYTES = 50 * MIB
 # 1.7: "vídeo, quando disponível, até 256 MiB" (Media Mill, ADR 036). O tipo vem da extensão do
 # nome, que é só indício: o conteúdo é conferido no executor, e só a versão de receita que declara
-# `max_input_bytes` acima de 32 MiB aceita a entrada maior na execução.
+# `max_input_bytes` acima do teto comum aceita a entrada maior na execução.
 MAX_VIDEO_FILE_BYTES = 256 * MIB
 VIDEO_EXTENSIONS = (".mp4", ".mov", ".webm")
 MAX_BATCH_FILES = 100

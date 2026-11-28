@@ -278,7 +278,7 @@ def test_entrada_que_completa_2_gib_em_24h_e_aceita(
 def test_execucao_cuja_entrada_sozinha_passa_de_2_gib_e_invalida(
     factory: sessionmaker[Session], storage: FileStorage
 ) -> None:
-    # Só o Image Forge (100 entradas de 32 MiB) chega a passar de 2 GiB numa execução.
+    # Só o Image Forge (100 entradas de até 50 MiB) chega a passar de 2 GiB numa execução.
     owner = new_owner(factory)
     inputs = ready_inputs(factory, storage, owner, 65)
     for upload_id in inputs:
@@ -350,15 +350,16 @@ def test_media_mill_recusa_lote_acima_de_512_mib(
         accept(factory, owner, RunCommand("media-mill", 1, (first, second, third), {}))
 
 
-def test_receita_comum_recusa_entrada_acima_de_32_mib(
+def test_receita_comum_recusa_entrada_um_byte_acima_do_teto(
     factory: sessionmaker[Session], storage: FileStorage
 ) -> None:
+    # Teto comum por extenso (ADR 062), no Image Forge, que o publica.
     owner = new_owner(factory)
     [upload_id] = ready_inputs(factory, storage, owner)
-    pretend_size(factory, upload_id, 32 * 1024**2 + 1)
+    pretend_size(factory, upload_id, 50 * 1024**2 + 1)
 
     with pytest.raises(InvalidRunCommandError, match="input_upload_ids"):
-        accept(factory, owner, run_command([upload_id]))
+        accept(factory, owner, RunCommand("image-forge", 1, (upload_id,), {}))
 
 
 def test_quota_nao_conta_execucao_recusada(

@@ -13,6 +13,7 @@ import {
   RUN_ID,
   screenRequests,
 } from "../test/fakeApi";
+import { installFakeNotification } from "../test/fakeNotification";
 import { expectHeadingFocused } from "../test/focus";
 import { currentUrl, renderRoutes } from "../test/renderRoutes";
 import { TEXT } from "../text";
@@ -499,6 +500,36 @@ describe("Execução: falha do polling sem anúncio repetido", () => {
     },
   );
 
+  it("o Avisar quando terminar fica ao lado do Cancelar e some no término", async () => {
+    installFakeNotification("default");
+    const { queryClient } = setup(
+      inSequence(running, () => jsonResponse(runBody({ status: "succeeded" }))),
+    );
+    expect(await screen.findByRole("button", { name: "Cancelar execução" })).toBeVisible();
+    expect(screen.getByRole("button", { name: "Avisar quando terminar" })).toBeVisible();
+
+    await nextPoll(queryClient);
+
+    expect(await screen.findByText("Concluída")).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Avisar quando terminar" })).toBeNull();
+  });
+
+  it("o Avisar quando terminar que some com o foco devolve o foco ao título", async () => {
+    installFakeNotification("default");
+    const { queryClient } = setup(
+      inSequence(running, () => jsonResponse(runBody({ status: "succeeded" }))),
+    );
+    const toggle = await screen.findByRole("button", { name: "Avisar quando terminar" });
+    act(() => {
+      toggle.focus();
+    });
+
+    await nextPoll(queryClient);
+
+    expect(await screen.findByText("Concluída")).toBeInTheDocument();
+    await expectHeadingFocused("Execução");
+  });
+
   it("com o convite na tela, o Cancelar some e os dados já carregados ficam", async () => {
     const { queryClient } = setup(
       inSequence(running, () => problemResponse(401, "AUTHENTICATION_REQUIRED")),
@@ -875,6 +906,60 @@ describe("pré-visualização dos resultados", () => {
         .map((th) => th.textContent),
     ).toEqual(["nome", "email"]);
     expect(within(table).getByRole("cell", { name: "ana@example.com" })).toBeInTheDocument();
+  });
+
+  it("CSV: rotula as colunas sem nome do cabeçalho da prévia", async () => {
+    setupPreview({ fileName: "clientes.csv", previewName: "clientes.csv" }, () =>
+      bytes("nome,, \nAna,1,2,extra\n"),
+    );
+
+    const table = await screen.findByRole("table", { name: "Amostra de clientes.csv: 1 registro" });
+    expect(
+      within(table)
+        .getAllByRole("columnheader")
+        .map((th) => th.textContent),
+    ).toEqual(["nome", "Coluna 2", "Coluna 3", "Coluna 4"]);
+    expect(within(table).getByRole("cell", { name: "extra" })).toBeInTheDocument();
+    // `empty-table-header` é best-practice: o axe do navegador (contrast.spec.ts) roda só as
+    // regras WCAG e não o vê; aqui o axe roda as regras padrão.
+    expect(await axeViolations(table)).toEqual([]);
+  });
+
+  it("CSV: cabeçalho vazio rotula todas as colunas pela posição", async () => {
+    setupPreview({ fileName: "clientes.csv", previewName: "clientes.csv" }, () => bytes("\n1,2\n"));
+
+    const table = await screen.findByRole("table", { name: "Amostra de clientes.csv: 1 registro" });
+    expect(
+      within(table)
+        .getAllByRole("columnheader")
+        .map((th) => th.textContent),
+    ).toEqual(["Coluna 1", "Coluna 2"]);
+  });
+
+  it("CSV: o rótulo da coluna sem nome não repete um cabeçalho real", async () => {
+    setupPreview({ fileName: "clientes.csv", previewName: "clientes.csv" }, () =>
+      bytes("Coluna 2,,\nAna,1,2\n"),
+    );
+
+    const table = await screen.findByRole("table", { name: "Amostra de clientes.csv: 1 registro" });
+    expect(
+      within(table)
+        .getAllByRole("columnheader")
+        .map((th) => th.textContent),
+    ).toEqual(["Coluna 2", "Coluna 2 (2)", "Coluna 3"]);
+  });
+
+  it("CSV: o sufixo do rótulo também não repete um cabeçalho real", async () => {
+    setupPreview({ fileName: "clientes.csv", previewName: "clientes.csv" }, () =>
+      bytes("Coluna 2 (2),,Coluna 2\nAna,1,2\n"),
+    );
+
+    const table = await screen.findByRole("table", { name: "Amostra de clientes.csv: 1 registro" });
+    expect(
+      within(table)
+        .getAllByRole("columnheader")
+        .map((th) => th.textContent),
+    ).toEqual(["Coluna 2 (2)", "Coluna 2 (3)", "Coluna 2"]);
   });
 
   it("CSV: a caixa rolável da amostra recebe foco e tem o nome da legenda", async () => {

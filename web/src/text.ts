@@ -203,8 +203,30 @@ export const TEXT = {
     backHome: "Oficina",
     filesHeading: "Arquivos de entrada",
     chooseFiles: "Escolher arquivos",
-    chooseFilesHint: "Pode escolher vários de uma vez, ou soltar os arquivos aqui.",
+    chooseFilesHint:
+      "Pode escolher vários de uma vez, soltar aqui ou colar com Ctrl+V (⌘V no Mac).",
+    pasted: (count: number) =>
+      count === 1 ? "1 arquivo colado." : `${String(count)} arquivos colados.`,
+    pasteTooMany: (count: number, max: number) =>
+      `Você colou ${String(count)} arquivos; esta receita aceita até ${String(max)} por execução. Nada foi enviado: cole menos arquivos de cada vez.`,
     dropHere: "Solte para adicionar.",
+    chooseFolder: "Escolher pasta",
+    folderAdded: (count: number) =>
+      count === 1
+        ? "1 arquivo da pasta adicionado."
+        : `${String(count)} arquivos da pasta adicionados.`,
+    folderTooBig: (max: number) =>
+      `A pasta tem mais de ${String(max)} arquivos; esta receita aceita até ${String(max)} por execução. Escolha uma pasta menor ou os arquivos um a um.`,
+    folderTooManyEntries:
+      "A pasta tem pastas e itens demais para ler de uma vez. Escolha uma pasta menor ou os arquivos um a um.",
+    pasteCanceled: "Colagem cancelada: a Bancada está ocupada.",
+    folderEmpty: "A pasta não tem arquivos para enviar.",
+    folderSkipped: (count: number) =>
+      `${String(count)} arquivo(s) oculto(s) ou de sistema ficaram de fora.`,
+    folderUnreadable: (count: number) =>
+      count === 1
+        ? "1 item não pôde ser lido e ficou de fora."
+        : `${String(count)} itens não puderam ser lidos e ficaram de fora.`,
     filesChosen: (count: number) =>
       count === 0
         ? "Nenhum arquivo escolhido"
@@ -427,6 +449,28 @@ export const TEXT = {
       alreadyFinished: "A execução já tinha terminado; não havia o que cancelar.",
     },
     backToWorkbench: (recipe: string) => `Bancada da ${recipe}`,
+    // Aviso de término com a aba escondida (D3); a cancelada não avisa: foi a pessoa que cancelou.
+    completion: {
+      title: {
+        succeeded: "✓ Concluída",
+        succeeded_with_warnings: "! Concluída com avisos",
+        failed: "✕ Falhou",
+      },
+      toggleOff: "Avisar quando terminar",
+      toggleOn: "Aviso ligado",
+      blocked:
+        "O navegador bloqueou os avisos deste site. O título da aba ainda muda quando a execução terminar.",
+      // Aparece na tela bloqueada: o corpo nunca leva nome de arquivo.
+      notification: {
+        title: {
+          succeeded: "Execução concluída",
+          succeeded_with_warnings: "Execução concluída com avisos",
+          failed: "Execução falhou",
+        },
+        body: (recipe: string, count: number) =>
+          `${recipe} · ${String(count)} ${count === 1 ? "arquivo" : "arquivos"}`,
+      },
+    },
     flavor: {
       queued: "As goblins pegam este lote assim que uma bancada vagar.",
       succeeded: "Pronto! As goblins terminaram o lote.",
@@ -495,6 +539,12 @@ export const TEXT = {
         },
         tableCaption: (fileName: string, rows: number) =>
           `Amostra de ${fileName}: ${rows === 1 ? "1 registro" : `${String(rows)} registros`}`,
+        // Nome em branco no cabeçalho; `position` começa em 1 (D7 do plano contrato-e-front).
+        // `copy` acima de 1 desfaz a colisão com um cabeçalho real de mesmo texto.
+        unnamedColumn: (position: number, copy: number) =>
+          copy === 1
+            ? `Coluna ${String(position)}`
+            : `Coluna ${String(position)} (${String(copy)})`,
         pagesCaption: (fileName: string, pages: number) =>
           `Páginas de ${fileName}: ${pages === 1 ? "1 página" : `${String(pages)} páginas`}`,
         page: (pageNumber: number, inputPosition: number) =>
@@ -776,6 +826,8 @@ export const TEXT = {
       reauthBody:
         "Por segurança, esta ação exige um login feito há poucos minutos. Entre de novo e volte para cá.",
       failed: "Não foi possível entrar. Tente de novo com a mesma conta ou com o outro provedor.",
+      reauthStale:
+        "O Google confirmou sua conta sem pedir a senha, então a confirmação não vale. Saia da conta Google neste navegador e entre de novo.",
       navSignIn: "Entrar",
       navAccess: "Acesso",
     },
@@ -784,6 +836,11 @@ export const TEXT = {
       loading: "Carregando o seu acesso.",
       sessionHeading: "Sessão",
       signedInAs: (name: string) => `Você entrou como ${name}.`,
+      accountIdLabel: "Identificador da conta",
+      accountIdHint: "Informe este identificador ao escrever para privacidade@goblinshift.dev.",
+      copyAccountId: "Copiar identificador",
+      accountIdCopied: "Identificador copiado.",
+      accountIdCopyFailed: "Não foi possível copiar. Selecione o identificador e copie à mão.",
       viaApiKey:
         "Este acesso é por chave de API. Sair, chaves e exclusão da conta só funcionam pela sessão do navegador.",
       signOut: "Sair",

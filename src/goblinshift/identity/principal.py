@@ -12,6 +12,10 @@ from uuid import UUID
 
 SCOPE_SEPARATOR = ","
 
+# Canal da credencial: sessão web ou chave de API. É também o balde do limite de requisições
+# (`rate_limit.count_request`): as chaves da conta dividem um, e a sessão web tem o seu.
+type RequestChannel = Literal["session", "api_key"]
+
 
 class Scope(StrEnum):
     """Escopos de chave de API da tabela de rotas de 1.6.
@@ -32,13 +36,13 @@ class Principal:
     """Credencial já autenticada: sessão web ou chave de API.
 
     A sessão usa as permissões da conta, isto é, todos os escopos (1.6); a chave, só os seus.
-    `session_id` e `authenticated_at` (login no provedor, base da autenticação recente de 10 min)
-    existem só na sessão.
+    `session_id` e `authenticated_at` (hora do login no provedor, base só da autenticação recente
+    de 10 min; o teto absoluto conta da abertura da sessão) existem só na sessão.
     """
 
     owner_id: UUID
     scopes: frozenset[Scope]
-    via: Literal["session", "api_key"]
+    via: RequestChannel
     session_id: UUID | None = None
     authenticated_at: datetime | None = None
 

@@ -7,13 +7,15 @@ vale entre réplicas e nunca passa do limite, nem com requisições simultâneas
 import threading
 from collections.abc import Callable
 from datetime import UTC, datetime, timedelta, timezone
+from typing import get_args
 from uuid import UUID
 
 import pytest
-from sqlalchemy import func, insert, select
+from sqlalchemy import Table, func, insert, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session, sessionmaker
 
+from goblinshift.identity.principal import RequestChannel
 from goblinshift.identity.rate_limit import (
     REQUESTS_PER_MINUTE,
     RequestClass,
@@ -22,7 +24,7 @@ from goblinshift.identity.rate_limit import (
     count_windows,
     delete_expired_windows,
 )
-from goblinshift.identity.tables import request_window
+from goblinshift.identity.tables import channel_request_window, legacy_request_window
 from goblinshift.platform.db import unit_of_work
 from tests.identity.support import new_user
 from tests.lock_support import InThread, in_thread, wait_until_someone_waits_for_a_lock
@@ -40,24 +42,35 @@ def count(
     owner: UUID,
     request_class: RequestClass = RequestClass.READ,
     now: datetime = NOW,
+    channel: RequestChannel = "session",
 ) -> None:
     with unit_of_work(factory) as session:
-        count_request(session, owner, request_class, now)
+        count_request(session, owner, channel, request_class, now)
 
 
 def count_many(
-    factory: sessionmaker[Session], owner: UUID, request_class: RequestClass, times: int
+    factory: sessionmaker[Session],
+    owner: UUID,
+    request_class: RequestClass,
+    times: int,
+    channel: RequestChannel = "session",
 ) -> None:
     for _ in range(times):
-        count(factory, owner, request_class)
+        count(factory, owner, request_class, channel=channel)
 
 
-def stored_count(factory: sessionmaker[Session], owner: UUID, request_class: RequestClass) -> int:
+def stored_count(
+    factory: sessionmaker[Session],
+    owner: UUID,
+    request_class: RequestClass,
+    channel: RequestChannel = "session",
+) -> int:
     with factory() as session:
         total: int = session.execute(
-            select(func.coalesce(func.sum(request_window.c.request_count), 0)).where(
-                request_window.c.owner_id == owner,
-                request_window.c.request_class == request_class.value,
+            select(func.coalesce(func.sum(channel_request_window.c.request_count), 0)).where(
+                channel_request_window.c.owner_id == owner,
+                channel_request_window.c.channel == channel,
+                channel_request_window.c.request_class == request_class.value,
             )
         ).scalar_one()
     return total
@@ -118,9 +131,9 @@ def test_janela_seguinte_comeca_do_zero(factory: sessionmaker[Session]) -> None:
 
     with factory() as session:
         windows = session.execute(
-            select(request_window.c.window_start, request_window.c.request_count)
-            .where(request_window.c.owner_id == owner)
-            .order_by(request_window.c.window_start)
+            select(channel_request_window.c.window_start, channel_request_window.c.request_count)
+            .where(channel_request_window.c.owner_id == owner)
+            .order_by(channel_request_window.c.window_start)
         ).all()
     assert [tuple(w) for w in windows] == [
         (WINDOW_START, 10),
@@ -138,7 +151,9 @@ def test_janela_e_o_minuto_em_utc_mesmo_com_relogio_em_outro_fuso(
 
     with factory() as session:
         start = session.execute(
-            select(request_window.c.window_start).where(request_window.c.owner_id == owner)
+            select(channel_request_window.c.window_start).where(
+                channel_request_window.c.owner_id == owner
+            )
         ).scalar_one()
     assert start == WINDOW_START
 
@@ -159,6 +174,19 @@ def test_classes_tem_limites_independentes(factory: sessionmaker[Session]) -> No
     count(factory, owner, RequestClass.COMMAND)
 
     assert stored_count(factory, owner, RequestClass.COMMAND) == 1
+
+
+def test_janelas_de_canais_diferentes_sao_independentes(factory: sessionmaker[Session]) -> None:
+    # A chave que esgota a conta não tranca a sessão do titular (#442, 49a), e vice-versa.
+    owner = new_user(factory)
+    count_many(factory, owner, RequestClass.RUN_CREATE, 10, channel="api_key")
+
+    count(factory, owner, RequestClass.RUN_CREATE, channel="session")
+
+    with pytest.raises(RequestLimitExceededError):
+        count(factory, owner, RequestClass.RUN_CREATE, channel="api_key")
+    assert stored_count(factory, owner, RequestClass.RUN_CREATE, "api_key") == 10
+    assert stored_count(factory, owner, RequestClass.RUN_CREATE, "session") == 1
 
 
 def run_together(actions: list[Callable[[], object]]) -> list[Exception | None]:
@@ -210,7 +238,7 @@ def test_requisicoes_simultaneas_nao_passam_do_limite(
 def count_while_first_holds(factory: sessionmaker[Session], owner: UUID) -> InThread[None]:
     """A segunda contagem começa com a primeira sem commit e espera por ela."""
     with factory() as first, first.begin():
-        count_request(first, owner, RequestClass.RUN_CREATE, NOW)
+        count_request(first, owner, "session", RequestClass.RUN_CREATE, NOW)
         second = in_thread(lambda: count(factory, owner, RequestClass.RUN_CREATE))
         wait_until_someone_waits_for_a_lock(factory, "a segunda contagem")
     return second
@@ -240,13 +268,22 @@ def test_contagem_concorrente_em_janela_nova_espera_a_insercao_e_soma(
     assert stored_count(factory, owner, RequestClass.RUN_CREATE) == 2
 
 
-def insert_window(factory: sessionmaker[Session], owner: UUID, start: datetime) -> None:
+def insert_window(
+    factory: sessionmaker[Session],
+    owner: UUID,
+    start: datetime,
+    table: Table = channel_request_window,
+) -> None:
+    values: dict[str, object] = {
+        "owner_id": owner,
+        "request_class": "read",
+        "window_start": start,
+        "request_count": 1,
+    }
+    if table is channel_request_window:
+        values["channel"] = "session"
     with unit_of_work(factory) as session:
-        session.execute(
-            insert(request_window).values(
-                owner_id=owner, request_class="read", window_start=start, request_count=1
-            )
-        )
+        session.execute(insert(table).values(**values))
 
 
 def test_limpeza_remove_so_janelas_terminadas_ha_mais_de_um_minuto(
@@ -264,15 +301,42 @@ def test_limpeza_remove_so_janelas_terminadas_ha_mais_de_um_minuto(
     assert (removed, remaining) == (3, 2)
 
 
-def test_limpeza_respeita_o_lote(factory: sessionmaker[Session]) -> None:
+def test_limpeza_esvazia_tambem_a_tabela_sem_canal_da_0007(factory: sessionmaker[Session]) -> None:
+    # Até o PR que apaga a tabela antiga, a réplica anterior ao deploy ainda pode gravar nela.
     owner = new_user(factory)
-    for minutes_ago in (2, 3, 4):
+    for minutes_ago in (0, 2, 3):
+        insert_window(factory, owner, WINDOW_START - timedelta(minutes=minutes_ago))
+        insert_window(
+            factory, owner, WINDOW_START - timedelta(minutes=minutes_ago), legacy_request_window
+        )
+
+    with unit_of_work(factory) as session:
+        removed = delete_expired_windows(session, WINDOW_START, limit=500)
+        remaining = count_windows(session)
+
+    assert (removed, remaining) == (4, 2)
+
+
+@pytest.mark.parametrize(
+    ("legacy", "current", "limit"),
+    [(3, 0, 2), (0, 3, 2), (1, 3, 2)],
+    ids=["so_antiga", "so_nova", "as_duas"],
+)
+def test_limpeza_respeita_o_lote(
+    factory: sessionmaker[Session], legacy: int, current: int, limit: int
+) -> None:
+    owner = new_user(factory)
+    for minutes_ago in range(2, 2 + legacy):
+        insert_window(
+            factory, owner, WINDOW_START - timedelta(minutes=minutes_ago), legacy_request_window
+        )
+    for minutes_ago in range(2, 2 + current):
         insert_window(factory, owner, WINDOW_START - timedelta(minutes=minutes_ago))
 
     with unit_of_work(factory) as session:
-        removed = delete_expired_windows(session, WINDOW_START, limit=2)
+        removed = delete_expired_windows(session, WINDOW_START, limit=limit)
 
-    assert removed == 2
+    assert removed == limit
 
 
 def test_limpeza_sem_janelas_nao_remove_nada(factory: sessionmaker[Session]) -> None:
@@ -284,29 +348,37 @@ def test_limpeza_sem_janelas_nao_remove_nada(factory: sessionmaker[Session]) -> 
 @pytest.mark.parametrize(
     "values",
     [
-        {"request_class": "transfer", "request_count": 1},
-        {"request_class": "read", "request_count": 0},
+        {"channel": "session", "request_class": "transfer", "request_count": 1},
+        {"channel": "session", "request_class": "read", "request_count": 0},
+        {"channel": "cookie", "request_class": "read", "request_count": 1},
     ],
+    ids=["classe", "contagem", "canal"],
 )
-def test_banco_recusa_classe_desconhecida_e_contagem_nao_positiva(
+def test_banco_recusa_classe_ou_canal_desconhecido_e_contagem_nao_positiva(
     factory: sessionmaker[Session], values: dict[str, object]
 ) -> None:
     owner = new_user(factory)
     with pytest.raises(IntegrityError), unit_of_work(factory) as session:
         session.execute(
-            insert(request_window).values(owner_id=owner, window_start=WINDOW_START, **values)
+            insert(channel_request_window).values(
+                owner_id=owner, window_start=WINDOW_START, **values
+            )
         )
 
 
-def test_check_do_banco_lista_as_classes_do_codigo(factory: sessionmaker[Session]) -> None:
+@pytest.mark.parametrize("request_class", list(RequestClass))
+@pytest.mark.parametrize("channel", get_args(RequestChannel.__value__))
+def test_check_do_banco_lista_as_classes_e_os_canais_do_codigo(
+    factory: sessionmaker[Session], channel: str, request_class: RequestClass
+) -> None:
     owner = new_user(factory)
-    for request_class in RequestClass:
-        with unit_of_work(factory) as session:
-            session.execute(
-                insert(request_window).values(
-                    owner_id=owner,
-                    request_class=request_class.value,
-                    window_start=WINDOW_START,
-                    request_count=1,
-                )
+    with unit_of_work(factory) as session:
+        session.execute(
+            insert(channel_request_window).values(
+                owner_id=owner,
+                channel=channel,
+                request_class=request_class.value,
+                window_start=WINDOW_START,
+                request_count=1,
             )
+        )

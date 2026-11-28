@@ -620,37 +620,43 @@
             }
           },
           "401": {
-            "description": "Unauthorized",
             "content": {
               "application/problem+json": {
                 "schema": {
                   "$ref": "#/components/schemas/ProblemDetails"
                 }
               }
-            }
+            },
+            "description": "Unauthorized"
           },
           "403": {
-            "description": "Forbidden",
             "content": {
               "application/problem+json": {
                 "schema": {
                   "$ref": "#/components/schemas/ProblemDetails"
                 }
               }
-            }
+            },
+            "description": "Forbidden"
           },
           "422": {
-            "description": "Unprocessable Content",
             "content": {
               "application/problem+json": {
                 "schema": {
                   "$ref": "#/components/schemas/ProblemDetails"
                 }
               }
-            }
+            },
+            "description": "Unprocessable Content"
           },
           "429": {
-            "description": "Too Many Requests",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
             "headers": {
               "Retry-After": {
                 "description": "Segundos até poder repetir a requisição.",
@@ -661,26 +667,26 @@
                 }
               }
             },
-            "content": {
-              "application/problem+json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ProblemDetails"
-                }
-              }
-            }
+            "description": "Too Many Requests"
           },
           "500": {
-            "description": "Internal Server Error",
             "content": {
               "application/problem+json": {
                 "schema": {
                   "$ref": "#/components/schemas/ProblemDetails"
                 }
               }
-            }
+            },
+            "description": "Internal Server Error"
           },
           "503": {
-            "description": "Service Unavailable",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
             "headers": {
               "Retry-After": {
                 "description": "Segundos até poder repetir a requisição.",
@@ -691,13 +697,7 @@
                 }
               }
             },
-            "content": {
-              "application/problem+json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ProblemDetails"
-                }
-              }
-            }
+            "description": "Service Unavailable"
           }
         }
       },
@@ -707,49 +707,6 @@
         ],
         "summary": "Create Api Key",
         "operationId": "createApiKey",
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "properties": {
-                  "scopes": {
-                    "items": {
-                      "type": "string",
-                      "enum": [
-                        "files:read",
-                        "files:write",
-                        "runs:read",
-                        "runs:write",
-                        "presets:read",
-                        "presets:write"
-                      ],
-                      "title": "Scope",
-                      "description": "Escopos de chave de API da tabela de rotas de 1.6.\n\nO banco guarda texto, então acrescentar um escopo não exige migração."
-                    },
-                    "type": "array",
-                    "maxItems": 6,
-                    "minItems": 1,
-                    "title": "Scopes"
-                  },
-                  "days": {
-                    "type": "integer",
-                    "maximum": 90.0,
-                    "minimum": 1.0,
-                    "title": "Days",
-                    "default": 30
-                  }
-                },
-                "additionalProperties": false,
-                "type": "object",
-                "required": [
-                  "scopes"
-                ],
-                "title": "CreateApiKey"
-              }
-            }
-          },
-          "required": true
-        },
         "responses": {
           "201": {
             "description": "Successful Response",
@@ -762,37 +719,43 @@
             }
           },
           "401": {
-            "description": "Unauthorized",
             "content": {
               "application/problem+json": {
                 "schema": {
                   "$ref": "#/components/schemas/ProblemDetails"
                 }
               }
-            }
+            },
+            "description": "Unauthorized"
           },
           "403": {
-            "description": "Forbidden",
             "content": {
               "application/problem+json": {
                 "schema": {
                   "$ref": "#/components/schemas/ProblemDetails"
                 }
               }
-            }
+            },
+            "description": "Forbidden"
           },
           "422": {
-            "description": "Unprocessable Content",
             "content": {
               "application/problem+json": {
                 "schema": {
                   "$ref": "#/components/schemas/ProblemDetails"
                 }
               }
-            }
+            },
+            "description": "Unprocessable Content"
           },
           "429": {
-            "description": "Too Many Requests",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
             "headers": {
               "Retry-After": {
                 "description": "Segundos até poder repetir a requisição.",
@@ -803,26 +766,26 @@
                 }
               }
             },
-            "content": {
-              "application/problem+json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ProblemDetails"
-                }
-              }
-            }
+            "description": "Too Many Requests"
           },
           "500": {
-            "description": "Internal Server Error",
             "content": {
               "application/problem+json": {
                 "schema": {
                   "$ref": "#/components/schemas/ProblemDetails"
                 }
               }
-            }
+            },
+            "description": "Internal Server Error"
           },
           "503": {
-            "description": "Service Unavailable",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
             "headers": {
               "Retry-After": {
                 "description": "Segundos até poder repetir a requisição.",
@@ -833,55 +796,104 @@
                 }
               }
             },
-            "content": {
-              "application/problem+json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ProblemDetails"
-                }
-              }
-            }
+            "description": "Service Unavailable"
           },
           "400": {
-            "description": "Bad Request",
             "content": {
               "application/problem+json": {
                 "schema": {
                   "$ref": "#/components/schemas/ProblemDetails"
                 }
               }
-            }
+            },
+            "description": "Bad Request"
           },
           "409": {
-            "description": "Conflict",
             "content": {
               "application/problem+json": {
                 "schema": {
                   "$ref": "#/components/schemas/ProblemDetails"
                 }
               }
-            }
+            },
+            "description": "Conflict"
           },
           "413": {
-            "description": "Content Too Large",
             "content": {
               "application/problem+json": {
                 "schema": {
                   "$ref": "#/components/schemas/ProblemDetails"
                 }
               }
-            }
+            },
+            "description": "Content Too Large"
           },
           "415": {
-            "description": "Unsupported Media Type",
             "content": {
               "application/problem+json": {
                 "schema": {
                   "$ref": "#/components/schemas/ProblemDetails"
                 }
+              }
+            },
+            "description": "Unsupported Media Type"
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "additionalProperties": false,
+                "properties": {
+                  "scopes": {
+                    "items": {
+                      "description": "Escopos de chave de API da tabela de rotas de 1.6.\n\nO banco guarda texto, então acrescentar um escopo não exige migração.",
+                      "enum": [
+                        "files:read",
+                        "files:write",
+                        "runs:read",
+                        "runs:write",
+                        "presets:read",
+                        "presets:write"
+                      ],
+                      "title": "Scope",
+                      "type": "string"
+                    },
+                    "maxItems": 6,
+                    "minItems": 1,
+                    "title": "Scopes",
+                    "type": "array"
+                  },
+                  "days": {
+                    "default": 30,
+                    "maximum": 90,
+                    "minimum": 1,
+                    "title": "Days",
+                    "type": "integer"
+                  }
+                },
+                "required": [
+                  "scopes"
+                ],
+                "title": "CreateApiKey",
+                "type": "object"
               }
             }
           }
-        }
+        },
+        "parameters": [
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "required": false,
+            "description": "Opcional. Repetida na mesma conta, responde 409 com o id da chave que ela já emitiu; o segredo só aparece na primeira resposta.",
+            "schema": {
+              "type": "string",
+              "pattern": "^[A-Za-z0-9_-]{16,64}$"
+            }
+          }
+        ]
       }
     },
     "/api/v1/api-keys/{key_id}": {
@@ -1159,7 +1171,7 @@
                           "type": "string"
                         },
                         "size": {
-                          "description": "Bytes: até 32 MiB, ou 256 MiB para vídeo (.mp4, .mov, .webm); o lote soma até 512 MiB.",
+                          "description": "Bytes: até 50 MiB, ou 256 MiB para vídeo (.mp4, .mov, .webm); o lote soma até 512 MiB.",
                           "maximum": 268435456,
                           "minimum": 0,
                           "title": "Size",
@@ -5941,6 +5953,17 @@
             "type": "string",
             "title": "Display Name"
           },
+          "provider": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ProviderName"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "O provedor de login da conta: a reautenticação oferece só ele. Nulo na conta do operador, que não entra pelo navegador."
+          },
           "scopes": {
             "items": {
               "$ref": "#/components/schemas/Scope"
@@ -5970,6 +5993,7 @@
         "required": [
           "id",
           "display_name",
+          "provider",
           "scopes",
           "via",
           "limits",
@@ -6294,6 +6318,14 @@
           "total"
         ],
         "title": "Progress"
+      },
+      "ProviderName": {
+        "type": "string",
+        "enum": [
+          "google",
+          "github"
+        ],
+        "title": "ProviderName"
       },
       "ReceivedContent": {
         "properties": {

@@ -12,6 +12,7 @@
 import { randomUUID } from "node:crypto";
 
 import { claimArtifactsDir } from "./artifactsDir.ts";
+import { NOTICE_ENV, NOTICE_KINDS, type NoticeKind } from "./phases.ts";
 import { parseSpecKeys } from "./specKeys.ts";
 import { assertLocalWriteTarget } from "./writeTarget.ts";
 
@@ -87,6 +88,24 @@ function readEnv(): E2EEnv {
 }
 
 export const E2E = readEnv();
-/** Build com o aviso de e2e/fixtures/notice.json (npm run e2e:notice, ADR 031). */
-export const NOTICE_BUILD = process.env["E2E_NOTICE"] === "1";
+
+/**
+ * Aviso do build servido (ADR 031), pelo valor de `E2E_NOTICE` em `NOTICE_ENV`: `1` é o de
+ * e2e/fixtures/notice.json (npm run e2e:notice); `incident`, o de e2e/fixtures/notice-incident.json
+ * (npm run e2e:notice-incident). Sem a variável, o build normal, sem aviso; outro valor é erro.
+ */
+function readNoticeKind(value: string | undefined): NoticeKind | null {
+  if (value === undefined || value === "") {
+    return null;
+  }
+  const kind = NOTICE_KINDS.find((candidate) => NOTICE_ENV[candidate] === value);
+  if (kind === undefined) {
+    throw new Error(`E2E_NOTICE inválido: use ${Object.values(NOTICE_ENV).join(" ou ")}`);
+  }
+  return kind;
+}
+
+export const NOTICE_KIND = readNoticeKind(process.env["E2E_NOTICE"]);
+/** O build servido traz a faixa do incidente (fase notice-incident). */
+export const INCIDENT_BUILD = NOTICE_KIND === "incident";
 export { LOCAL_PORT };
