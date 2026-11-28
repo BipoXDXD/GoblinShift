@@ -98,6 +98,20 @@ describe("Bancada aberta pelo compartilhamento", () => {
     expect(uploadRequests(api.requests)).toEqual([]);
   });
 
+  it("esconde o arquivo de exemplo enquanto o compartilhado espera a decisão", async () => {
+    await seedShared(caches, [csv("clientes.csv")], { id: SHARE_ID });
+    render();
+
+    await screen.findByRole("region", { name: "Arquivos recebidos" });
+    expect(screen.queryByRole("button", { name: "Testar com arquivo de exemplo" })).toBeNull();
+
+    await userEvent.click(screen.getByRole("button", { name: "Descartar" }));
+
+    expect(
+      await screen.findByRole("button", { name: "Testar com arquivo de exemplo" }),
+    ).toBeVisible();
+  });
+
   it("entra com os arquivos compartilhados depois do clique em enviar", async () => {
     await seedShared(caches, [csv("clientes.csv"), csv("pedidos.csv")], { id: SHARE_ID });
 

@@ -53,6 +53,15 @@ export function workbenchPresetPath(recipeId: RecipeId, presetId: string): strin
   return `${workbenchPath(recipeId)}?${query}`;
 }
 
+/** Parâmetro da Bancada que pede o arquivo de exemplo da receita (primeiro uso, D4). */
+export const SAMPLE_PARAM = "exemplo";
+
+/** Bancada que abre já com o arquivo de exemplo; a página tira o parâmetro depois de carregar. */
+export function workbenchSamplePath(recipeId: RecipeId): string {
+  const query = new URLSearchParams({ [SAMPLE_PARAM]: "1" }).toString();
+  return `${workbenchPath(recipeId)}?${query}`;
+}
+
 /** Parâmetro da Bancada com o id da execução cuja configuração se reusa (Histórico). */
 export const RUN_PARAM = "execucao";
 

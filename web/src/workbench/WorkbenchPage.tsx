@@ -1,8 +1,9 @@
 import { useQuery, type UseQueryResult } from "@tanstack/react-query";
-import { useEffect, useState, type ReactElement, type ReactNode } from "react";
+import { useCallback, useEffect, useState, type ReactElement, type ReactNode } from "react";
 import { useSearchParams } from "react-router";
 
 import { useApiClient } from "../api/ApiClientContext";
+import { SAMPLE_PARAM, SHARED_PARAM } from "../app/paths";
 import {
   CATALOG_QUERY_KEY,
   findCatalogVersion,
@@ -10,7 +11,6 @@ import {
   type Catalog,
   type CatalogVersion,
 } from "../catalog/api";
-import { SHARED_PARAM } from "../app/paths";
 import { ANNOUNCE_DELAY_MS, LiveRegion } from "../components/a11y/LiveRegion";
 import { FailureNotice } from "../components/feedback/FailureNotice";
 import type { Preset } from "../presets/api";
@@ -39,8 +39,21 @@ interface WorkbenchPageProps {
 /** Rota da Bancada de uma receita do registro (routes.tsx tem uma por receita). */
 export function WorkbenchPage({ recipeId, uploadServices }: WorkbenchPageProps): ReactElement {
   const recipe = recipeOf(recipeId);
-  const [search] = useSearchParams();
+  const [search, setSearch] = useSearchParams();
   const source = sourceFromSearch(search);
+  const sampleRequested = search.get(SAMPLE_PARAM) === "1";
+  // Tira o `?exemplo=1` com replace depois que a Bancada pede a amostra: recarregar ou voltar não
+  // a carrega de novo. O parâmetro não entra na key, então a Bancada não remonta.
+  const clearSampleRequest = useCallback(() => {
+    setSearch(
+      (current) => {
+        const next = new URLSearchParams(current);
+        next.delete(SAMPLE_PARAM);
+        return next;
+      },
+      { replace: true },
+    );
+  }, [setSearch]);
   // A key recria a Bancada ao trocar de origem (preset, execução) e também de receita: cada
   // receita tem a sua rota, mas o React Router não dá key às rotas e reaproveitaria esta página.
   // Assim nada herda arquivos nem parâmetros.
@@ -51,6 +64,8 @@ export function WorkbenchPage({ recipeId, uploadServices }: WorkbenchPageProps):
       source={source}
       sharedId={search.get(SHARED_PARAM)}
       uploadServices={uploadServices}
+      sampleRequested={sampleRequested}
+      onSampleRequested={clearSampleRequest}
     />
   );
 }
@@ -62,6 +77,9 @@ interface CatalogGateProps {
   /** Compartilhamento (`?compartilhado=`) cujos arquivos a Bancada recebe ao abrir (ADR 064). */
   readonly sharedId: string | null;
   readonly uploadServices: UploadServices;
+  /** A URL pediu o arquivo de exemplo (`?exemplo=1`). */
+  readonly sampleRequested: boolean;
+  readonly onSampleRequested: () => void;
 }
 
 /**
@@ -72,7 +90,14 @@ interface CatalogGateProps {
  * tivesse o seu, o `h1` remontaria quando o catálogo chega e o FocusHeading tomaria o foco de quem
  * já estivesse usando a página (o seletor de tema, por exemplo).
  */
-function CatalogGate({ recipe, source, sharedId, uploadServices }: CatalogGateProps): ReactElement {
+function CatalogGate({
+  recipe,
+  source,
+  sharedId,
+  uploadServices,
+  sampleRequested,
+  onSampleRequested,
+}: CatalogGateProps): ReactElement {
   const client = useApiClient();
   const loaded = useParameterSource(source);
   const catalog = useQuery({
@@ -86,6 +111,8 @@ function CatalogGate({ recipe, source, sharedId, uploadServices }: CatalogGatePr
     source,
     sharedId,
     uploadServices,
+    sampleRequested,
+    onSampleRequested,
     catalog,
     loaded,
   });
@@ -105,7 +132,16 @@ interface GateBodyInput extends CatalogGateProps {
 }
 
 /** O que vai abaixo do título: carregando, falha da receita ou a Bancada, e o aviso a anunciar. */
-function gateBody({ recipe, source, sharedId, uploadServices, catalog, loaded }: GateBodyInput): {
+function gateBody({
+  recipe,
+  source,
+  sharedId,
+  uploadServices,
+  sampleRequested,
+  onSampleRequested,
+  catalog,
+  loaded,
+}: GateBodyInput): {
   readonly announcement: string | null;
   readonly body: ReactNode;
 } {
@@ -158,6 +194,8 @@ function gateBody({ recipe, source, sharedId, uploadServices, catalog, loaded }:
         sourcePreset={prefilled.preset}
         sharedId={sharedId}
         uploadServices={uploadServices}
+        sampleRequested={sampleRequested}
+        onSampleRequested={onSampleRequested}
       />
     ),
   };

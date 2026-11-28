@@ -23,9 +23,10 @@ import {
   fakeSpecial,
   type FakeEntry,
 } from "../test/fakeEntries";
+import { fakeSampleFetch } from "../test/fakeSample";
 import { fakeUploader } from "../test/fakeUploader";
 import { expectHeadingFocused } from "../test/focus";
-import { renderRoutes } from "../test/renderRoutes";
+import { currentUrl, renderRoutes } from "../test/renderRoutes";
 
 await preloadRoutes("/bancada/csv-janitor");
 
@@ -43,6 +44,10 @@ interface SetupOptions {
   readonly catalog?: () => Response | null;
   /** DELETE /uploads/{id} de qualquer upload; por padrão, 202. */
   readonly deleteUpload?: () => Response;
+  /** Quem baixa a amostra do "Testar com arquivo de exemplo"; por padrão, o do appRoutes. */
+  readonly fetchSample?: typeof fetch;
+  /** Query da URL de entrada, com o `?`. */
+  readonly search?: string;
 }
 
 function renderWorkbench({
@@ -51,6 +56,8 @@ function renderWorkbench({
   recipe = "csv-janitor",
   catalog = catalogHandler(),
   deleteUpload = () => new Response(null, { status: 202 }),
+  fetchSample,
+  search = "",
 }: SetupOptions = {}) {
   const deletions = Object.fromEntries(
     [1, 2, 3].map((sequence) => [`DELETE /api/v1/uploads/${uploadIdFor(sequence)}`, deleteUpload]),
@@ -63,8 +70,11 @@ function renderWorkbench({
     [`GET /api/v1/runs/${RUN_ID}`]: () => jsonResponse(runBody()),
   });
   const { uploader, pending } = fakeUploader({ autoResolve });
-  const routes = appRoutes(api.client, { uploader });
-  const view = renderRoutes({ routes, path: `/bancada/${recipe}`, client: api.client });
+  const routes = appRoutes(api.client, {
+    uploader,
+    ...(fetchSample === undefined ? {} : { fetchSample }),
+  });
+  const view = renderRoutes({ routes, path: `/bancada/${recipe}${search}`, client: api.client });
   return { ...view, api, pending, user: userEvent.setup() };
 }
 
@@ -138,6 +148,9 @@ describe("Bancada", () => {
     const run = screen.getByRole("button", { name: "Executar" });
 
     files.focus();
+    // Com a lista vazia, o "Testar com arquivo de exemplo" fica no poço, logo depois da escolha.
+    await user.tab();
+    expect(screen.getByRole("button", { name: "Testar com arquivo de exemplo" })).toHaveFocus();
     await user.tab();
 
     expect(firstParameter).toHaveFocus();
@@ -974,6 +987,106 @@ describe("Bancada", () => {
   });
 });
 
+describe("Bancada: testar com arquivo de exemplo", () => {
+  it("testar com exemplo põe a amostra na lista e envia", async () => {
+    const { fetchSample, requested } = fakeSampleFetch({
+      body: "nome,email\n Ana ,a@example.com\n",
+    });
+    const { user, api } = await setup({ fetchSample });
+
+    await user.click(screen.getByRole("button", { name: "Testar com arquivo de exemplo" }));
+
+    await waitUntilSent(1);
+    expect(requested).toEqual([expect.stringMatching(/exemplo-clientes\.csv/)]);
+    expect(screen.getByText("exemplo-clientes.csv")).toBeInTheDocument();
+    // Com a lista cheia, o botão sai do poço: o exemplo é só para a primeira vez.
+    expect(
+      screen.queryByRole("button", { name: "Testar com arquivo de exemplo" }),
+    ).not.toBeInTheDocument();
+
+    await user.click(screen.getByRole("button", { name: "Executar" }));
+
+    await expectHeadingFocused("Execução");
+    const body = await bodyOf(runRequests(api.requests)[0]);
+    expect(body.input_upload_ids).toEqual([uploadIdFor(1)]);
+  });
+
+  it("o botão de exemplo some com a amostra na lista e o foco vai para a escolha de arquivos", async () => {
+    const { fetchSample } = fakeSampleFetch({ body: "nome\nAna\n" });
+    const { user } = await setup({ fetchSample });
+
+    await user.click(screen.getByRole("button", { name: "Testar com arquivo de exemplo" }));
+
+    await waitUntilSent(1);
+    expect(screen.getByLabelText("Escolher arquivos")).toHaveFocus();
+  });
+
+  it("a Bancada com ?exemplo=1 carrega a amostra uma vez e limpa a URL", async () => {
+    const { fetchSample, requested } = fakeSampleFetch({ body: "imagem" });
+    const { router } = await setup({ recipe: "image-forge", search: "?exemplo=1", fetchSample });
+
+    await waitUntilSent(1);
+    expect(screen.getByText("exemplo-oficina.jpg")).toBeInTheDocument();
+    expect(requested).toEqual([expect.stringMatching(/exemplo-oficina\.jpg/)]);
+    expect(currentUrl(router)).toBe("/bancada/image-forge");
+    // Voltar não reabre o pedido: o `replace` tirou a URL com `?exemplo=1` do histórico.
+    expect(router.state.historyAction).toBe("REPLACE");
+  });
+
+  it("a Bancada com ?exemplo=1 anuncia o download e a amostra na lista", async () => {
+    let release: (response: Response) => void = () => undefined;
+    const fetchSample: typeof fetch = () =>
+      new Promise<Response>((resolve) => {
+        release = resolve;
+      });
+    await setup({ recipe: "image-forge", search: "?exemplo=1", fetchSample });
+
+    await waitFor(() => {
+      expect(liveRegionTexts()).toContain("Baixando o exemplo…");
+    });
+    release(new Response("imagem"));
+
+    await waitFor(() => {
+      expect(liveRegionTexts()).toContain("Exemplo na lista: exemplo-oficina.jpg.");
+    });
+  });
+
+  it("falha ao baixar a amostra mostra o motivo e mantém o poço", async () => {
+    const { fetchSample } = fakeSampleFetch({ status: 404 });
+    const { user } = await setup({ fetchSample });
+
+    await user.click(screen.getByRole("button", { name: "Testar com arquivo de exemplo" }));
+
+    expect(await screen.findByRole("alert")).toHaveTextContent(
+      "Não deu para baixar o arquivo de exemplo. Tente de novo ou escolha os seus arquivos.",
+    );
+    expect(screen.getByLabelText("Escolher arquivos")).toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: "A bancada está vazia" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Testar com arquivo de exemplo" })).toBeEnabled();
+  });
+
+  it("a falha do exemplo não volta depois de escolher e remover um arquivo", async () => {
+    const { fetchSample } = fakeSampleFetch({ status: 404 });
+    const { user } = await setup({ fetchSample });
+    await user.click(screen.getByRole("button", { name: "Testar com arquivo de exemplo" }));
+    await screen.findByRole("alert");
+
+    await chooseFiles(user, ["a.csv"]);
+    await waitUntilSent(1);
+    await user.click(screen.getByRole("button", { name: "Remover a.csv" }));
+    await user.click(screen.getByRole("button", { name: "Remover" }));
+
+    expect(
+      await screen.findByRole("heading", { name: "A bancada está vazia" }),
+    ).toBeInTheDocument();
+    expect(screen.queryByRole("alert")).toBeNull();
+  });
+});
+
+function liveRegionTexts(): readonly (string | null)[] {
+  return screen.getAllByRole("status").map((region) => region.textContent);
+}
+
 describe("Bancada do PDF Press", () => {
   const pdf = (name: string) => new File(["%PDF-1.4\n"], name, { type: "application/pdf" });
 
@@ -1123,6 +1236,21 @@ describe("Bancada: colar arquivos", () => {
     );
     expect(uploadIntents(api.requests)).toHaveLength(0);
     expect(screen.getByText("Nenhum arquivo escolhido")).toBeInTheDocument();
+  });
+
+  it("testar com exemplo depois de colar demais tira o aviso da colagem", async () => {
+    const { fetchSample } = fakeSampleFetch({ body: "nome\nAna\n" });
+    const { user } = await setup({ fetchSample });
+    const six = ["1", "2", "3", "4", "5", "6"].map((n) => csv(`${n}.csv`));
+    fireEvent.paste(document, { clipboardData: clipboard(six) });
+    const message =
+      "Você colou 6 arquivos; esta receita aceita até 5 por execução. Nada foi enviado: cole menos arquivos de cada vez.";
+    expect(await screen.findAllByText(message)).not.toHaveLength(0);
+
+    await user.click(screen.getByRole("button", { name: "Testar com arquivo de exemplo" }));
+
+    await waitUntilSent(1);
+    expect(screen.queryByText(message)).toBeNull();
   });
 
   it("colar fora da Bancada não faz nada", async () => {

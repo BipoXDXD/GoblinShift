@@ -61,6 +61,9 @@ describe("App", () => {
         .getAllByRole("link")
         .map((link) => [link.textContent, link.getAttribute("href")]),
     ).toEqual([
+      // A ação primária da abertura (D4) e o atalho para os cartões vêm antes deles.
+      ["Testar com um exemplo", "/bancada/image-forge?exemplo=1"],
+      ["ou escolha uma receita", "#receitas"],
       ["Abrir a Bancada da CSV Janitor", "/bancada/csv-janitor"],
       ["Abrir a Bancada da Image Forge", "/bancada/image-forge"],
       ["Abrir a Bancada da Downloads Detox", "/bancada/downloads-detox"],

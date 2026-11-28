@@ -6,6 +6,7 @@ import {
   type ChangeEvent,
   type DragEvent,
   type ReactElement,
+  type ReactNode,
 } from "react";
 
 import { TEXT } from "../../text";
@@ -29,6 +30,8 @@ interface FileDropzoneProps {
   /** Quantos arquivos já estão na Bancada; o texto ao lado do botão diz isso em pt-BR. */
   readonly chosenCount: number;
   readonly onFiles: (files: readonly File[]) => void;
+  /** Ação a mais ao lado do botão de escolher (o "Testar com arquivo de exemplo" da Bancada). */
+  readonly extraAction?: ReactNode;
   /**
    * Pasta inteira: o botão "Escolher pasta" (onde o navegador tem `webkitdirectory`) e a pasta
    * solta sobre a área chegam em `onPick` já filtradas e conferidas contra `maxFiles`.
@@ -57,6 +60,7 @@ export function FileDropzone({
   accept,
   chosenCount,
   onFiles,
+  extraAction = null,
   folder,
   notice = null,
 }: FileDropzoneProps): ReactElement {
@@ -169,6 +173,7 @@ export function FileDropzone({
         <p id={statusId} className="text-sm text-fg-muted">
           {TEXT.workbench.filesChosen(chosenCount)}
         </p>
+        {extraAction}
       </div>
       <div className="text-sm text-fg">
         <LiveRegion message={notice} />

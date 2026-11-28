@@ -14,8 +14,10 @@ const MIN_RING_CONTRAST = 3;
 // Teto de paradas por tela, só para pegar armadilha de foco: a maior é o Histórico com uma página
 // cheia (25 linhas com o link da execução e o "Reutilizar parâmetros", mais filtros e moldura).
 const MAX_TAB_STOPS = 100;
-// O bloco de execuções recentes da Oficina, só presente em conta com execuções.
-const RECENT_RUN_STOP = /, criada em |^Ver o histórico completo$/;
+// O bloco de execuções recentes da Oficina, que muda com a conta: com execuções, os links delas;
+// sem nenhuma, o "Primeira vez?" com o arquivo de exemplo.
+const RECENT_RUN_STOP =
+  /, criada em |^Ver o histórico completo$|^Teste com um arquivo de exemplo\.$/;
 
 /** O que o navegador desenhou para o elemento focado, lido no próprio navegador. */
 interface FocusStop {
@@ -85,32 +87,41 @@ test("Oficina: o Tab segue a leitura, do pular para o conteúdo aos cartões @ke
   // A tela é um chunk lazy: o Tab só começa com ela pintada, senão percorre a moldura vazia.
   await expect(page.getByRole("heading", { level: 1 })).toBeVisible();
   const stops = (await tabThrough(page)).map((stop) => stop.name);
-  // A conta real acumula as execuções das outras specs; a API falsa começa sem nenhuma.
-  const names = E2E.remote ? stops.filter((name) => !RECENT_RUN_STOP.test(name)) : stops;
-  expect(names).toEqual([
-    "Pular para o conteúdo",
-    "GoblinShift",
-    "Histórico",
-    "Acesso",
-    "Tema Sistema",
-    // O seletor do elenco do palco 3D (ADR 038); sem GPU, como no CI, a cena não monta e o palco
-    // e os botões Girar e Pose inicial não entram no Tab.
-    "Rúbia",
-    "Fagulha",
-    "Ferrugem",
-    "Jade",
-    "Lua",
-    "Nyx",
-    "Abrir a Bancada da CSV Janitor",
-    "Abrir a Bancada da Image Forge",
-    "Abrir a Bancada da Downloads Detox",
-    "Abrir a Bancada da PDF Press",
-    "Abrir a Bancada da Media Mill",
-    // O rodapé vem depois de todo o conteúdo.
-    "Termos de Uso",
-    "Aviso de Privacidade",
-    "Créditos",
-  ]);
+  // A conta real acumula as execuções das outras specs, e a API falsa começa sem nenhuma: na
+  // remota, o bloco das recentes sai dos dois lados da comparação.
+  const comparable = (names: readonly string[]): readonly string[] =>
+    E2E.remote ? names.filter((name) => !RECENT_RUN_STOP.test(name)) : names;
+  expect(comparable(stops)).toEqual(
+    comparable([
+      "Pular para o conteúdo",
+      "GoblinShift",
+      "Histórico",
+      "Acesso",
+      "Tema Sistema",
+      // O primeiro uso vem antes do palco na ordem do DOM (HomePage): a um clique no celular.
+      "Testar com um exemplo",
+      "ou escolha uma receita",
+      // O seletor do elenco do palco 3D (ADR 038); sem GPU, como no CI, a cena não monta e o palco
+      // e os botões Girar e Pose inicial não entram no Tab.
+      "Rúbia",
+      "Fagulha",
+      "Ferrugem",
+      "Jade",
+      "Lua",
+      "Nyx",
+      "Abrir a Bancada da CSV Janitor",
+      "Abrir a Bancada da Image Forge",
+      "Abrir a Bancada da Downloads Detox",
+      "Abrir a Bancada da PDF Press",
+      "Abrir a Bancada da Media Mill",
+      // O "Primeira vez?" das execuções recentes, que a API falsa começa vazias.
+      "Teste com um arquivo de exemplo.",
+      // O rodapé vem depois de todo o conteúdo.
+      "Termos de Uso",
+      "Aviso de Privacidade",
+      "Créditos",
+    ]),
+  );
 });
 
 test("Bancada: arquivos → lista → parâmetros → Executar, e o foco segue o item movido @keyboard", async ({
