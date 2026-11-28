@@ -20,7 +20,7 @@ source "$here/apt-key.sh"
 KEYRING=/usr/share/keyrings/gvisor-archive-keyring.gpg
 [[ $EUID -eq 0 ]] || { echo "rode com sudo" >&2; exit 1; }
 note() { printf '==> %s\n' "$*"; }
-has_runsc_runtime() { docker info --format '{{json .Runtimes}}' | grep -q '"runsc"'; }
+has_runsc_runtime() { grep -q '"runsc"' <<<"$(docker info --format '{{json .Runtimes}}')"; }
 
 # Anel conferido pela impressão digital e fonte na suíte fixada; vale também no host que já tem o
 # runsc, para a troca de versão descrita abaixo achar o pacote.
@@ -70,4 +70,4 @@ else
   systemctl reload docker
 fi
 has_runsc_runtime || { echo "o Docker não lista o runtime runsc" >&2; exit 1; }
-runsc --version | head -n 1
+runsc --version | sed -n 1p

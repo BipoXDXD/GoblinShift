@@ -3,6 +3,7 @@ import { describe, expect, it, vi } from "vitest";
 import { z } from "zod";
 
 import { createApiClient } from "../api/client";
+import { testNow } from "../test/clock";
 import type { ContentInstructions, ReceivedContent } from "./api";
 import { useUploadBatch, type UploadEntry } from "./useUploadBatch";
 import type { ContentUploader, UploadContentOptions } from "./xhr";
@@ -109,7 +110,7 @@ function fakeApi() {
     }
     return Promise.resolve(respond());
   });
-  const client = createApiClient({ fetch: fetchMock, csrfToken: () => null, now: Date.now });
+  const client = createApiClient({ fetch: fetchMock, csrfToken: () => null, now: testNow });
   /** Intenções que seguem reservando cota: criadas e ainda não excluídas. */
   const live = (): number => created.filter((id) => !deleted.includes(id)).length;
   return { client, fetchMock, state, deleted, live };
