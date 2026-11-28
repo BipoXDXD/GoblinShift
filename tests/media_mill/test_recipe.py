@@ -7,6 +7,7 @@ e arquivo truncado.
 
 import itertools
 import subprocess
+import tempfile
 import wave
 from collections.abc import Iterator
 from pathlib import Path
@@ -15,16 +16,23 @@ import pytest
 from PIL import Image
 
 from goblinshift.processing.media_mill import RECIPE_ID, AudioFormat, Params
+from goblinshift.processing.media_mill import recipe as mill_recipe
 from goblinshift.processing.media_mill.commands import Source, audio_argv
 from goblinshift.processing.media_mill.recipe import MediaMillV1
 from goblinshift.processing.media_mill.signature import Container
 from goblinshift.processing.media_mill.tools import Tools
 from goblinshift.processing.output_dir import FileSystemOutputDir
+from goblinshift.processing.previews import PendingPreview
 from goblinshift.processing.recipe import (
     FailureCode,
     InputContractError,
+    InputFile,
     ItemOk,
     ItemRejected,
+    OutputDir,
+    OutputFile,
+    OutputGroup,
+    OutputRole,
     Preview,
     RecipeFailure,
 )
@@ -631,3 +639,98 @@ def test_mais_de_cinco_videos_e_job_fora_do_contrato(workspace: Workspace) -> No
 
     with pytest.raises(InputContractError):
         workspace.run()
+
+
+def _must_not_be_called() -> Tools:
+    raise AssertionError("Tools.discover() antes do teto de entradas")
+
+
+def test_lote_acima_do_teto_falha_antes_de_procurar_as_ferramentas(
+    workspace: Workspace, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(Tools, "discover", _must_not_be_called)
+    for index in range(6):
+        workspace.add(f"{index}.mp4", HLS_PLAYLIST)
+
+    with pytest.raises(InputContractError):
+        workspace.run()
+
+    assert workspace.progress.done == []
+
+
+class _ScratchWatchingOutputDir(FileSystemOutputDir):
+    """Registra, a cada saída criada, o que ainda havia no diretório de rascunho do processo."""
+
+    def __init__(self, root: Path, scratch_parent: Path) -> None:
+        super().__init__(root)
+        self._scratch_parent = scratch_parent
+        self.scratch_at_create: list[tuple[str, bool]] = []
+
+    def create(
+        self,
+        logical_name: str,
+        role: OutputRole,
+        position: int,
+        group: OutputGroup | None = None,
+    ) -> OutputFile:
+        output = super().create(logical_name, role, position, group)
+        self.scratch_at_create.append((output.name, any(self._scratch_parent.iterdir())))
+        return output
+
+
+def test_previews_sao_gravados_depois_que_o_rascunho_sai(
+    workspace: Workspace, clips: ClipLibrary, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    scratch_parent = tmp_path / "tmp"
+    scratch_parent.mkdir()
+    monkeypatch.setattr(tempfile, "tempdir", str(scratch_parent))
+    workspace.add("a.mp4", clips.bytes("mp4"))
+    workspace.add("b.mp4", clips.bytes("mp4"))
+    out = _ScratchWatchingOutputDir(workspace.out_dir, scratch_parent)
+
+    MediaMillV1().run(Params(), workspace.inputs, out, workspace.progress)
+
+    # O conteúdo sai com o rascunho no disco; os previews, só depois que ele foi removido.
+    assert out.scratch_at_create == [
+        ("audio/a.wav", True),
+        ("thumbnails/a-10pct.jpg", True),
+        ("audio/b.wav", True),
+        ("thumbnails/b-10pct.jpg", True),
+        ("previews/a-10pct.jpg", False),
+        ("previews/b-10pct.jpg", False),
+    ]
+
+
+def test_erro_num_video_no_meio_do_lote_sobe_sem_progresso_nem_preview(
+    workspace: Workspace, clips: ClipLibrary, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # O primeiro vídeo sai inteiro (conteúdo copiado e preview pendente); o segundo levanta.
+    scratch_parent = tmp_path / "tmp"
+    scratch_parent.mkdir()
+    monkeypatch.setattr(tempfile, "tempdir", str(scratch_parent))
+    boom = RuntimeError("falha inesperada no segundo vídeo")
+    real_process = mill_recipe._Mill.process
+    calls: list[int] = []
+
+    def process_that_fails_second(
+        mill: mill_recipe._Mill, source: InputFile, out: OutputDir, pending: list[PendingPreview]
+    ) -> ItemOk | ItemRejected:
+        calls.append(source.position)
+        if source.position == 1:
+            raise boom
+        return real_process(mill, source, out, pending)
+
+    monkeypatch.setattr(mill_recipe._Mill, "process", process_that_fails_second)
+    for name in ("a.mp4", "b.mp4", "c.mp4"):
+        workspace.add(name, clips.bytes("mp4"))
+    out = FileSystemOutputDir(workspace.out_dir)
+
+    with pytest.raises(RuntimeError) as raised:
+        MediaMillV1().run(Params(), workspace.inputs, out, workspace.progress)
+
+    assert raised.value is boom
+    assert calls == [0, 1]
+    assert workspace.progress.done == [0]
+    assert [name for name, _role in out.created] == ["audio/a.wav", "thumbnails/a-10pct.jpg"]
+    assert not (workspace.out_dir / "previews").exists()
+    assert list(scratch_parent.iterdir()) == []
