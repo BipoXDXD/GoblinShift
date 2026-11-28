@@ -782,6 +782,9 @@ describe("pré-visualização dos resultados", () => {
         .map((th) => th.textContent),
     ).toEqual(["nome", "Coluna 2", "Coluna 3", "Coluna 4"]);
     expect(within(table).getByRole("cell", { name: "extra" })).toBeInTheDocument();
+    // `empty-table-header` é best-practice: o axe do navegador (contrast.spec.ts) roda só as
+    // regras WCAG e não o vê; aqui o axe roda as regras padrão.
+    expect(await axeViolations(table)).toEqual([]);
   });
 
   it("CSV: a caixa rolável da amostra recebe foco e tem o nome da legenda", async () => {

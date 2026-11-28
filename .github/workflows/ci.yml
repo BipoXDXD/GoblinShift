@@ -311,9 +311,17 @@ jobs:
         env:
           E2E_PHASE: notice
         run: npm run e2e:notice
+      # Terceiro build, com o incidente de e2e/fixtures/notice-incident.json: a faixa vermelha
+      # medida pelo axe, nos dois temas, sobre tela comum, lista, formulário com erro e tabela.
+      - name: Build com o aviso de incidente
+        run: npm run build:notice-incident-e2e
+      - name: Contraste com o aviso de incidente
+        env:
+          E2E_PHASE: notice-incident
+        run: npm run e2e:notice-incident
       # Caso que não roda num projeto sai dele por tag (grepInvert), não por skip em runtime.
-      - name: Nenhum teste pulado (relatórios json das três fases)
-        run: npm run e2e:check-skips -- e2e-results/ui.json e2e-results/gpu.json e2e-results/notice.json
+      - name: Nenhum teste pulado (relatórios json das quatro fases)
+        run: npm run e2e:check-skips -- e2e-results/ui.json e2e-results/gpu.json e2e-results/notice.json e2e-results/notice-incident.json
       # O relatório e os traces ficam fora do artefato se a chave da conta de teste (formato
       # gsk_...) aparecer em qualquer arquivo ou dentro de um .zip: o repositório é público.
       - name: Canário (chave de API nos artefatos)

@@ -8,7 +8,7 @@ import { AcessoPage } from "../pages/AcessoPage";
 import { BancadaPage } from "../pages/BancadaPage";
 import { ExecucaoPage } from "../pages/ExecucaoPage";
 import { HistoricoPage } from "../pages/HistoricoPage";
-import type { FakeApi, RunOverrides } from "./fakeApi";
+import type { FakeApi, RunOverrides, SeededOutput } from "./fakeApi";
 import { expect } from "./test";
 
 export interface Screen {
@@ -19,6 +19,18 @@ export interface Screen {
 const LATER = "2026-10-15T12:00:00Z";
 /** Qualquer script do build, com ou sem query: depois da carga, só os pedaços `lazy` pedem. */
 const SCRIPT_FILE = /\.js(\?.*)?$/;
+
+/**
+ * Amostra com nome em branco, nome só com espaço e uma linha mais longa que o cabeçalho: a tabela
+ * da prévia entra na medição com o cabeçalho completado e rotulado. O `<th>` vazio é regra
+ * best-practice do axe, fora das WCAG medidas aqui; quem o vigia é o RunPage.test.tsx.
+ */
+const RAGGED_SAMPLE = Buffer.from("nome,, \nAna,1,2,extra\n");
+const RAGGED_CSV: SeededOutput = {
+  name: "clientes.csv",
+  body: RAGGED_SAMPLE,
+  preview: { name: "clientes.csv", body: RAGGED_SAMPLE, contentType: "application/octet-stream" },
+};
 
 function runScreen(name: string, overrides: RunOverrides, visibleText: string): Screen {
   return {
@@ -251,6 +263,13 @@ export const SCREENS: readonly Screen[] = [
     "Falhou",
   ),
   {
+    name: "Execução com prévia de CSV sem cabeçalho completo",
+    open: async (page: Page, api: FakeApi): Promise<void> => {
+      await new ExecucaoPage(page).open(api.seedRun({ status: "succeeded" }, [RAGGED_CSV]));
+      await expect(page.getByRole("table")).toBeVisible();
+    },
+  },
+  {
     name: "Bancada sem sessão (convite para entrar)",
     open: async (page: Page, api: FakeApi): Promise<void> => {
       api.account.apiKeyValid = false;
@@ -380,3 +399,24 @@ export const SCREENS: readonly Screen[] = [
     },
   },
 ];
+
+/**
+ * Telas do build com o incidente (fase notice-incident): a faixa vermelha sobre uma tela comum,
+ * uma lista, um formulário com erro e uma tabela.
+ */
+const NOTICE_INCIDENT_SCREEN_NAMES = [
+  "Oficina",
+  "Histórico com Carregar mais",
+  "Bancada com erros (CSV Janitor)",
+  "Execução com prévia de CSV sem cabeçalho completo",
+];
+
+export const NOTICE_INCIDENT_SCREENS: readonly Screen[] = NOTICE_INCIDENT_SCREEN_NAMES.map(
+  (name) => {
+    const screen = SCREENS.find((candidate) => candidate.name === name);
+    if (screen === undefined) {
+      throw new Error(`Tela do incidente fora de SCREENS: ${name}`);
+    }
+    return screen;
+  },
+);

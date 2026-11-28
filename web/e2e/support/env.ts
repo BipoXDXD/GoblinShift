@@ -87,6 +87,25 @@ function readEnv(): E2EEnv {
 }
 
 export const E2E = readEnv();
-/** Build com o aviso de e2e/fixtures/notice.json (npm run e2e:notice, ADR 031). */
-export const NOTICE_BUILD = process.env["E2E_NOTICE"] === "1";
+/**
+ * Aviso do build servido (ADR 031): `E2E_NOTICE=1` é o de e2e/fixtures/notice.json (npm run
+ * e2e:notice); `E2E_NOTICE=incident`, o de e2e/fixtures/notice-incident.json (npm run
+ * e2e:notice-incident). Sem a variável, o build normal, sem aviso; outro valor é erro.
+ */
+export type NoticeKind = "terms-change" | "incident";
+
+function readNoticeKind(value: string | undefined): NoticeKind | null {
+  if (value === undefined || value === "") {
+    return null;
+  }
+  if (value === "1") {
+    return "terms-change";
+  }
+  if (value === "incident") {
+    return "incident";
+  }
+  throw new Error("E2E_NOTICE inválido: use 1 ou incident");
+}
+
+export const NOTICE_KIND = readNoticeKind(process.env["E2E_NOTICE"]);
 export { LOCAL_PORT };

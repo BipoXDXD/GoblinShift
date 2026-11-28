@@ -54,7 +54,10 @@ const reportSchema = z.object({
   suites: z.array(suiteSchema),
 });
 
-type Phase = "ui" | "gpu" | "notice";
+type Phase = "ui" | "gpu" | "notice" | "notice-incident";
+/** Valor de `E2E_NOTICE` do build de cada aviso (support/env.ts). */
+const NOTICE_ENV = { "terms-change": "1", incident: "incident" } as const;
+type Notice = keyof typeof NOTICE_ENV;
 interface SelectedTest {
   project: string;
   gpu: boolean;
@@ -76,14 +79,14 @@ function fail(reason: string): never {
   throw new Error(reason);
 }
 
-function list(phase: Phase | undefined, notice = false): Selection {
+function list(phase: Phase | undefined, notice?: Notice): Selection {
   // Só entradas locais explícitas: sem URL remota, conta ou segredo herdado do ambiente.
   const env = {
     PATH: `${dirname(process.execPath)}:/usr/bin:/bin`,
     CI: "1",
     E2E_ARTIFACTS_DIR: temporary,
     ...(phase === undefined ? {} : { E2E_PHASE: phase }),
-    ...(notice ? { E2E_NOTICE: "1" } : {}),
+    ...(notice === undefined ? {} : { E2E_NOTICE: NOTICE_ENV[notice] }),
   };
   const result = spawnSync(
     process.execPath,
@@ -146,9 +149,11 @@ try {
   const canonical = list(undefined);
   const ui = list("ui");
   const gpu = list("gpu");
-  const noticeCanonical = list(undefined, true);
-  const notice = list("notice", true);
-  if ([canonical, ui, gpu, notice].some((selection) => selection.tests.size === 0)) {
+  const noticeCanonical = list(undefined, "terms-change");
+  const notice = list("notice", "terms-change");
+  const incidentCanonical = list(undefined, "incident");
+  const incident = list("notice-incident", "incident");
+  if ([canonical, ui, gpu, notice, incident].some((selection) => selection.tests.size === 0)) {
     fail("Partição vazia não é evidência de cobertura");
   }
   if (gpu.workers !== 1) fail("A fase GPU precisa de exatamente um worker");
@@ -159,11 +164,12 @@ try {
   }
   equalTests(canonical, { ...ui, tests: combined });
   equalTests(noticeCanonical, notice);
+  equalTests(incidentCanonical, incident);
   for (const [id, entry] of canonical.tests) {
     if (!(entry.gpu ? gpu : ui).tests.has(id)) fail("Teste foi para a fase incorreta");
   }
   const usedOutputs = new Set<string>();
-  for (const selection of [ui, gpu, notice]) {
+  for (const selection of [ui, gpu, notice, incident]) {
     for (const directory of selection.outputDirs) {
       if (usedOutputs.has(directory)) fail("As fases sobrescrevem os mesmos resultados");
       usedOutputs.add(directory);
@@ -180,6 +186,7 @@ try {
       ui: ui.tests.size,
       gpu: gpu.tests.size,
       notice: notice.tests.size,
+      notice_incident: incident.tests.size,
       gpu_workers: gpu.workers,
       gpu_by_project: byProject,
     }),
