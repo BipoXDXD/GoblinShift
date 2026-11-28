@@ -1,8 +1,10 @@
 import { act, render, screen, within } from "@testing-library/react";
 import { describe, expect, it, onTestFinished, vi } from "vitest";
 
+import { SESSION_CHANNEL } from "../account/sessionSignal";
 import { installAnnounceClock, untilFakeClock } from "../test/announceClock";
 import { preloadRoutes } from "../test/appRoutes";
+import { fakeChannelNetwork } from "../test/fakeBroadcastChannel";
 import { jsonResponse, problemResponse, runBody } from "../test/fakeApi";
 import { TEXT } from "../text";
 
@@ -10,7 +12,44 @@ import { App } from "./App";
 
 const HOUR_MS = 60 * 60 * 1_000;
 
+/** Troca o BroadcastChannel do navegador pelo falso; devolve a rede, para ver os canais abertos. */
+function stubBroadcastChannel(): ReturnType<typeof fakeChannelNetwork> {
+  const create = fakeChannelNetwork();
+  vi.stubGlobal("BroadcastChannel", function FakeBroadcastChannel(name: string) {
+    return create(name);
+  });
+  onTestFinished(() => {
+    vi.unstubAllGlobals();
+  });
+  return create;
+}
+
 describe("App", () => {
+  it("abre o canal da sessão entre abas e o fecha ao desmontar", () => {
+    const create = stubBroadcastChannel();
+    window.history.pushState({}, "", "/rota-que-nao-existe");
+
+    const view = render(<App />);
+
+    expect(create.opened.map(({ name, closed }) => ({ name, closed }))).toEqual([
+      { name: SESSION_CHANNEL, closed: false },
+    ]);
+    view.unmount();
+    expect(create.opened.map(({ closed }) => closed)).toEqual([true]);
+  });
+
+  it("sem BroadcastChannel no navegador, o app abre do mesmo jeito", () => {
+    vi.stubGlobal("BroadcastChannel", undefined);
+    onTestFinished(() => {
+      vi.unstubAllGlobals();
+    });
+    window.history.pushState({}, "", "/rota-que-nao-existe");
+
+    render(<App />);
+
+    expect(screen.getByRole("link", { name: "GoblinShift" })).toBeVisible();
+  });
+
   it("renderiza a rota inicial", async () => {
     window.history.pushState({}, "", "/");
 

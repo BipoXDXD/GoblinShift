@@ -2,6 +2,7 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { render, type RenderResult } from "@testing-library/react";
 import { createMemoryRouter, RouterProvider, type RouteObject } from "react-router";
 
+import { SessionChannelProvider } from "../account/SessionChannelContext";
 import { ApiClientProvider } from "../api/ApiClientContext";
 import type { ApiClient } from "../api/client";
 
@@ -13,6 +14,8 @@ interface RenderRoutesOptions {
   readonly visited?: readonly string[];
   /** Outro QueryClient, como o do app (`createAppQueryClient`); por padrão, um sem retry. */
   readonly queryClient?: QueryClient;
+  /** O canal da sessão entre abas, como o do app; por padrão, nenhum (navegador sem o canal). */
+  readonly sessionChannel?: BroadcastChannel | null;
 }
 
 /** Renderiza as rotas num router em memória, com o cliente da API e um QueryClient novo. */
@@ -22,6 +25,7 @@ export function renderRoutes({
   client,
   visited = [],
   queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } }),
+  sessionChannel = null,
 }: RenderRoutesOptions): RenderResult & {
   readonly router: ReturnType<typeof createMemoryRouter>;
   readonly queryClient: QueryClient;
@@ -33,7 +37,9 @@ export function renderRoutes({
   const view = render(
     <ApiClientProvider client={client}>
       <QueryClientProvider client={queryClient}>
-        <RouterProvider router={router} />
+        <SessionChannelProvider channel={sessionChannel}>
+          <RouterProvider router={router} />
+        </SessionChannelProvider>
       </QueryClientProvider>
     </ApiClientProvider>,
   );

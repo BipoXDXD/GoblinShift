@@ -9,8 +9,10 @@ import { consoleCalls } from "../test/consoleGuard";
 import { fakeApi, jsonResponse, problemResponse, screenRequests } from "../test/fakeApi";
 import { expectHeadingFocused, recordDescriptionOnFocus } from "../test/focus";
 import { escapeIsBlocked, forceClose, heldResponse } from "../test/dialog";
+import { fakeChannelNetwork, receivedBy } from "../test/fakeBroadcastChannel";
 import { currentUrl, renderRoutes } from "../test/renderRoutes";
 import { API_KEYS_QUERY_KEY } from "./api";
+import { openSessionChannel } from "./sessionSignal";
 
 await preloadRoutes(
   "/acesso",
@@ -26,7 +28,11 @@ const CSRF = "csrf-da-sessao";
 const CANARY = `CANARY-${crypto.randomUUID()}`;
 const NO_CONTENT = (): Response => new Response(null, { status: 204 });
 
-function setup(handlers: Readonly<Record<string, Handler>> = {}, path = "/acesso") {
+function setup(
+  handlers: Readonly<Record<string, Handler>> = {},
+  path = "/acesso",
+  sessionChannel: BroadcastChannel | null = null,
+) {
   const api = fakeApi(
     {
       "GET /api/v1/me": () => jsonResponse(meBody()),
@@ -36,7 +42,12 @@ function setup(handlers: Readonly<Record<string, Handler>> = {}, path = "/acesso
     },
     { csrfToken: CSRF },
   );
-  const view = renderRoutes({ routes: appRoutes(api.client), path, client: api.client });
+  const view = renderRoutes({
+    routes: appRoutes(api.client),
+    path,
+    client: api.client,
+    sessionChannel,
+  });
   return { ...view, api, user: userEvent.setup() };
 }
 
@@ -1122,5 +1133,81 @@ describe("Acesso: excluir conta", () => {
     await openDialog(user);
 
     expect(await axeViolations(container)).toEqual([]);
+  });
+});
+
+describe("Acesso: avisa as outras abas ao encerrar a sessão", () => {
+  /** O Acesso numa aba com o canal da sessão, e as mensagens que chegam a outra aba da origem. */
+  function setupTabs(handlers: Readonly<Record<string, Handler>>) {
+    const create = fakeChannelNetwork();
+    const tab = openSessionChannel(create);
+    const other = openSessionChannel(create);
+    if (tab === null || other === null) {
+      throw new Error("canal falso não abriu");
+    }
+    return { ...setup(handlers, "/acesso", tab), messages: receivedBy(other) };
+  }
+
+  it("sair avisa as outras abas", async () => {
+    const { user, router, messages } = setupTabs({ "POST /auth/logout": NO_CONTENT });
+
+    await user.click(within(await section("Sessão")).getByRole("button", { name: "Sair" }));
+
+    await waitFor(() => {
+      expect(messages).toEqual([{ type: "signed-out" }]);
+    });
+    await waitFor(() => {
+      expect(currentUrl(router)).toBe("/");
+    });
+  });
+
+  it("sair de todos avisa as outras abas", async () => {
+    const { user, messages } = setupTabs({ "POST /auth/logout-all": NO_CONTENT });
+
+    await user.click(
+      within(await section("Sessão")).getByRole("button", {
+        name: "Sair de todos os dispositivos",
+      }),
+    );
+    await user.click(screen.getByRole("button", { name: "Sair de todos e revogar as chaves" }));
+
+    await waitFor(() => {
+      expect(messages).toEqual([{ type: "signed-out" }]);
+    });
+  });
+
+  it("excluir a conta avisa as outras abas", async () => {
+    const { user, messages } = setupTabs({
+      "DELETE /api/v1/me": () => new Response(null, { status: 202 }),
+    });
+    await user.click(
+      within(await section("Excluir conta")).getByRole("button", { name: "Excluir conta…" }),
+    );
+    const dialog = screen.getByRole("dialog", { name: "Excluir a conta?" });
+
+    await user.type(
+      within(dialog).getByLabelText("Digite “excluir minha conta”"),
+      "excluir minha conta",
+    );
+    await user.click(within(dialog).getByRole("button", { name: "Excluir conta" }));
+
+    await expectHeadingFocused("Exclusão pedida");
+    await waitFor(() => {
+      expect(messages).toEqual([{ type: "signed-out" }]);
+    });
+  });
+
+  it("sair que falha não avisa as outras abas", async () => {
+    const { user, messages } = setupTabs({
+      "POST /auth/logout": () => problemResponse(403, "CSRF_FAILED"),
+    });
+
+    await user.click(within(await section("Sessão")).getByRole("button", { name: "Sair" }));
+
+    await waitFor(() => {
+      expect(filledAlerts()).toHaveLength(1);
+    });
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(messages).toEqual([]);
   });
 });

@@ -97,6 +97,27 @@ test("Sair encerra a sessão: os cookies somem e a próxima tela pede para entra
   await expect(page.getByRole("region", { name: "Entre para continuar" })).toBeVisible();
 });
 
+test("sair numa aba leva a outra ao convite para entrar @fake-api", async ({
+  page,
+  context,
+  fakeApi,
+}) => {
+  // As duas abas na mesma origem e no mesmo contexto (cookies), as duas no Acesso com a conta.
+  await fakeApi.signIn();
+  const tabA = new AcessoPage(page);
+  await tabA.open();
+  const otherPage = await context.newPage();
+  const tabB = new AcessoPage(otherPage);
+  await tabB.open();
+  await expect(tabB.section("Sessão")).toBeVisible();
+
+  await tabA.signOut();
+
+  // Sem recarregar: o aviso pelo BroadcastChannel tira a conta da outra aba.
+  await expect(otherPage.getByRole("region", { name: "Entre para continuar" })).toBeVisible();
+  await expect(tabB.section("Sessão")).toBeHidden();
+});
+
 test("no celular de 375 px, o Tab no diálogo segue a ordem vertical dos botões @keyboard @fake-api", async ({
   page,
   fakeApi,
