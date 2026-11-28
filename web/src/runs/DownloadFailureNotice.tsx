@@ -1,8 +1,8 @@
-import { CircleAlert } from "lucide-react";
 import type { ReactElement } from "react";
 
 import type { ApiProblem } from "../api/problem";
 import type { HeadingLevel } from "../components/a11y/Heading";
+import { DangerAlert } from "../components/feedback/DangerAlert";
 import { asGuidanceCode, GuidanceNotice } from "../components/feedback/FailureNotice";
 import { TEXT } from "../text";
 
@@ -26,14 +26,10 @@ export function DownloadFailureNotice({
     return <GuidanceNotice code={guidance} headingLevel={headingLevel} />;
   }
   return (
-    <div
-      role="alert"
-      className="flex gap-3 rounded-lg border-l-4 border-danger-accent bg-danger-bg p-4 text-danger-fg"
-    >
-      <CircleAlert aria-hidden="true" className="mt-1 size-4 flex-none" />
+    <DangerAlert>
       <p className="font-semibold">
         {TEXT.run.results.downloadFailed(TEXT.failure.problems[code])}
       </p>
-    </div>
+    </DangerAlert>
   );
 }
