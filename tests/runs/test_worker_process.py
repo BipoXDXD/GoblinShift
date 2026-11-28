@@ -1,9 +1,13 @@
-"""Worker como processo real: NOTIFY, SIGKILL e SIGSTOP além do lease (3.4 e 3.7 do plano)."""
+"""Worker como processo real: NOTIFY, SIGKILL e SIGSTOP além do lease (3.4 e 3.7 do plano).
+
+No fim, o `serve` dentro do processo do teste, para medir o pool do worker (ADR 073).
+"""
 
 import os
 import signal
 import subprocess
 import sys
+import threading
 import time
 import uuid
 from collections.abc import Callable, Iterator
@@ -14,18 +18,21 @@ from pathlib import Path
 from typing import Any
 
 import pytest
-from sqlalchemy import RowMapping, func, select, text
+from sqlalchemy import Engine, RowMapping, event, func, select, text
 from sqlalchemy.orm import Session, sessionmaker
 
+from goblinshift.entrypoints import worker as worker_entrypoint
+from goblinshift.entrypoints.shutdown import ShutdownFlag
 from goblinshift.files.states import ObjectState
 from goblinshift.files.storage import FileStorage
 from goblinshift.files.tables import stored_object
-from goblinshift.platform.db import unit_of_work
+from goblinshift.platform.db import WORKER_POOL, PoolSize, make_engine, unit_of_work
 from goblinshift.platform.settings import Settings
 from goblinshift.runs.lifecycle import MIN_RETRY_JITTER
 from goblinshift.runs.maintenance import Maintenance, MaintenanceConfig
 from goblinshift.runs.tables import attempt, run_output
 from goblinshift.runs.worker.claim import RUNS_CHANNEL
+from goblinshift.runs.worker.runner import ExecutorStatus, Runner
 from tests.runs.worker_process import (
     IDLE_MESSAGE,
     PAUSE_AT,
@@ -500,3 +507,108 @@ def test_sigterm_encerra_o_worker_ocioso(
     output = log.read_text(encoding="utf-8")
     assert output.count("parada pedida") == 1, output
     assert "worker encerrado" in output
+
+
+class PoolCheckouts:
+    """Conexões do pool em uso ao mesmo tempo, medidas pelos eventos `checkout` e `checkin`."""
+
+    def __init__(self) -> None:
+        self._lock = threading.Lock()
+        self._in_use = 0
+        self.peak = 0
+        self.pools: list[PoolSize | None] = []
+
+    def make_engine(self, settings: Settings, *, pool: PoolSize | None = None) -> Engine:
+        self.pools.append(pool)
+        engine = make_engine(settings, pool=pool)
+        event.listen(engine.pool, "checkout", self._checkout)
+        event.listen(engine.pool, "checkin", self._checkin)
+        return engine
+
+    def _checkout(self, *_args: object) -> None:
+        with self._lock:
+            self._in_use += 1
+            self.peak = max(self.peak, self._in_use)
+
+    def _checkin(self, *_args: object) -> None:
+        with self._lock:
+            self._in_use -= 1
+
+
+class SlowStartRunner:
+    """Runner cujo `start` bloqueia além do lease, como um executor-ctl lento: a renovação do
+    lease roda em thread durante a chamada."""
+
+    def __init__(self, inner: Runner, delay_s: float) -> None:
+        self._inner = inner
+        self._delay_s = delay_s
+
+    def work_dir(self, attempt_id: uuid.UUID) -> Path:
+        return self._inner.work_dir(attempt_id)
+
+    def create_work_dir(self, attempt_id: uuid.UUID) -> Path:
+        return self._inner.create_work_dir(attempt_id)
+
+    def list_work(self) -> list[uuid.UUID]:
+        return self._inner.list_work()
+
+    def start(self, attempt_id: uuid.UUID, image: str) -> ExecutorStatus:
+        time.sleep(self._delay_s)
+        return self._inner.start(attempt_id, image)
+
+    def status(self, attempt_id: uuid.UUID) -> ExecutorStatus:
+        return self._inner.status(attempt_id)
+
+    def stop(self, attempt_id: uuid.UUID, grace: timedelta) -> ExecutorStatus:
+        return self._inner.stop(attempt_id, grace)
+
+    def remove(self, attempt_id: uuid.UUID) -> None:
+        self._inner.remove(attempt_id)
+
+
+def test_worker_completa_a_run_dentro_do_worker_pool(
+    monkeypatch: pytest.MonkeyPatch,
+    factory: sessionmaker[Session],
+    db_settings: Settings,
+    storage: FileStorage,
+    work_root: Path,
+) -> None:
+    """Claim, renovação do lease durante um `start` lento, coleta e publicação (ADR 073).
+
+    Mede no próprio processo as conexões do pool em uso ao mesmo tempo: o pico é 1, e o resto
+    do `WORKER_POOL` é margem.
+    """
+    checkouts = PoolCheckouts()
+    monkeypatch.setattr(worker_entrypoint, "make_engine", checkouts.make_engine)
+    settings = db_settings.model_copy(
+        update={
+            "storage_root": storage.root,
+            "work_root": work_root,
+            "worker_lease_s": LEASE_S,
+            "worker_poll_interval_s": 0.2,
+        }
+    )
+    run_id = queue_run(factory, storage, create_user(factory))
+    shutdown = ShutdownFlag()
+    runner = SlowStartRunner(local_runner(work_root), delay_s=LEASE_S * 2)
+    errors: list[BaseException] = []
+
+    def serve() -> None:
+        try:
+            worker_entrypoint.serve(settings, runner, shutdown)
+        except BaseException as error:  # relançada abaixo, na thread do teste
+            errors.append(error)
+
+    thread = threading.Thread(target=serve, name="worker-serve")
+    thread.start()
+    try:
+        wait_until(lambda: run_row(factory, run_id)["status"] == "succeeded" or bool(errors))
+    finally:
+        shutdown.request()
+        thread.join(timeout=WAIT_S)
+    assert not errors, errors
+    assert checkouts.pools == [WORKER_POOL]
+    # O `start` levou dois leases: a Run só termina com a renovação feita pela thread.
+    assert run_row(factory, run_id)["status"] == "succeeded"
+    # Uma conexão por vez: o laço e a renovação nunca seguram conexão juntos (ADR 073).
+    assert checkouts.peak == 1, checkouts.peak

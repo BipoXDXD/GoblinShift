@@ -98,7 +98,7 @@ from goblinshift.identity.accounts import (
     list_accounts,
     list_pending_accounts,
 )
-from goblinshift.platform.db import make_engine, make_session_factory, unit_of_work
+from goblinshift.platform.db import ADMIN_POOL, make_engine, make_session_factory, unit_of_work
 from goblinshift.platform.settings import MissingSecretError, Settings
 from goblinshift.platform.telemetry import (
     UserHasher,
@@ -194,7 +194,7 @@ class _OneLineFormatter(logging.Formatter):
 def _run_command(args: argparse.Namespace, clock: Callable[[], float]) -> int:
     command: Command = args.command
     settings = Settings()
-    engine = make_engine(settings)
+    engine = make_engine(settings, pool=ADMIN_POOL)
     try:
         return command(args, _Context(make_session_factory(engine), settings, clock))
     finally:

@@ -34,6 +34,7 @@ from goblinshift.identity import purge as identity_purge
 from goblinshift.identity import rate_limit
 from goblinshift.identity.login_state import count_login_states
 from goblinshift.platform.db import (
+    MAINTENANCE_POOL,
     is_lock_contention,
     make_engine,
     make_session_factory,
@@ -109,7 +110,7 @@ def serve(settings: Settings, runner: Runner, shutdown: ShutdownFlag) -> None:
     # O tracing fecha por último, depois do pool, e mesmo se o `dispose` falhar: o encerramento
     # descarta span emitido depois dele, e sem ele sobraria o `atexit` do SDK, que não tem prazo.
     with process_tracer(settings, "goblinshift-maintenance") as tracer:
-        engine = make_engine(batch_settings)
+        engine = make_engine(batch_settings, pool=MAINTENANCE_POOL)
         factory = make_session_factory(engine)
         storage = FileStorage(settings.storage_root)
         try:

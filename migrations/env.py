@@ -28,7 +28,7 @@ import goblinshift.files.tables
 import goblinshift.identity.tables
 import goblinshift.presets.tables
 import goblinshift.runs.tables  # noqa: F401
-from goblinshift.platform.db import make_engine, metadata
+from goblinshift.platform.db import MIGRATE_POOL, make_engine, metadata
 from goblinshift.platform.migration_locks import (
     MIGRATION_LOCK_TIMEOUT_MS,
     RelativeMigrationPlan,
@@ -80,7 +80,7 @@ def run_migrations_online() -> None:
         if any(_relative_destination.match(target) for target in destination or ())
         else None
     )
-    engine = make_engine(settings)
+    engine = make_engine(settings, pool=MIGRATE_POOL)
     try:
         if goes_to_head:
             with engine.connect() as connection:
