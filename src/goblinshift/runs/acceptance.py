@@ -6,7 +6,7 @@ entradas e o hash canônico do comando. Numa transação curta, na ordem de lock
 1. Trava da chave de idempotência (`pg_try_advisory_xact_lock`, sem espera). Todo escritor de uma
    chave passa por ela, então outra requisição com a mesma chave em andamento é detectada na
    hora (409 `IDEMPOTENCY_IN_PROGRESS`), em vez de esperar ou criar uma segunda Run. Por não
-   esperar, essa trava fica fora da ordem de 3.4 sem risco de deadlock.
+   esperar, essa trava fica fora da ordem do ADR 071 sem risco de deadlock.
 2. Registro de idempotência vigente: mesmo hash → replay; hash diferente → recusa. Nada é escrito.
 3. Capacidade global: `pg_advisory_xact_lock` numa chave constante serializa as aceitações antes
    de contar a fila, para que duas réplicas não vejam 9 aguardando e entrem as duas (contar e
