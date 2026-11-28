@@ -29,9 +29,12 @@ from goblinshift.processing.csv_janitor import (
     Params,
     params_from_mapping,
 )
+from goblinshift.processing.csv_janitor import Limits as TableLimits
 from goblinshift.processing.registry import RECIPES
 
 TABLE_BYTES = 8 * 1024 * 1024
+# Receitas cujo teto por entrada fica abaixo do comum, com o limite do executor que o justifica.
+INPUT_CEILING_BELOW_COMMON = {"csv-janitor": TableLimits().table_bytes}
 DEFAULTS: dict[str, object] = {
     "case_rules": [],
     "deduplicate_by": [],
@@ -207,7 +210,7 @@ def test_toda_versao_declara_o_teto_por_entrada() -> None:
     # A aceitação aplica `max_input_bytes` a cada entrada; o envio só olha o nome (ADR 036). Só o
     # CSV Janitor fica abaixo do teto comum, no teto da tabela que o executor aplica (D8, ADR 062).
     for version in CATALOG.list_versions():
-        floor = TABLE_BYTES if version.recipe_id == "csv-janitor" else MAX_FILE_BYTES
+        floor = INPUT_CEILING_BELOW_COMMON.get(version.recipe_id, MAX_FILE_BYTES)
         assert version.limits["max_input_bytes"] >= floor
 
 

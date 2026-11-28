@@ -64,6 +64,8 @@ def run_recipe(recipe_id: str, inputs: Sequence[InputFile], out: Path) -> list[O
                 outcomes.append(("rejected", code))
             case ItemDuplicate():
                 outcomes.append(("duplicate", ""))
+            case _:
+                raise AssertionError(f"desfecho de item desconhecido: {item!r}")
     return outcomes
 
 
