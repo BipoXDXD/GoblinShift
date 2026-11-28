@@ -14,7 +14,8 @@ a produção. Para medir uma imagem já publicada, retague-a para `goblinshift-e
 Reaproveita a medição do Image Forge (`image_forge_load.measure`): usa a imagem do executor do
 checkout e roda uma tentativa de verdade com as MESMAS opções do perfil de produção (runsc, 1 vCPU,
 2 GiB, sem rede), com a manutenção parada (ADR 017). Pede áudio em FLAC e três miniaturas por
-vídeo. Passa se a tentativa terminar com código 0, todos os vídeos aceitos, dentro de 600 s.
+vídeo; com `--version 2`, Opus a 192 kbps sem corte (o codificador mais caro da v2, ADR 063).
+Passa se a tentativa terminar com código 0, todos os vídeos aceitos, dentro de 600 s.
 Usa só a biblioteca padrão (Python 3.12 do host).
 """
 
@@ -39,17 +40,31 @@ PARAMETERS = {
     "thumbnail_count": 3,
 }
 CRITERION = "5 vídeos de 300 s em 1080p60 com FLAC e 3 miniaturas numa tentativa (teto de 600 s)"
+PARAMETERS_V2 = {
+    "audio_bitrate_kbps": 192,
+    "audio_format": "opus",
+    "audio_stream_index": None,
+    "extract_audio": True,
+    "thumbnail_count": 3,
+    "trim_end_ms": None,
+    "trim_start_ms": 0,
+}
+CRITERION_V2 = (
+    "5 vídeos de 300 s em 1080p60 com Opus a 192 kbps e 3 miniaturas, v2 sem corte, numa "
+    "tentativa (teto de 600 s)"
+)
+_BY_VERSION = {1: (PARAMETERS, CRITERION), 2: (PARAMETERS_V2, CRITERION_V2)}
 
 
-def expected_for(videos: Path) -> dict[str, Any]:
+def expected_for(videos: Path, version: int = 1) -> dict[str, Any]:
     """O equivalente ao expected.json do gerador, dos vídeos do diretório em ordem de nome."""
     paths = sorted(p for p in videos.iterdir() if p.suffix.casefold() in VIDEO_SUFFIXES)
     if not 1 <= len(paths) <= MAX_VIDEOS:
         raise ValueError(f"esperados de 1 a {MAX_VIDEOS} vídeos em {videos}, há {len(paths)}")
     return {
         "recipe_id": "media-mill",
-        "recipe_version": 1,
-        "parameters": PARAMETERS,
+        "recipe_version": version,
+        "parameters": _BY_VERSION[version][0],
         "inputs": [
             {
                 "path": path.name,
@@ -68,13 +83,17 @@ def expected_for(videos: Path) -> dict[str, Any]:
 def main(argv: list[str]) -> int:
     parser = argparse.ArgumentParser(prog="python3 -B -m acceptance.media_mill_load")
     parser.add_argument("videos", type=Path, help="diretório com os vídeos do pior caso")
+    parser.add_argument(
+        "--version", type=int, choices=sorted(_BY_VERSION), default=1, help="versão da receita"
+    )
     load.add_skip_build(parser)
     options = parser.parse_args(argv)
     if os.geteuid() != 0:
         print("rode com sudo", file=sys.stderr)
         return 2
     videos = options.videos.resolve()
-    expected = expected_for(videos)
+    expected = expected_for(videos, options.version)
+    criterion = _BY_VERSION[options.version][1]
     config = load_config(DEFAULT_CONFIG_PATH)
     host = Host.from_config(config)
     if options.skip_build:
@@ -82,7 +101,7 @@ def main(argv: list[str]) -> int:
     else:
         load.build_image()
     return load.measure_with_maintenance_suspended(
-        lambda: load.measure(host, videos, expected, CRITERION)
+        lambda: load.measure(host, videos, expected, criterion)
     )
 
 

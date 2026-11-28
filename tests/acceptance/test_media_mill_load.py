@@ -35,6 +35,23 @@ def test_parametros_sao_a_forma_resolvida_pelo_catalogo() -> None:
     assert CATALOG.resolve("media-mill", 1, media.PARAMETERS) == media.PARAMETERS
 
 
+def test_parametros_da_v2_sao_opus_192_sem_corte_na_forma_resolvida() -> None:
+    assert CATALOG.resolve("media-mill", 2, media.PARAMETERS_V2) == media.PARAMETERS_V2
+    assert (media.PARAMETERS_V2["audio_format"], media.PARAMETERS_V2["audio_bitrate_kbps"]) == (
+        "opus",
+        192,
+    )
+    assert media.PARAMETERS_V2["trim_end_ms"] is None
+
+
+def test_job_da_v2_pede_a_versao_2(tmp_path: Path) -> None:
+    (tmp_path / "a.mp4").write_bytes(b"a")
+
+    expected = media.expected_for(tmp_path, 2)
+
+    assert (expected["recipe_version"], expected["parameters"]) == (2, media.PARAMETERS_V2)
+
+
 @pytest.mark.parametrize("count", [0, 6])
 def test_diretorio_sem_videos_ou_com_mais_de_cinco_e_recusado(tmp_path: Path, count: int) -> None:
     for index in range(count):
@@ -80,6 +97,24 @@ def test_por_padrao_constroi_a_imagem_do_checkout(host_stubs: list[str], tmp_pat
     assert media.main([str(tmp_path)]) == 0
 
     assert host_stubs == ["build"]
+
+
+def test_version_2_mede_com_o_criterio_da_v2(
+    host_stubs: list[str], tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    measured: list[tuple[int, str]] = []
+
+    def fake_measure(_host: Any, _videos: Path, expected: dict[str, Any], criterion: str) -> int:
+        measured.append((expected["recipe_version"], criterion))
+        return 0
+
+    monkeypatch.setattr(load, "measure_with_maintenance_suspended", lambda run: run())
+    monkeypatch.setattr(load, "measure", fake_measure)
+    monkeypatch.setattr("acceptance.run.Host.from_config", lambda _config: None)
+
+    assert media.main(["--version", "2", str(tmp_path)]) == 0
+
+    assert measured == [(2, media.CRITERION_V2)]
 
 
 def test_skip_build_usa_a_imagem_retagueada_sem_construir(

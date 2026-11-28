@@ -142,7 +142,10 @@ const comparisonSchema = z
       audio_before: z
         .enum(["aac", "pcm_s16le", "pcm_s16be", "pcm_s24le", "pcm_s24be", "opus", "vorbis"])
         .nullable(),
-      audio_after: z.enum(["wav", "flac"]).nullable(),
+      audio_after: z.enum(["wav", "flac", "mp3", "aac", "opus"]).nullable(),
+      /** Só com corte (Media Mill v2): a duração do vídeo e a do trecho; as duas ou nenhuma. */
+      duration_before_ms: z.number().int().nullable(),
+      duration_after_ms: z.number().int().nullable(),
     }),
   ])
   .nullable()

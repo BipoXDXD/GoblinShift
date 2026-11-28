@@ -1,4 +1,4 @@
-"""Parâmetros do media-mill v2 como modelo Pydantic estrito (ADR 072).
+"""Parâmetros do media-mill v2 como modelo Pydantic estrito (ADR 063).
 
 Superconjunto da v1: os mesmos campos e defaults, mais o bitrate do áudio com perda e o trecho em
 milissegundos inteiros. As regras moram em `processing.media_mill.ParamsV2`, que o validador do

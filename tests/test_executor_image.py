@@ -123,6 +123,7 @@ def make_work_dir(
     tables: Sequence[tuple[str, bytes]],
     recipe_id: str = "csv-janitor",
     parameters: Mapping[str, object] | None = None,
+    version: int = 1,
 ) -> Path:
     """Área como o worker a monta, com os parâmetros resolvidos pelo catálogo."""
     work = root / "work"
@@ -144,8 +145,8 @@ def make_work_dir(
         )
     job = {
         "recipe_id": recipe_id,
-        "recipe_version": 1,
-        "parameters": CATALOG.resolve(recipe_id, 1, parameters or {}),
+        "recipe_version": version,
+        "parameters": CATALOG.resolve(recipe_id, version, parameters or {}),
         "inputs": entries,
     }
     (work / "job.json").write_text(json.dumps(job), encoding="utf-8")
@@ -610,6 +611,47 @@ def test_media_mill_gera_o_mesmo_zip_em_duas_execucoes_na_imagem(
     second = run_recipe(image, tmp_path / "2", batch, "media-mill", thumbnail_count=3)
 
     assert package_digest(first, "media-mill") == package_digest(second, "media-mill")
+
+
+def run_media_mill_v2(image: str, root: Path, audio_format: str) -> Path:
+    root.mkdir(parents=True)
+    batch = [("clipe.mp4", video.generate(video.CLIPS["mp4"], root / "a.mp4").read_bytes())]
+    parameters = {
+        "audio_format": audio_format,
+        "thumbnail_count": 1,
+        "trim_start_ms": 500,
+        "trim_end_ms": 1500,
+    }
+    work = make_work_dir(root, batch, "media-mill", parameters, version=2)
+    result = run_executor(image, work)
+    assert result.returncode == SUCCEEDED, result.stderr
+    return work / "out"
+
+
+@pytest.mark.parametrize(
+    ("audio_format", "suffix", "magic"),
+    # Assinatura nos 8 primeiros bytes: quadro MPEG-1 Layer III, caixa `ftyp` do MP4 e página Ogg.
+    [("mp3", ".mp3", b"\xff\xfb"), ("aac", ".m4a", b"ftyp"), ("opus", ".opus", b"OggS")],
+    ids=["mp3", "aac", "opus"],
+)
+def test_media_mill_v2_gera_mp3_aac_e_opus_na_imagem(
+    image: str, tmp_path: Path, audio_format: str, suffix: str, magic: bytes
+) -> None:
+    out = run_media_mill_v2(image, tmp_path / "1", audio_format)
+    again = run_media_mill_v2(image, tmp_path / "2", audio_format)
+
+    [item] = read_json(out / "report.json")["items"]
+    assert item["status"] == "ok"
+    assert (item["details"]["trim_start_ms"], item["details"]["trim_end_ms"]) == (500, 1500)
+    with zipfile.ZipFile(out / "media-mill.zip") as archive:
+        assert archive.namelist() == [
+            f"audio/clipe{suffix}",
+            "thumbnails/clipe-10pct.jpg",
+            "manifest.json",
+            "report.json",
+        ]
+        assert magic in archive.read(f"audio/clipe{suffix}")[:8]
+    assert package_digest(out, "media-mill") == package_digest(again, "media-mill")
 
 
 # --- PDF Press na imagem (1.5; ADR 035) -------------------------------------------------------

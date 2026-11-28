@@ -491,10 +491,10 @@ export interface components {
         AudioCodec: "aac" | "pcm_s16le" | "pcm_s16be" | "pcm_s24le" | "pcm_s24be" | "opus" | "vorbis";
         /**
          * AudioFormat
-         * @description Formato do áudio extraído pelo Media Mill.
+         * @description Formato do áudio extraído pelo Media Mill; MP3, AAC e Opus vêm da v2 (ADR 063).
          * @enum {string}
          */
-        AudioFormat: "wav" | "flac";
+        AudioFormat: "wav" | "flac" | "mp3" | "aac" | "opus";
         /**
          * Availability
          * @description Se o conteúdo ainda pode ser usado, independente do estado histórico (1.7).
@@ -734,6 +734,10 @@ export interface components {
             height_after: number | null;
             audio_before: components["schemas"]["AudioCodec"] | null;
             audio_after: components["schemas"]["AudioFormat"] | null;
+            /** Duration Before Ms */
+            duration_before_ms: number | null;
+            /** Duration After Ms */
+            duration_after_ms: number | null;
         };
         /**
          * PdfComparisonResponse

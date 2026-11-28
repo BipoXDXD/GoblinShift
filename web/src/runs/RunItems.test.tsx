@@ -422,6 +422,8 @@ describe("Execução: detalhe por arquivo", () => {
         height_after: 180,
         audio_before: "pcm_s24le",
         audio_after: "flac",
+        duration_before_ms: null,
+        duration_after_ms: null,
       });
 
       expect(definitions(group)).toEqual([
@@ -439,9 +441,27 @@ describe("Execução: detalhe por arquivo", () => {
         height_after: null,
         audio_before: "aac",
         audio_after: "wav",
+        duration_before_ms: null,
+        duration_after_ms: null,
       });
 
       expect(definitions(group)).toEqual([["Áudio", "AAC → para WAV"]]);
+    });
+
+    it("Media Mill v2: o áudio extraído em MP3", async () => {
+      const group = await comparisonOf({
+        kind: "media",
+        width_before: 1920,
+        height_before: 1080,
+        width_after: null,
+        height_after: null,
+        audio_before: "aac",
+        audio_after: "mp3",
+        duration_before_ms: 125000,
+        duration_after_ms: 1000,
+      });
+
+      expect(definitions(group)).toEqual([["Áudio", "AAC → para MP3"]]);
     });
 
     it("mídia sem miniatura e sem áudio não mostra um bloco vazio", async () => {
@@ -457,6 +477,8 @@ describe("Execução: detalhe por arquivo", () => {
               height_after: null,
               audio_before: null,
               audio_after: null,
+              duration_before_ms: null,
+              duration_after_ms: null,
             },
           }),
         ],

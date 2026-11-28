@@ -1,4 +1,4 @@
-"""Parâmetros do Media Mill v2: áudio com perda (MP3, AAC e Opus) e corte (ADR 072).
+"""Parâmetros do Media Mill v2: áudio com perda (MP3, AAC e Opus) e corte (ADR 063).
 
 O `AudioFormat` da v1 fica intocado (1.6: dentro de uma versão publicada, enums não mudam); a v2
 tem o enum próprio, superconjunto do da v1. As listas de bitrate são as de D6 (a): todos os valores

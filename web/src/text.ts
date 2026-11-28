@@ -390,6 +390,7 @@ export const TEXT = {
           vorbis: "Vorbis",
           wav: "WAV",
           flac: "FLAC",
+          mp3: "MP3",
         },
       },
       // Singular e plural, como em `nouns`.

@@ -228,7 +228,7 @@ MEDIA_MILL_V1 = RecipeVersion(
     limits=dict(_MEDIA_MILL_LIMITS),
 )
 
-# ADR 072: superconjunto da v1 (áudio com perda e trecho), com os mesmos limites.
+# ADR 063: superconjunto da v1 (áudio com perda e trecho), com os mesmos limites.
 MEDIA_MILL_V2 = RecipeVersion(
     recipe_id=media_mill.RECIPE_ID,
     version=media_mill.VERSION_2,

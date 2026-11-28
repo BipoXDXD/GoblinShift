@@ -12,7 +12,7 @@ erros: um `ENOSPC` ou `OUTPUT_LIMIT_EXCEEDED` derruba a execução em vez de vir
 As duas versões rodam o mesmo pipeline, `_Mill`, sobre um `MillPlan` (`plan.py`): um conserto de
 segurança vale para as duas de uma vez. `MediaMillV1` e `MediaMillV2` só montam o plano. A v2
 acrescenta o áudio com perda e o trecho (`trim_start_ms`/`trim_end_ms`), que vale para o áudio e
-para as miniaturas (ADR 072).
+para as miniaturas (ADR 063).
 """
 
 import math

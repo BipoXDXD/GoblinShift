@@ -1,4 +1,4 @@
-"""Media Mill v2: áudio com perda e corte sobre o mesmo pipeline da v1 (ADR 072).
+"""Media Mill v2: áudio com perda e corte sobre o mesmo pipeline da v1 (ADR 063).
 
 Usa o FFmpeg do ambiente (`media.py`); o do CI (`apt ffmpeg`) e o do Homebrew trazem LAME e Opus.
 """
@@ -13,6 +13,7 @@ from goblinshift.processing.media_mill.recipe import MediaMillV2
 from goblinshift.processing.output_dir import FileSystemOutputDir
 from goblinshift.processing.recipe import ItemNoticeCode, ItemOk, ItemRejected, Report
 from goblinshift.processing.registry import RECIPES
+from goblinshift.runs.comparison import AudioFormat, MediaComparison, comparison_from_report
 from tests.media_mill.conftest import ClipLibrary, Workspace
 from tests.media_mill.media import CANARY, duration_s, probe
 
@@ -276,3 +277,18 @@ def test_v2_sem_corte_nao_registra_o_trecho(workspace: Workspace, clips: ClipLib
 
     assert not {"trim_start_ms", "trim_end_ms", "audio_bitrate_kbps"} & item.details.keys()
     assert milliseconds(item, "audio_sample_rate_out_hz") == 44100
+
+
+def test_detalhes_da_v2_com_corte_viram_comparacao_com_duracao(
+    workspace: Workspace, clips: ClipLibrary
+) -> None:
+    """Chave renomeada na receita zeraria a duração da comparação em silêncio."""
+    workspace.add("clip.mp4", clips.bytes("mp4"))
+
+    item = ok_item(workspace, {"audio_format": "mp3", "trim_start_ms": 500, "trim_end_ms": 1500})
+    comparison = comparison_from_report("media-mill", item.counts, item.details)
+
+    assert isinstance(comparison, MediaComparison)
+    assert comparison.audio_after is AudioFormat.MP3
+    assert comparison.duration_after_ms == 1000
+    assert comparison.duration_before_ms == milliseconds(item, "duration_ms")

@@ -251,6 +251,9 @@ class MediaComparisonResponse(BaseModel):
     height_after: int | None = Field(ge=1)
     audio_before: AudioCodec | None
     audio_after: AudioFormat | None
+    # Só com corte (Media Mill v2): a duração do vídeo e a do trecho; os dois ou nenhum.
+    duration_before_ms: int | None = Field(ge=1)
+    duration_after_ms: int | None = Field(ge=1)
 
 
 ItemComparisonResponse = Annotated[
@@ -774,6 +777,8 @@ def _comparison(comparison: ItemComparison | None) -> ItemComparisonResponse | N
                 height_after=comparison.height_after,
                 audio_before=comparison.audio_before,
                 audio_after=comparison.audio_after,
+                duration_before_ms=comparison.duration_before_ms,
+                duration_after_ms=comparison.duration_after_ms,
             )
 
 

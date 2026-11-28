@@ -1300,12 +1300,16 @@ def test_openapi_publica_a_variante_do_catalogo(client: TestClient) -> None:
     operation = spec["paths"][RUNS]["post"]
     schema = operation["requestBody"]["content"]["application/json"]["schema"]
     variants = schema["allOf"][1]["oneOf"]
-    assert [v["properties"]["recipe_id"]["const"] for v in variants] == [
-        "csv-janitor",
-        "image-forge",
-        "downloads-detox",
-        "pdf-press",
-        "media-mill",
+    assert [
+        (v["properties"]["recipe_id"]["const"], v["properties"]["recipe_version"]["const"])
+        for v in variants
+    ] == [
+        ("csv-janitor", 1),
+        ("image-forge", 1),
+        ("downloads-detox", 1),
+        ("pdf-press", 1),
+        ("media-mill", 1),
+        ("media-mill", 2),
     ]
     assert schema["unevaluatedProperties"] is False
     assert operation["operationId"] == "createRun"
@@ -1535,18 +1539,33 @@ MEDIA_COMPARISON = {
     "audio_before": "aac",
     "audio_after": "wav",
 }
+# Media Mill v2 com corte: MP3 e a duração do vídeo e do trecho.
+MEDIA_V2_COMPARISON = MEDIA_COMPARISON | {
+    "audio_after": "mp3",
+    "duration_before_ms": 125_000,
+    "duration_after_ms": 1000,
+}
+NO_DURATION = {"duration_before_ms": None, "duration_after_ms": None}
 
 
 @pytest.mark.parametrize(
-    "stored",
-    [TABLE_COMPARISON, PDF_COMPARISON, IMAGE_COMPARISON, MEDIA_COMPARISON],
-    ids=["table", "pdf", "image", "media"],
+    ("stored", "expected"),
+    [
+        (TABLE_COMPARISON, TABLE_COMPARISON),
+        (PDF_COMPARISON, PDF_COMPARISON),
+        (IMAGE_COMPARISON, IMAGE_COMPARISON),
+        # Guardada antes da v2, sem as chaves de duração: responde com as duas nulas.
+        (MEDIA_COMPARISON, MEDIA_COMPARISON | NO_DURATION),
+        (MEDIA_V2_COMPARISON, MEDIA_V2_COMPARISON),
+    ],
+    ids=["table", "pdf", "image", "media", "media-v2"],
 )
 def test_detalhe_traz_a_comparacao_por_item(
     client: TestClient,
     factory: sessionmaker[Session],
     storage: FileStorage,
     stored: dict[str, object],
+    expected: dict[str, object],
 ) -> None:
     account = Account(factory)
     run_id = insert_finished_run(factory, account.id, BASE_TIME)
@@ -1560,7 +1579,7 @@ def test_detalhe_traz_a_comparacao_por_item(
 
     [item] = client.get(f"{RUNS}/{run_id}", headers=account.headers).json()["items"]
 
-    assert item["comparison"] == stored
+    assert item["comparison"] == expected
 
 
 def test_detalhe_sem_comparacao_responde_nulo(

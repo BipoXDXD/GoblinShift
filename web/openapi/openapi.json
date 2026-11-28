@@ -6024,10 +6024,13 @@
         "type": "string",
         "enum": [
           "wav",
-          "flac"
+          "flac",
+          "mp3",
+          "aac",
+          "opus"
         ],
         "title": "AudioFormat",
-        "description": "Formato do áudio extraído pelo Media Mill."
+        "description": "Formato do áudio extraído pelo Media Mill; MP3, AAC e Opus vêm da v2 (ADR 063)."
       },
       "Availability": {
         "type": "string",
@@ -6584,6 +6587,30 @@
                 "type": "null"
               }
             ]
+          },
+          "duration_before_ms": {
+            "anyOf": [
+              {
+                "type": "integer",
+                "minimum": 1.0
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Duration Before Ms"
+          },
+          "duration_after_ms": {
+            "anyOf": [
+              {
+                "type": "integer",
+                "minimum": 1.0
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Duration After Ms"
           }
         },
         "type": "object",
@@ -6594,7 +6621,9 @@
           "width_after",
           "height_after",
           "audio_before",
-          "audio_after"
+          "audio_after",
+          "duration_before_ms",
+          "duration_after_ms"
         ],
         "title": "MediaComparisonResponse",
         "description": "Media Mill: vídeo → miniatura e áudio de origem → extraído; cada par vem inteiro ou nulo."

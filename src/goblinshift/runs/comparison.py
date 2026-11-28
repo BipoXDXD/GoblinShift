@@ -42,10 +42,13 @@ class AudioCodec(StrEnum):
 
 
 class AudioFormat(StrEnum):
-    """Formato do áudio extraído pelo Media Mill."""
+    """Formato do áudio extraído pelo Media Mill; MP3, AAC e Opus vêm da v2 (ADR 063)."""
 
     WAV = "wav"
     FLAC = "flac"
+    MP3 = "mp3"
+    AAC = "aac"
+    OPUS = "opus"
 
 
 @dataclass(frozen=True)
@@ -81,7 +84,11 @@ class ImageComparison:
 
 @dataclass(frozen=True)
 class MediaComparison:
-    """Vídeo → miniatura e áudio de origem → extraído; cada par vem inteiro ou fica `None`."""
+    """Vídeo → miniatura e áudio de origem → extraído; cada par vem inteiro ou fica `None`.
+
+    A duração antes/depois só existe com corte (v2): a do vídeo e a do trecho efetivo. Os dois
+    campos têm default, e a comparação guardada antes deles continua válida sem as chaves.
+    """
 
     kind: ClassVar[str] = KIND_MEDIA
 
@@ -91,16 +98,23 @@ class MediaComparison:
     height_after: int | None
     audio_before: AudioCodec | None
     audio_after: AudioFormat | None
+    duration_before_ms: int | None = None
+    duration_after_ms: int | None = None
 
 
 type ItemComparison = TableComparison | PdfComparison | ImageComparison | MediaComparison
 
 
 def comparison_as_json(comparison: ItemComparison) -> dict[str, object]:
-    """Forma guardada no banco: `kind` mais os campos, com os enums como `.value`."""
+    """Forma guardada no banco: `kind` mais os campos, com os enums como `.value`.
+
+    Campo opcional (com default) ausente fica fora: a forma de quem não tem corte não muda.
+    """
     raw: dict[str, object] = {"kind": comparison.kind}
     for field in fields(comparison):
         value = getattr(comparison, field.name)
+        if value is None and field.name in _optional_keys(type(comparison)):
+            continue
         raw[field.name] = value.value if isinstance(value, StrEnum) else value
     return raw
 
@@ -113,7 +127,8 @@ def comparison_from_json(raw: object) -> ItemComparison | None:
     if not isinstance(kind, str) or kind not in _PARSERS:
         return None
     cls, parse = _PARSERS[kind]
-    if raw.keys() != {"kind", *(field.name for field in fields(cls))}:
+    allowed = {"kind", *(field.name for field in fields(cls))}
+    if not allowed - _optional_keys(cls) <= raw.keys() <= allowed:
         return None
     try:
         return parse(_Fields(raw))
@@ -159,7 +174,8 @@ class _Fields:
             raise _InvalidFieldError from None
 
     def absent(self, key: str) -> bool:
-        return self._raw[key] is None
+        # Chave opcional que falta conta como ausente; as obrigatórias já foram conferidas.
+        return self._raw.get(key) is None
 
 
 def _table(raw: _Fields) -> TableComparison:
@@ -186,6 +202,7 @@ def _image(raw: _Fields) -> ImageComparison:
 def _media(raw: _Fields) -> MediaComparison:
     has_thumbnail = _pair_present(raw, "width_after", "height_after")
     has_audio = _pair_present(raw, "audio_before", "audio_after")
+    has_duration = _pair_present(raw, "duration_before_ms", "duration_after_ms")
     if not (has_thumbnail or has_audio):
         raise _InvalidFieldError
     return MediaComparison(
@@ -195,7 +212,13 @@ def _media(raw: _Fields) -> MediaComparison:
         height_after=raw.dimension("height_after") if has_thumbnail else None,
         audio_before=raw.choice("audio_before", AudioCodec) if has_audio else None,
         audio_after=raw.choice("audio_after", AudioFormat) if has_audio else None,
+        duration_before_ms=raw.dimension("duration_before_ms") if has_duration else None,
+        duration_after_ms=raw.dimension("duration_after_ms") if has_duration else None,
     )
+
+
+def _optional_keys(cls: type[ItemComparison]) -> frozenset[str]:
+    return frozenset(field.name for field in fields(cls) if field.default is None)
 
 
 def _pair_present(raw: _Fields, first: str, second: str) -> bool:
@@ -258,7 +281,7 @@ def _media_candidate(
     _counts: Mapping[str, int], details: Mapping[str, object]
 ) -> dict[str, object]:
     # Sem miniatura (`thumbnail_count=0`) ou sem áudio, as chaves faltam e o par entra como None.
-    return {
+    candidate: dict[str, object] = {
         "kind": KIND_MEDIA,
         "width_before": details.get("width"),
         "height_before": details.get("height"),
@@ -267,6 +290,22 @@ def _media_candidate(
         "audio_before": details.get("audio_codec"),
         "audio_after": details.get("audio_format"),
     }
+    # Só a v2 com corte registra o trecho efetivo; a duração depois é a dele.
+    start, end = details.get("trim_start_ms"), details.get("trim_end_ms")
+    if start is not None or end is not None:
+        trimmed = _trim_length_ms(start, end)
+        candidate["duration_before_ms"] = details.get("duration_ms") if trimmed else None
+        candidate["duration_after_ms"] = trimmed
+    return candidate
+
+
+def _trim_length_ms(start: object, end: object) -> int | None:
+    """`fim - início` de inteiros válidos; o que foge da forma vira `None` (sem duração)."""
+    if not isinstance(start, int) or not isinstance(end, int):
+        return None
+    if isinstance(start, bool) or isinstance(end, bool) or not 0 <= start < end:
+        return None
+    return end - start
 
 
 type _Candidate = Callable[[Mapping[str, int], Mapping[str, object]], dict[str, object]]

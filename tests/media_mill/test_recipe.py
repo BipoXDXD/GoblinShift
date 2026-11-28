@@ -97,7 +97,10 @@ def test_detalhes_do_item_viram_comparacao(workspace: Workspace, clips: ClipLibr
     comparison = comparison_from_report(RECIPE_ID, item.counts, item.details)
 
     assert isinstance(comparison, MediaComparison)
-    assert None not in vars(comparison).values()
+    # A duração antes/depois só existe com o corte da v2.
+    paired = {k: v for k, v in vars(comparison).items() if not k.startswith("duration_")}
+    assert None not in paired.values()
+    assert (comparison.duration_before_ms, comparison.duration_after_ms) == (None, None)
 
 
 def test_relatorio_traz_duration_ms_da_fonte(workspace: Workspace, clips: ClipLibrary) -> None:

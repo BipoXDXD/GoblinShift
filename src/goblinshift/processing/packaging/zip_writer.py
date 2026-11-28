@@ -29,7 +29,7 @@ _REGULAR_FILE_0644 = (stat.S_IFREG | 0o644) << 16
 _UNIX = 3  # "create_system" do ZIP: atributos externos no formato Unix
 # Formatos que já chegam comprimidos: DEFLATE só gastaria CPU. O WAV do Media Mill é PCM cru e
 # continua com DEFLATE; o FLAC já é compressão sem perdas (ADR 036). MP3, AAC (.m4a) e Opus vêm do
-# Media Mill v2 (ADR 072).
+# Media Mill v2 (ADR 063).
 _STORED_SUFFIXES = frozenset({".jpg", ".jpeg", ".png", ".zip", ".flac", ".mp3", ".m4a", ".opus"})
 
 

@@ -8,6 +8,7 @@ from goblinshift.processing.image_forge.encoding import SaveFormat
 from goblinshift.processing.image_forge.inspection import ACCEPTED_FORMATS, MPO
 from goblinshift.processing.media_mill import probe
 from goblinshift.processing.media_mill.params import AudioFormat as MediaMillAudioFormat
+from goblinshift.processing.media_mill.params_v2 import AudioFormatV2
 from goblinshift.runs.comparison import (
     KIND_IMAGE,
     KIND_MEDIA,
@@ -52,6 +53,7 @@ EXAMPLES: list[ItemComparison] = [
     PdfComparison(3, 0),
     ImageComparison(2, 2, 1, 1, ImageFormat.PNG, ImageFormat.PNG, 10, 7),
     MediaComparison(640, 360, None, None, AudioCodec.OPUS, AudioFormat.FLAC),
+    MediaComparison(640, 360, 320, 180, AudioCodec.AAC, AudioFormat.MP3, 2000, 1000),
 ]
 
 
@@ -120,6 +122,57 @@ def test_video_sem_miniaturas_nem_audio_nao_tem_comparacao() -> None:
     assert comparison_from_report("media-mill", {}, details) is None
 
 
+def test_comparacao_da_v2_aceita_mp3_e_a_duracao_cortada() -> None:
+    details = MEDIA_DETAILS | {"audio_format": "mp3", "trim_start_ms": 500, "trim_end_ms": 1500}
+
+    comparison = comparison_from_report("media-mill", {}, details)
+
+    assert comparison == MediaComparison(
+        1920, 1080, 320, 180, AudioCodec.AAC, AudioFormat.MP3, 125_000, 1000
+    )
+    assert comparison_from_json(comparison_as_json(comparison)) == comparison
+
+
+def test_comparacao_antiga_sem_duracao_continua_valida() -> None:
+    # Forma guardada no banco antes da v2 do Media Mill, sem as chaves de duração.
+    stored = {
+        "kind": "media",
+        "width_before": 1920,
+        "height_before": 1080,
+        "width_after": 320,
+        "height_after": 180,
+        "audio_before": "aac",
+        "audio_after": "wav",
+    }
+
+    comparison = comparison_from_json(stored)
+
+    assert comparison == MediaComparison(1920, 1080, 320, 180, AudioCodec.AAC, AudioFormat.WAV)
+    assert comparison_as_json(comparison) == stored
+
+
+def test_v2_sem_corte_nao_tem_duracao() -> None:
+    details = MEDIA_DETAILS | {"audio_format": "opus"}
+
+    comparison = comparison_from_report("media-mill", {}, details)
+
+    assert comparison == MediaComparison(1920, 1080, 320, 180, AudioCodec.AAC, AudioFormat.OPUS)
+
+
+@pytest.mark.parametrize(
+    "trim",
+    [
+        {"trim_start_ms": 1500, "trim_end_ms": 500},
+        {"trim_start_ms": "500", "trim_end_ms": 1500},
+        {"trim_start_ms": 500},
+    ],
+)
+def test_trecho_fora_da_forma_fica_sem_duracao(trim: dict[str, object]) -> None:
+    comparison = comparison_from_report("media-mill", {}, MEDIA_DETAILS | trim)
+
+    assert comparison == MediaComparison(1920, 1080, 320, 180, AudioCodec.AAC, AudioFormat.WAV)
+
+
 @pytest.mark.parametrize("recipe_id", ["downloads-detox", "receita-nova"])
 def test_detox_e_receita_desconhecida_nao_tem_comparacao(recipe_id: str) -> None:
     counts = {"records_read": 1, "written": 1, "pages": 1, "output_pages": 1}
@@ -152,7 +205,7 @@ def test_chave_fora_do_tipo_ou_da_lista_vira_ausencia(key: str, value: object) -
     "details",
     [
         MEDIA_DETAILS | {"audio_codec": "<b>"},
-        MEDIA_DETAILS | {"audio_format": "mp3"},
+        MEDIA_DETAILS | {"audio_format": "ogg"},
         MEDIA_DETAILS | {"thumbnail_height": 0},
         without(MEDIA_DETAILS, "thumbnail_height"),
         without(MEDIA_DETAILS, "audio_format"),
@@ -226,6 +279,27 @@ def test_json_so_tem_inteiros_e_valores_das_listas_fechadas(comparison: ItemComp
             "audio_before": None,
             "audio_after": None,
         },
+        {
+            "kind": "media",
+            "width_before": 640,
+            "height_before": 360,
+            "width_after": 320,
+            "height_after": 180,
+            "audio_before": None,
+            "audio_after": None,
+            "duration_before_ms": 2000,
+        },
+        {
+            "kind": "media",
+            "width_before": 640,
+            "height_before": 360,
+            "width_after": 320,
+            "height_after": 180,
+            "audio_before": None,
+            "audio_after": None,
+            "duration_before_ms": 2000,
+            "duration_after_ms": 0,
+        },
     ],
 )
 def test_json_fora_da_forma_vira_ausencia(raw: object) -> None:
@@ -246,3 +320,7 @@ def test_formatos_de_imagem_cobrem_entrada_e_saida_da_v1() -> None:
 
 def test_formatos_de_audio_cobrem_os_da_v1_do_media_mill() -> None:
     assert values(MediaMillAudioFormat) <= values(AudioFormat)
+
+
+def test_formatos_de_audio_cobrem_os_da_v2_do_media_mill() -> None:
+    assert values(AudioFormatV2) <= values(AudioFormat)
