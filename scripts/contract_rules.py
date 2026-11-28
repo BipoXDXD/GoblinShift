@@ -113,7 +113,7 @@ def _is_astral_format(char: str) -> bool:
 
 
 def _only_oversized_common_files(rejection: Rejection) -> bool:
-    """Todo erro aponta um item que não é vídeo pelo nome e passa dos 32 MiB do arquivo comum.
+    """Todo erro aponta um item que não é vídeo pelo nome e passa do teto do arquivo comum.
 
     A spec publica o teto do vídeo (256 MiB); o do tipo depende do nome (1.7, ADR 036).
     """

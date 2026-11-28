@@ -8,11 +8,12 @@ from typing import Any
 import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
-from sqlalchemy import func, update
+from sqlalchemy import func, select, update
 from sqlalchemy.orm import Session, sessionmaker
 
 from goblinshift.files.retention import NAME_AFTER, anonymize_deleted_uploads, expire_unused_uploads
 from goblinshift.files.states import TransferDirection
+from goblinshift.files.storage import ObjectMissingError
 from goblinshift.files.tables import upload
 from goblinshift.identity import Scope
 from goblinshift.platform.db import unit_of_work
@@ -60,6 +61,12 @@ def expire_upload(factory: sessionmaker[Session], upload_id: str) -> None:
             .where(upload.c.id == uuid.UUID(upload_id))
             .values(expires_at=func.now() - timedelta(seconds=1))
         )
+
+
+def upload_rows(factory: sessionmaker[Session]) -> int:
+    with factory() as session:
+        rows: int = session.execute(select(func.count()).select_from(upload)).scalar_one()
+    return rows
 
 
 # --- Fluxo completo ---------------------------------------------------------------------------
@@ -282,6 +289,36 @@ def test_corpo_maior_que_o_declarado_responde_413_e_falha_o_upload(
 
     assert_problem(response, 413, "BODY_TOO_LARGE")
     assert client.get(upload_url(item), headers=auth).json()["state"] == "failed"
+
+
+def test_arquivo_no_teto_passa_e_um_byte_acima_e_recusado(
+    app: FastAPI, client: TestClient, factory: sessionmaker[Session]
+) -> None:
+    # Teto comum por extenso, nunca pela constante (ADR 062): 50 MiB passa pela API inteira; um
+    # byte acima é recusado pelo tamanho declarado (422, sem criar nada) ou, se a declaração
+    # mentir, no envio (413), sem deixar nada no storage.
+    fifty_mib = 50 * 1024 * 1024
+    _, auth = new_account(factory)
+
+    at_limit = create_upload(client, auth, name="foto.png", size=fifty_mib)
+    ready = send_content(client, auth, at_limit, b"\0" * fifty_mib)
+    assert (ready["state"], ready["size"]) == ("ready", fifty_mib)
+
+    declared = client.post(
+        UPLOADS, json={"items": [{"name": "foto.png", "size": fifty_mib + 1}]}, headers=auth
+    )
+    body = assert_problem(declared, 422, "VALIDATION_FAILED")
+    assert [(e["field"], e["code"]) for e in body["errors"]] == [("body.items.0.size", "invalid")]
+    assert upload_rows(factory) == 1
+
+    lying = create_upload(client, auth, name="foto.png", size=fifty_mib)
+    sent = client.put(
+        lying["content"]["url"], content=b"\0" * (fifty_mib + 1), headers={**auth, **OCTET_STREAM}
+    )
+    assert_problem(sent, 413, "BODY_TOO_LARGE")
+    assert client.get(upload_url(lying), headers=auth).json()["state"] == "failed"
+    with pytest.raises(ObjectMissingError):
+        storage_of(app).stat(upload_storage_key(factory, lying["id"]))
 
 
 def test_corpo_menor_que_o_declarado_responde_422_e_falha_o_upload(

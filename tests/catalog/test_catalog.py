@@ -192,7 +192,7 @@ def test_versao_atual_publica_limites_efetivos() -> None:
     assert version.status is VersionStatus.CURRENT
     assert version.limits == {
         "max_inputs": 5,
-        "max_input_bytes": 32 * 1024 * 1024,
+        "max_input_bytes": 50 * 1024 * 1024,
         "table_bytes": 8 * 1024 * 1024,
         "records": 20_000,
         "columns": 100,
@@ -253,7 +253,7 @@ def test_image_forge_publica_os_limites_de_1_7() -> None:
     assert version.status is VersionStatus.CURRENT
     assert version.limits == {
         "max_inputs": 100,
-        "max_input_bytes": 32 * 1024 * 1024,
+        "max_input_bytes": 50 * 1024 * 1024,
         "max_pixels": 24_000_000,
         "max_axis_px": 8192,
         "thumbnail_box_px": 320,
@@ -266,7 +266,7 @@ def test_downloads_detox_publica_o_teto_do_lote_abaixo_do_teto_de_saidas() -> No
     assert version.status is VersionStatus.CURRENT
     assert version.limits == {
         "max_inputs": 100,
-        "max_input_bytes": 32 * 1024 * 1024,
+        "max_input_bytes": 50 * 1024 * 1024,
         "max_total_input_bytes": 480 * 1024 * 1024,
     }
 

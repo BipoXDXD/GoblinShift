@@ -1958,7 +1958,7 @@ export interface operations {
                         name: string;
                         /**
                          * Size
-                         * @description Bytes: até 32 MiB, ou 256 MiB para vídeo (.mp4, .mov, .webm); o lote soma até 512 MiB.
+                         * @description Bytes: até 50 MiB, ou 256 MiB para vídeo (.mp4, .mov, .webm); o lote soma até 512 MiB.
                          */
                         size: number;
                     }[];

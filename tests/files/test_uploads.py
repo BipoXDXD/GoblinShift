@@ -40,7 +40,8 @@ from tests.files.support import (
 pytestmark = pytest.mark.integration
 
 MIB = 1024 * 1024
-MAX_FILE_BYTES = 32 * MIB
+# Por extenso, nunca pela constante: o teste não acompanha um valor errado (ADR 062).
+MAX_FILE_BYTES = 50 * MIB
 MAX_BATCH_BYTES = 512 * MIB
 
 
@@ -118,9 +119,16 @@ def test_lote_vazio_e_recusado(factory: sessionmaker[Session]) -> None:
     assert error.value.field == "items"
 
 
+def full_batch() -> list[tuple[str, int]]:
+    """Arquivos cheios (10 de 50 MiB) e o resto (12 MiB) até somar o teto exato do lote."""
+    full, rest = divmod(MAX_BATCH_BYTES, MAX_FILE_BYTES)
+    items = [(f"f{i}", MAX_FILE_BYTES) for i in range(full)]
+    return [*items, ("resto", rest)] if rest else items
+
+
 def test_soma_de_exatamente_512_mib_e_aceita(factory: sessionmaker[Session]) -> None:
     owner = create_user(factory, "a")
-    items = [(f"f{i}", MAX_FILE_BYTES) for i in range(MAX_BATCH_BYTES // MAX_FILE_BYTES)]
+    items = full_batch()
 
     with unit_of_work(factory) as session:
         views = create_intents(session, owner, items)
@@ -130,7 +138,7 @@ def test_soma_de_exatamente_512_mib_e_aceita(factory: sessionmaker[Session]) -> 
 
 def test_soma_um_byte_acima_de_512_mib_e_recusada(factory: sessionmaker[Session]) -> None:
     owner = create_user(factory, "a")
-    items = [(f"f{i}", MAX_FILE_BYTES) for i in range(MAX_BATCH_BYTES // MAX_FILE_BYTES)]
+    items = full_batch()
     items.append(("extra", 1))
 
     with pytest.raises(InvalidUploadRequestError) as error, unit_of_work(factory) as session:
@@ -283,12 +291,12 @@ def test_conteudo_completo_deixa_upload_pronto_com_hash_e_tamanho(
     assert files_under(storage) != []
 
 
-def test_conteudo_de_32_mib_exatos_e_aceito(
+def test_conteudo_no_teto_exato_e_aceito(
     factory: sessionmaker[Session], storage: FileStorage
 ) -> None:
     owner = create_user(factory, "a")
     intent = create_intent(factory, owner, size=MAX_FILE_BYTES)
-    chunks = (b"\x00" * MIB for _ in range(32))
+    chunks = (b"\x00" * MIB for _ in range(MAX_FILE_BYTES // MIB))
 
     with factory() as session:
         view = receive_content(session, storage, owner, intent.id, chunks)
