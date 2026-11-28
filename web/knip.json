@@ -3,12 +3,17 @@
   "entry": ["src/sw.ts"],
   "project": ["src/**/*.{ts,tsx,css}", "e2e/**/*.ts"],
   "ignore": ["src/api/schema.d.ts"],
+  "ignoreBinaries": ["ffmpeg"],
   "ignoreExportsUsedInFile": {
     "interface": true,
     "type": true
   },
   "playwright": {
-    "config": ["e2e/playwright.config.ts", "e2e/playwright.webkit.config.ts"],
-    "entry": ["e2e/specs/**/*.spec.ts"]
+    "config": [
+      "e2e/playwright.config.ts",
+      "e2e/playwright.webkit.config.ts",
+      "e2e/playwright.vitrine.config.ts"
+    ],
+    "entry": ["e2e/specs/**/*.spec.ts", "e2e/vitrine/vitrine.spec.ts"]
   }
 }

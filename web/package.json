@@ -74,6 +74,7 @@
     "e2e:notice": "E2E_NOTICE=1 E2E_DIST_DIR=dist-notice playwright test -c e2e",
     "e2e:notice-incident": "E2E_NOTICE=incident E2E_DIST_DIR=dist-notice-incident playwright test -c e2e",
     "e2e:sabotage": "node e2e/sabotage.ts",
+    "vitrine": "npm run build && playwright test -c e2e/playwright.vitrine.config.ts && node scripts/vitrine-gif.ts",
     "coverage": "vitest run --coverage",
     "knip": "knip",
     "type-coverage": "type-coverage -p tsconfig.app.json --strict --at-least 100 --detail",
