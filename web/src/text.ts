@@ -798,6 +798,11 @@ export const TEXT = {
       loading: "Carregando o seu acesso.",
       sessionHeading: "Sessão",
       signedInAs: (name: string) => `Você entrou como ${name}.`,
+      accountIdLabel: "Identificador da conta",
+      accountIdHint: "Informe este identificador ao escrever para privacidade@goblinshift.dev.",
+      copyAccountId: "Copiar identificador",
+      accountIdCopied: "Identificador copiado.",
+      accountIdCopyFailed: "Não foi possível copiar. Selecione o identificador e copie à mão.",
       viaApiKey:
         "Este acesso é por chave de API. Sair, chaves e exclusão da conta só funcionam pela sessão do navegador.",
       signOut: "Sair",
