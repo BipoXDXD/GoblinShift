@@ -1,6 +1,6 @@
 # ADR 042. Auditoria de dependências e CodeQL fora do gate da release
 
-- **Estado:** proposto
+- **Estado:** aceito no merge do PR #182 (2026-11-06); antes: proposto
 - **Plano:** [3.6](../GoblinShiftPlan.md#s3-6)
 - **Relacionado:** [ADR 033](033-segredos-de-deploy-no-environment-production.md) (publicação só pela `main`)
 
