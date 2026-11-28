@@ -1,13 +1,13 @@
 import type { ReactElement } from "react";
 
-import type { ApiProblem } from "../api/problem";
 import type { HeadingLevel } from "../components/a11y/Heading";
 import { DangerAlert } from "../components/feedback/DangerAlert";
 import { asGuidanceCode, GuidanceNotice } from "../components/feedback/FailureNotice";
 import { TEXT } from "../text";
+import type { DownloadFailureCode } from "./downloadFailure";
 
 interface DownloadFailureNoticeProps {
-  readonly code: ApiProblem["code"];
+  readonly code: DownloadFailureCode;
   /** Nível do título dos avisos de login e de termos, conforme a seção onde aparecem. */
   readonly headingLevel: HeadingLevel;
 }

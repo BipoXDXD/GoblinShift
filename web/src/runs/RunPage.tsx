@@ -13,7 +13,6 @@ import { Link, useParams, useSearchParams } from "react-router";
 import { z } from "zod";
 
 import { useApiClient } from "../api/ApiClientContext";
-import type { ApiProblem } from "../api/problem";
 import { NotFoundPage } from "../app/NotFoundPage";
 import { workbenchPath } from "../app/paths";
 import { GoblinIllustration, type GoblinState } from "../art/GoblinIllustration";
@@ -37,7 +36,11 @@ import { CancelRun } from "./CancelRun";
 import type { ResultReference, RunResults as RunResultsData } from "./commands";
 import { artifactDownloadPath, getRunResults } from "./commands";
 import { unavailableReason } from "./availability";
-import { DOWNLOAD_FAILURE_PARAM, downloadFailureCode } from "./downloadFailure";
+import {
+  DOWNLOAD_FAILURE_PARAM,
+  downloadFailureCode,
+  type DownloadFailureCode,
+} from "./downloadFailure";
 import { DownloadFailureNotice } from "./DownloadFailureNotice";
 import { ResultPreview } from "./preview/ResultPreview";
 import { ResultsAvailability } from "./ResultsAvailability";
@@ -125,8 +128,6 @@ function RunView({ runId }: { readonly runId: string }): ReactElement {
     </div>
   );
 }
-
-type DownloadFailureCode = ApiProblem["code"];
 
 /**
  * A falha do download que voltou à tela com `?falha=<code>` (64a). Lida uma vez e guardada em
