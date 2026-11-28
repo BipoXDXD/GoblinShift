@@ -6,6 +6,7 @@ import { configDefaults, defineConfig } from "vitest/config";
 
 import { FONT_PRELOADS } from "./scripts/check-budget";
 import { preloadFonts } from "./scripts/vite-preload-fonts";
+import { serviceWorker } from "./scripts/vite-service-worker";
 
 /**
  * Só para o build do E2E com aviso (npm run build:notice-e2e): troca o `notice.json` do
@@ -14,7 +15,12 @@ import { preloadFonts } from "./scripts/vite-preload-fonts";
 const noticeFile = process.env["GS_NOTICE_FILE"];
 
 export default defineConfig({
-  plugins: [react(), tailwindcss(), preloadFonts(FONT_PRELOADS.map((font) => font.file))],
+  plugins: [
+    react(),
+    tailwindcss(),
+    preloadFonts(FONT_PRELOADS.map((font) => font.file)),
+    serviceWorker("src/sw.ts"),
+  ],
   resolve: {
     alias:
       noticeFile === undefined || noticeFile === ""
@@ -31,11 +37,7 @@ export default defineConfig({
     // propósito; quem manda no peso é o check-budget, com os tetos do ADR 027 e 030.
     chunkSizeWarningLimit: 650,
     rolldownOptions: {
-      // O service worker é uma entrada à parte e sai como `sw.js` na raiz, sem hash: o navegador
-      // o busca sempre pelo mesmo nome, e o escopo dele é o caminho de onde vem (ADR 062).
-      input: { index: resolve("index.html"), sw: resolve("src/sw.ts") },
       output: {
-        entryFileNames: (chunk) => (chunk.name === "sw" ? "sw.js" : "assets/[name]-[hash].js"),
         // O framework muda pouco: em chunks próprios, o cache do navegador sobrevive aos deploys da
         // interface, e nenhum chunk chega perto do teto de tamanho cru do orçamento.
         advancedChunks: {

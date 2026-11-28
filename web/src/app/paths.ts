@@ -17,6 +17,8 @@ export const PATHS = {
   credits: "/creditos",
   acceptTerms: "/termos/aceitar",
   accountDeleted: "/conta-excluida",
+  // Destino do `share_target` do manifest (ADR 062): o service worker recebe o POST e manda o GET.
+  share: "/compartilhar",
 } as const;
 
 // Caminho deste site: uma barra e, depois dela, nem outra barra nem contrabarra. `//evil.com` e
@@ -61,6 +63,24 @@ export function workbenchFromRunPath(recipeId: RecipeId, runId: string): string 
   const query = new URLSearchParams({ [RUN_PARAM]: runId }).toString();
   return `${workbenchPath(recipeId)}?${query}`;
 }
+
+/** Parâmetro da Bancada com o id do compartilhamento cujos arquivos ela recebe. */
+export const SHARED_PARAM = "compartilhado";
+
+export function workbenchSharedPath(recipeId: RecipeId, shareId: string): string {
+  const query = new URLSearchParams({ [SHARED_PARAM]: shareId }).toString();
+  return `${workbenchPath(recipeId)}?${query}`;
+}
+
+/** Parâmetro da página do compartilhamento com o id que o service worker deu (sw.ts). */
+export const SHARE_ID_PARAM = "id";
+
+/**
+ * Parâmetro da Oficina quando o compartilhamento não chegou (sem service worker, o Nginx manda
+ * `/?compartilhamento=indisponivel`; ver docker/nginx e sw.ts).
+ */
+export const SHARE_STATUS_PARAM = "compartilhamento";
+export const SHARE_UNAVAILABLE = "indisponivel";
 
 export function runPath(runId: string): string {
   return generatePath(PATHS.run, { runId });

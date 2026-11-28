@@ -1,5 +1,7 @@
 import { vi } from "vitest";
 
+import { SHARE_FIELD, storeShared } from "../share/inbox";
+
 /** Origem das chaves relativas, como a do service worker no navegador. */
 const ORIGIN = "https://goblinshift.test";
 
@@ -108,5 +110,27 @@ class BlobResponse {
 
   clone(): BlobResponse {
     return new BlobResponse(this.#body, { headers: this.headers });
+  }
+}
+
+/**
+ * Grava um compartilhamento na caixa de entrada como o service worker faria, com a `Response` que
+ * guarda o `Blob` só durante a gravação: a API falsa da tela continua com a `Response` do Node.
+ */
+export async function seedShared(
+  caches: CacheStorage,
+  files: readonly File[],
+  { id, at = Date.now() }: { readonly id: string; readonly at?: number },
+): Promise<void> {
+  const original = globalThis.Response;
+  vi.stubGlobal("Response", BlobResponse);
+  try {
+    const form = new FormData();
+    for (const file of files) {
+      form.append(SHARE_FIELD, file);
+    }
+    await storeShared(caches, form, { now: at, newId: () => id });
+  } finally {
+    vi.stubGlobal("Response", original);
   }
 }

@@ -1,6 +1,6 @@
 import { ChevronRight } from "lucide-react";
 import { useId, type ReactElement } from "react";
-import { Link } from "react-router";
+import { Link, useSearchParams } from "react-router";
 
 import { FocusHeading } from "../components/a11y/FocusHeading";
 import { RecentRuns } from "../history/RecentRuns";
@@ -8,8 +8,9 @@ import { OficinaHero } from "../oficina3d/OficinaHero";
 import { PresetsSection } from "../presets/PresetsSection";
 import { RECIPE_LIST } from "../recipes/registry";
 import type { RecipeId } from "../recipes/types";
+import { ShareNotice } from "../share/ShareNotice";
 import { TEXT } from "../text";
-import { workbenchPath } from "./paths";
+import { SHARE_STATUS_PARAM, SHARE_UNAVAILABLE, workbenchPath } from "./paths";
 
 const T = TEXT.home;
 const SUMMARIES: Readonly<Record<RecipeId, string>> = T.summaries;
@@ -21,8 +22,12 @@ const SUMMARIES: Readonly<Record<RecipeId, string>> = T.summaries;
  */
 export function HomePage(): ReactElement {
   const recipesHeadingId = useId();
+  const [search] = useSearchParams();
+  // O "Compartilhar" do celular sem service worker cai aqui (Nginx, ADR 062).
+  const shareUnavailable = search.get(SHARE_STATUS_PARAM) === SHARE_UNAVAILABLE;
   return (
     <div className="flex flex-col gap-12 md:gap-16">
+      {shareUnavailable && <ShareNotice>{TEXT.share.unavailable}</ShareNotice>}
       {/* A partir de 1024 px o palco é alto (480 px mais controles e seletor): o título sobe para o
           topo, ao lado do palco, em vez de boiar no meio da coluna, e a faixa perde 32 px de
           padding vertical, para as receitas ficarem mais perto da primeira tela. */}

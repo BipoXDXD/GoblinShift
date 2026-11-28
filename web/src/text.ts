@@ -136,6 +136,18 @@ export const TEXT = {
         "Tira o áudio de vídeos curtos em WAV ou FLAC e gera miniaturas, sem editar o vídeo.",
     },
   },
+  share: {
+    title: "Arquivos compartilhados",
+    loading: "Lendo os arquivos compartilhados.",
+    received: (names: readonly string[]) =>
+      `${names.length === 1 ? "1 arquivo recebido" : `${String(names.length)} arquivos recebidos`}: ${names.join(", ")}.`,
+    chooseRecipe: "Escolha a receita para estes arquivos.",
+    recipesLabel: "Receitas para estes arquivos",
+    expired:
+      "Os arquivos compartilhados expiraram ou já foram usados. Escolha os arquivos de novo.",
+    unavailable:
+      "Os arquivos compartilhados não chegaram: o GoblinShift ainda não estava pronto para recebê-los neste navegador. Escolha uma receita e os arquivos por aqui.",
+  },
   notFound: {
     title: "Página não encontrada",
     lead: "O endereço pode estar errado, ou a página saiu do ar.",

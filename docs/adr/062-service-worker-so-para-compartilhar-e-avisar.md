@@ -29,7 +29,10 @@ deploy novo vale na próxima navegação.
   só (`takeShared` apaga). Um compartilhamento novo apaga os vencidos. Os arquivos ficam só no
   aparelho e só vão ao servidor pelo fluxo normal da Bancada (intenções, cotas, `PUT` do conteúdo),
   depois do login.
-- **Build:** o `sw.ts` é uma entrada a mais do Vite e sai como `dist/sw.js`, sem hash. O
+- **Build:** o `sw.ts` tem um build próprio do Vite, em IIFE, depois do da página
+  (`web/scripts/vite-service-worker.ts`), e sai como `dist/sw.js`, sem hash e sem `import`: como
+  entrada do build da página, o código que divide com ela iria para um chunk importado, que um
+  service worker clássico não carrega. O
   `tsconfig.sw.json` o confere com `lib: ["ES2023", "WebWorker"]`. O registro
   (`registerServiceWorker`) só roda no build de produção e só onde há `navigator.serviceWorker`.
   A falha no registro não vai ao console.
