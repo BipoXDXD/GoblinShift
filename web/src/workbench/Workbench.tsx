@@ -105,6 +105,8 @@ export function Workbench({
   const [order, setOrder] = useState<readonly string[]>([]);
   const [form, setForm] = useState(initialForm);
   const [applied, setApplied] = useState<AppliedPreset | null>(null);
+  // Separado de `applied` (a key dos campos): enviar apaga o anúncio sem remontar o formulário.
+  const [presetNotice, setPresetNotice] = useState<string | null>(null);
   const [draft, setDraft] = useState<RecipeDraft<RecipeId>>(initialForm.initialDraft);
   const [attempt, setAttempt] = useState(0);
   const [pendingRemoval, setPendingRemoval] = useState<PendingRemoval | null>(null);
@@ -175,7 +177,8 @@ export function Workbench({
     }
     setForm(next);
     setDraft(next.initialDraft);
-    setApplied({ key: preset.key, name: preset.name, count: (applied?.count ?? 0) + 1 });
+    setApplied({ key: preset.key, count: (applied?.count ?? 0) + 1 });
+    setPresetNotice(TEXT.workbench.systemPresets.applied(preset.name));
   };
 
   const onSubmit = (event: SubmitEvent<HTMLFormElement>): void => {
@@ -184,6 +187,8 @@ export function Workbench({
       return;
     }
     setAttempt((current) => current + 1);
+    // Uma falha do envio não pode repetir o anúncio de um ajuste aplicado antes.
+    setPresetNotice(null);
     if (command === null) {
       return;
     }
@@ -301,13 +306,7 @@ export function Workbench({
           </div>
         </div>
         <LiveRegion
-          message={
-            mutation.isPending
-              ? TEXT.workbench.creatingRun
-              : applied === null
-                ? null
-                : TEXT.workbench.systemPresets.applied(applied.name)
-          }
+          message={mutation.isPending ? TEXT.workbench.creatingRun : presetNotice}
           visuallyHidden
         />
         <ConfirmDialog

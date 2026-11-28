@@ -863,6 +863,29 @@ describe("Bancada", () => {
     expect(body.parameters).toEqual(catalogVersion("image-forge").system_presets[1]?.parameters);
   });
 
+  it("enviar depois de aplicar um ajuste pronto apaga o anúncio do ajuste", async () => {
+    const { user } = await setup({
+      recipe: "image-forge",
+      runs: () => problemResponse(503, "SERVICE_UNAVAILABLE"),
+    });
+    await user.upload(screen.getByLabelText("Escolher arquivos"), [new File(["x"], "a.png")]);
+    await waitUntilSent(1);
+    await user.click(screen.getByRole("button", { name: "Redes 1080" }));
+
+    await user.click(screen.getByRole("button", { name: "Executar" }));
+
+    await waitFor(() => {
+      expect(screen.getByRole("button", { name: "Executar" })).toHaveAttribute(
+        "aria-disabled",
+        "false",
+      );
+    });
+    expect(
+      screen.getAllByRole("status").some((region) => region.textContent?.includes("Ajuste pronto")),
+    ).toBe(false);
+    expect(screen.getByRole("radio", { name: "Preencher e cortar o centro" })).toBeChecked();
+  });
+
   it("Image Forge: erro do servidor no campo aparece no campo", async () => {
     const { user } = await setup({
       recipe: "image-forge",
