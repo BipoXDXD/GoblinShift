@@ -53,9 +53,16 @@ export function watchSignedOutElsewhere(
   if (channel === null) {
     return () => undefined;
   }
+  const signOutHere = async (): Promise<void> => {
+    // Um /me em voo voltaria com 200 depois do aviso e gravaria a conta antiga por cima do `null`.
+    // O `await` garante a ordem cancelar → gravar sem depender de como o TanStack reverte o estado
+    // (na 5.107 a reversão é síncrona, e o `null` gravado à mão também vira o estado de reversão).
+    await queryClient.cancelQueries({ queryKey: ME_QUERY_KEY });
+    queryClient.setQueryData(ME_QUERY_KEY, null);
+  };
   const onMessage = (event: MessageEvent<unknown>): void => {
     if (signedOutMessage.safeParse(event.data).success) {
-      queryClient.setQueryData(ME_QUERY_KEY, null);
+      void signOutHere();
     }
   };
   channel.addEventListener("message", onMessage);

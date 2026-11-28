@@ -4,7 +4,7 @@ import { describe, expect, it, onTestFinished, vi } from "vitest";
 
 import { meBody } from "../test/account";
 import { fakeChannelNetwork, receivedBy } from "../test/fakeBroadcastChannel";
-import { ME_QUERY_KEY } from "./api";
+import { ME_QUERY_KEY, type Me } from "./api";
 import {
   announceSignedOut,
   openSessionChannel,
@@ -78,6 +78,32 @@ describe("sessionSignal", () => {
     await waitFor(() => {
       expect(client.getQueryData(ME_QUERY_KEY)).toBeNull();
     });
+  });
+
+  it("um /me em voo que volta depois do aviso não traz a conta de volta", async () => {
+    const { a, b, client } = twoTabs();
+    onTestFinished(watchSignedOutElsewhere(client, b));
+    let answerMe: (me: Me) => void = () => undefined;
+    const meInFlight = client
+      .query({
+        queryKey: ME_QUERY_KEY,
+        queryFn: () =>
+          new Promise<Me>((resolve) => {
+            answerMe = resolve;
+          }),
+      })
+      .catch(() => undefined);
+    expect(client.getQueryState(ME_QUERY_KEY)?.fetchStatus).toBe("fetching");
+
+    announceSignedOut(a);
+    await waitFor(() => {
+      expect(client.getQueryData(ME_QUERY_KEY)).toBeNull();
+    });
+    answerMe(meBody());
+    await meInFlight;
+    await deliveries();
+
+    expect(client.getQueryData(ME_QUERY_KEY)).toBeNull();
   });
 
   it("mensagem de outro formato é ignorada", async () => {
