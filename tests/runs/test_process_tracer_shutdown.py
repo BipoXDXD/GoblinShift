@@ -22,7 +22,13 @@ from sqlalchemy import Engine
 from sqlalchemy.orm import Session, sessionmaker
 
 from goblinshift.entrypoints import bootstrap, maintenance, worker
-from goblinshift.entrypoints.maintenance import CYCLE_SPAN, AccountJobs, Cycle, run_cycles
+from goblinshift.entrypoints.maintenance import (
+    CYCLE_SPAN,
+    AccountJobs,
+    BacklogTrend,
+    Cycle,
+    run_cycles,
+)
 from goblinshift.entrypoints.shutdown import SHUTDOWN_POLL_S, ShutdownFlag
 from goblinshift.platform import telemetry
 from goblinshift.platform.db import make_engine
@@ -294,10 +300,13 @@ def test_parada_da_manutencao_encerra_o_tracing_depois_dos_outros_passos(
     tracers: list[Tracer] = []
 
     def capture_tracer(
-        tracer: Tracer, cycles: Sequence[Cycle], should_stop: Callable[[], bool]
+        tracer: Tracer,
+        cycles: Sequence[Cycle],
+        should_stop: Callable[[], bool],
+        trend: BacklogTrend | None = None,
     ) -> None:
         tracers.append(tracer)
-        run_cycles(tracer, cycles, should_stop)
+        run_cycles(tracer, cycles, should_stop, trend)
 
     otlp.setattr(maintenance, "run_cycles", capture_tracer)
     otlp.setattr(maintenance, "make_engine", _dispose_emitting_span(otlp, make_engine, tracers))

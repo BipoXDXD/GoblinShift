@@ -339,6 +339,19 @@ def test_fila_parada_com_worker_fora(telemetry: Telemetry, stalled: int, fires: 
     assert bool(cause_rows(telemetry, "causa-fila-parada", stream)) is fires
 
 
+@pytest.mark.parametrize(("growing", "fires"), [(2, False), (3, True)])
+def test_retencao_que_acumula_por_tres_voltas(
+    telemetry: Telemetry, growing: int, fires: bool
+) -> None:
+    stream = unique_stream("retencao")
+    traces = telemetry.traces(stream)
+    traces.maintenance_cycle(retention_backlog_growing=growing, age_s=MINUTE_S)
+    traces.maintenance_cycle(retention_backlog_growing=0, age_s=3 * MINUTE_S)
+    traces.flush()
+
+    assert bool(cause_rows(telemetry, "causa-retencao-atrasada", stream)) is fires
+
+
 @pytest.mark.parametrize(("reached", "fires"), [(0, False), (1, True)])
 def test_limitador_de_exclusoes_acionado(telemetry: Telemetry, reached: int, fires: bool) -> None:
     stream = unique_stream("limitador")
@@ -449,6 +462,7 @@ def test_span_que_nao_e_da_manutencao_nao_dispara_as_causas_dela(telemetry: Tele
                 "main": True,
                 "maintenance.runs_stuck_stopping": 3,
                 "maintenance.queue_stalled_runs": 1,
+                "maintenance.retention_backlog_growing": 3,
                 "maintenance.purge_limit_reached": 1,
                 "maintenance.accounts_deletion_overdue": 1,
                 "maintenance.audit_events_overdue": 1,
@@ -473,6 +487,7 @@ def test_span_que_nao_e_da_manutencao_nao_dispara_as_causas_dela(telemetry: Tele
     for name in (
         "causa-execucao-presa",
         "causa-fila-parada",
+        "causa-retencao-atrasada",
         "causa-limitador-de-exclusoes",
         "causa-exclusao-de-conta-atrasada",
         "causa-auditoria-atrasada",

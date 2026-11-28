@@ -23,7 +23,7 @@ from enum import Enum, auto
 from functools import partial
 from uuid import UUID
 
-from opentelemetry.trace import Status, StatusCode, Tracer
+from opentelemetry.trace import Span, Status, StatusCode, Tracer
 from sqlalchemy.orm import Session, sessionmaker
 
 from goblinshift.entrypoints.bootstrap import build_runner, process_tracer
@@ -81,6 +81,16 @@ _FAILED_STEP_COUNTS = (STEPS_FAILED, ACCOUNT_STEPS_FAILED)
 # Prazo do laço da retenção da auditoria em cada ciclo de contas (#442, 50b): os lotes repetem
 # até a fila de vencidos acabar ou o prazo passar, e o resto fica para o ciclo seguinte.
 AUDIT_RETENTION_TIME_BUDGET = timedelta(seconds=20)
+# Acúmulos da retenção (1.7, ADR 028) cujo crescimento seguido avisa (#442, 21b): a retenção que
+# atrasa sem exceção (lote pequeno, linha presa por trava) não cai em nenhuma outra causa.
+RETENTION_BACKLOGS = (
+    "runs_to_delete",
+    "uploads_to_delete",
+    "idempotency_records_expired",
+    "request_windows",
+)
+BACKLOG_GROWTH_ALERT_CYCLES = 3
+RETENTION_BACKLOG_GROWING = "retention_backlog_growing"
 
 
 def main() -> int:
@@ -142,8 +152,9 @@ def serve(settings: Settings, runner: Runner, shutdown: ShutdownFlag) -> None:
                 ("contas", account_jobs.run_cycle),
                 *executor_image_cycles(settings, runner),
             )
+            trend = BacklogTrend()
             while not shutdown.is_set():
-                run_cycles(tracer, cycles, should_stop=shutdown.is_set)
+                run_cycles(tracer, cycles, should_stop=shutdown.is_set, trend=trend)
                 shutdown.wait(settings.maintenance_interval_s)
             logger.info("parada pedida", extra={"fields": {"signal": shutdown.signum}})
         finally:
@@ -159,12 +170,50 @@ def executor_image_cycles(settings: Settings, runner: Runner) -> tuple[Cycle, ..
     return (("imagem do executor", probe.run_cycle),)
 
 
+class BacklogTrend:
+    """Voltas seguidas em que cada acúmulo da retenção cresceu, só em memória.
+
+    Reiniciar o processo zera a contagem, ao custo de mais três voltas até o aviso.
+    """
+
+    def __init__(self) -> None:
+        self._last: dict[str, int] = {}
+        self._streaks: dict[str, int] = {}
+
+    def observe(self, counts: Mapping[str, int]) -> int:
+        """Registra a volta e devolve a maior sequência de crescimento estrito entre os acúmulos.
+
+        Volta sem a chave (o passo falhou) ou sem crescimento zera a sequência daquela chave.
+        """
+        for key in RETENTION_BACKLOGS:
+            value = counts.get(key)
+            previous = self._last.get(key)
+            if value is None:
+                self._last.pop(key, None)
+                self._streaks[key] = 0
+                continue
+            grew = previous is not None and value > previous
+            self._streaks[key] = self._streaks.get(key, 0) + 1 if grew else 0
+            self._last[key] = value
+        return max(self._streaks.values(), default=0)
+
+    def growing(self, cycles: int) -> list[str]:
+        """Os acúmulos que cresceram por pelo menos `cycles` voltas seguidas."""
+        return [key for key, streak in self._streaks.items() if streak >= cycles]
+
+
 def run_cycles(
-    tracer: Tracer, cycles: Sequence[Cycle], should_stop: Callable[[], bool] = lambda: False
+    tracer: Tracer,
+    cycles: Sequence[Cycle],
+    should_stop: Callable[[], bool] = lambda: False,
+    trend: BacklogTrend | None = None,
 ) -> None:
     """Uma volta: roda os ciclos em sequência dentro de um span `maintenance.cycle`.
 
     Com a parada pedida (`should_stop`), o ciclo seguinte não começa; o span sai com o que rodou.
+    Com `trend`, a volta grava `maintenance.retention_backlog_growing`: as voltas seguidas em que
+    algum acúmulo da retenção cresceu. A partir de `BACKLOG_GROWTH_ALERT_CYCLES`, loga o alerta
+    `retention_backlog_growing` com as chaves que crescem.
 
     Ciclos independentes: a falha de um não impede o outro. O span leva as contagens de todos,
     com o prefixo `maintenance.`, e quantos falharam: os que levantaram e os que contaram passos
@@ -176,6 +225,7 @@ def run_cycles(
         CYCLE_SPAN, record_exception=False, set_status_on_exception=False
     ) as span:
         failed = 0
+        observed: dict[str, int] = {}
         for name, cycle in cycles:
             if should_stop():
                 break
@@ -188,15 +238,35 @@ def run_cycles(
                 continue
             for key, value in counts.items():
                 span.set_attribute(f"{_ATTRIBUTE_PREFIX}{key}", value)
+            observed.update(counts)
             if any(counts.get(key, 0) > 0 for key in _FAILED_STEP_COUNTS):
                 # Passo que falhou dentro do ciclo: as contagens dos outros seguem no span, e a
                 # volta entra no mesmo alerta de quem levanta.
                 failed += 1
+        if trend is not None:
+            _record_backlog_trend(span, trend, observed)
         span.set_attribute("main", True)
         span.set_attribute(f"{_ATTRIBUTE_PREFIX}failed_cycles", failed)
         span.set_attribute("duration_ms", round((time.monotonic() - started) * 1000))
         if failed:
             span.set_status(Status(StatusCode.ERROR, "ciclo de manutenção falhou"))
+
+
+def _record_backlog_trend(span: Span, trend: BacklogTrend, counts: Mapping[str, int]) -> None:
+    growing = trend.observe(counts)
+    span.set_attribute(f"{_ATTRIBUTE_PREFIX}{RETENTION_BACKLOG_GROWING}", growing)
+    if growing >= BACKLOG_GROWTH_ALERT_CYCLES:
+        # Alerta de causa: a retenção atrasa sem exceção; o ciclo não falha, só acumula.
+        logger.warning(
+            "retenção acumulando",
+            extra={
+                "fields": {
+                    "alert": RETENTION_BACKLOG_GROWING,
+                    "backlogs": trend.growing(BACKLOG_GROWTH_ALERT_CYCLES),
+                    "cycles": growing,
+                }
+            },
+        )
 
 
 @dataclass(frozen=True)

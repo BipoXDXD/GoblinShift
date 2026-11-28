@@ -12,7 +12,12 @@ from opentelemetry.sdk.trace.export import SimpleSpanProcessor
 from opentelemetry.sdk.trace.export.in_memory_span_exporter import InMemorySpanExporter
 from opentelemetry.trace import StatusCode
 
-from goblinshift.entrypoints.maintenance import ACCOUNT_STEPS_FAILED, CYCLE_SPAN, run_cycles
+from goblinshift.entrypoints.maintenance import (
+    ACCOUNT_STEPS_FAILED,
+    CYCLE_SPAN,
+    BacklogTrend,
+    run_cycles,
+)
 from goblinshift.platform.telemetry import AlertEventCounter
 from goblinshift.runs.maintenance import STEPS_FAILED
 
@@ -171,3 +176,73 @@ def test_ciclo_de_contas_com_passo_falho_conta_como_falha_sem_apagar_o_de_execuc
     assert attributes["maintenance.account_steps_failed"] == 1
     assert attributes["maintenance.login_states_removed"] == 1
     assert span.status.status_code is StatusCode.ERROR
+
+
+@pytest.mark.parametrize(
+    ("series", "expected"),
+    [([5, 6, 7], 2), ([5, 6, 7, 8], 3), ([5, 6, 6, 7], 1), ([5, 4, 5, 6], 2), ([], 0)],
+)
+def test_tendencia_conta_voltas_seguidas_de_crescimento(series: list[int], expected: int) -> None:
+    trend = BacklogTrend()
+    result = 0
+    for value in series:
+        result = trend.observe({"runs_to_delete": value})
+
+    assert result == expected
+
+
+def test_chave_ausente_na_volta_zera_a_sequencia() -> None:
+    # Volta sem a contagem (o passo falhou): não dá para dizer que cresceu.
+    trend = BacklogTrend()
+    for value in (1, 2, 3):
+        trend.observe({"runs_to_delete": value})
+
+    assert trend.observe({}) == 0
+    assert trend.observe({"runs_to_delete": 4}) == 0
+
+
+def test_tendencia_devolve_a_maior_sequencia_entre_os_acumulos() -> None:
+    trend = BacklogTrend()
+    for runs, uploads in ((1, 9), (2, 8), (3, 9)):
+        result = trend.observe({"runs_to_delete": runs, "uploads_to_delete": uploads})
+
+    assert result == 2
+
+
+def test_volta_grava_a_tendencia_no_span(
+    provider: TracerProvider, exporter: InMemorySpanExporter
+) -> None:
+    trend = BacklogTrend()
+    for value in (1, 2, 3, 4):
+        run_cycles(
+            provider.get_tracer("t"),
+            (("execuções", lambda value=value: {"runs_to_delete": value}),),
+            trend=trend,
+        )
+
+    spans = exporter.get_finished_spans()
+    growing = [
+        dict(span.attributes or {})["maintenance.retention_backlog_growing"] for span in spans
+    ]
+    assert growing == [0, 1, 2, 3]
+
+
+def test_tres_voltas_de_acumulo_logam_o_alerta_com_a_chave(
+    provider: TracerProvider, caplog: pytest.LogCaptureFixture
+) -> None:
+    trend = BacklogTrend()
+    with caplog.at_level(logging.WARNING, logger="goblinshift.maintenance"):
+        for value in (1, 2, 3, 4):
+            run_cycles(
+                provider.get_tracer("t"),
+                (("contas", lambda value=value: {"request_windows": value}),),
+                trend=trend,
+            )
+
+    alerts = [
+        record
+        for record in caplog.records
+        if getattr(record, "fields", {}).get("alert") == "retention_backlog_growing"
+    ]
+    [only] = alerts
+    assert only.fields["backlogs"] == ["request_windows"]  # type: ignore[attr-defined]

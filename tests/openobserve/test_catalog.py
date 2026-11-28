@@ -44,6 +44,7 @@ LOG_EVENT_ALERTS = {
     "objects_unreadable": "gs-causa-objetos-ilegiveis",
     "purge_file_not_removed": "gs-causa-arquivos-nao-removidos",
     "purge_governor": "gs-causa-limitador-de-exclusoes",
+    "retention_backlog_growing": "gs-causa-retencao-atrasada",
     "run_without_reservation": "gs-causa-sem-reserva",
     "storage_unreachable": "gs-causa-storage-sem-sentinela",
     "upload_without_reservation": "gs-causa-sem-reserva",
@@ -60,6 +61,7 @@ CYCLE_COUNTERS = {
     "objects_missing": "maintenance_objects_marked_missing",
     "objects_unreadable": "maintenance_objects_missing_unreadable",
     "purge_governor": "maintenance_purge_limit_reached",
+    "retention_backlog_growing": "maintenance_retention_backlog_growing",
     "storage_unreachable": "maintenance_missing_sweep_skipped",
 }
 MAINTENANCE_MODULES = {"entrypoints/maintenance.py", "runs/maintenance.py"}
@@ -105,6 +107,7 @@ def test_catalogo_tem_queima_por_slo_e_nivel_causas_e_heartbeat() -> None:
         "gs-causa-disco",
         "gs-causa-execucao-presa",
         "gs-causa-fila-parada",
+        "gs-causa-retencao-atrasada",
         "gs-causa-limitador-de-exclusoes",
         "gs-causa-exclusao-de-conta-atrasada",
         "gs-causa-auditoria-atrasada",
@@ -201,6 +204,7 @@ def test_alertas_da_manutencao_leem_o_span_do_ciclo_no_stream_de_traces() -> Non
     names = {
         "gs-causa-execucao-presa",
         "gs-causa-fila-parada",
+        "gs-causa-retencao-atrasada",
         "gs-causa-limitador-de-exclusoes",
         "gs-causa-exclusao-de-conta-atrasada",
         "gs-causa-auditoria-atrasada",
@@ -238,6 +242,16 @@ def test_fila_parada_acorda_o_destino_urgente_lendo_a_contagem_do_ciclo() -> Non
     assert alert.destination is DestinationKey.URGENT
     assert (alert.period_minutes, alert.silence_minutes) == (10, 60)
     assert "maintenance_queue_stalled_runs" in alert.sql
+
+
+def test_retencao_atrasada_avisa_a_partir_de_tres_voltas_de_acumulo() -> None:
+    [alert] = [
+        a for a in alerts(stream="s", prefix=PREFIX) if a.name == "gs-causa-retencao-atrasada"
+    ]
+
+    assert alert.destination is DestinationKey.WARNING
+    assert (alert.period_minutes, alert.silence_minutes) == (10, 180)
+    assert "maintenance_retention_backlog_growing AS BIGINT)) >= 3" in alert.sql
 
 
 @pytest.mark.parametrize("log", ["executor não iniciou", "área de trabalho falhou"])

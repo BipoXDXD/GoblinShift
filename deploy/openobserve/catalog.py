@@ -128,6 +128,7 @@ CAUSE_COLUMNS: tuple[str, ...] = (
     "main",
     "maintenance_runs_stuck_stopping",
     "maintenance_queue_stalled_runs",
+    "maintenance_retention_backlog_growing",
     "maintenance_purge_limit_reached",
     "maintenance_accounts_deletion_overdue",
     "maintenance_audit_events_overdue",
@@ -190,6 +191,15 @@ SPAN_CAUSES: tuple[_SpanCause, ...] = (
         period_minutes=10,
         silence_minutes=60,
         destination=DestinationKey.URGENT,
+    ),
+    _SpanCause(
+        "causa-retencao-atrasada",
+        "Retenção acumulando: um acúmulo da retenção cresceu por três voltas seguidas sem o ciclo "
+        "falhar (lote pequeno ou linha presa por trava). Veja o runbook em "
+        "deploy/openobserve/README.md.",
+        period_minutes=10,
+        silence_minutes=180,
+        destination=DestinationKey.WARNING,
     ),
     _SpanCause(
         "causa-limitador-de-exclusoes",
