@@ -25,7 +25,7 @@ from goblinshift.entrypoints import bootstrap, maintenance, worker
 from goblinshift.entrypoints.maintenance import CYCLE_SPAN, AccountJobs, Cycle, run_cycles
 from goblinshift.entrypoints.shutdown import SHUTDOWN_POLL_S, ShutdownFlag
 from goblinshift.platform import telemetry
-from goblinshift.platform.db import make_engine
+from goblinshift.platform.db import PoolSize, make_engine
 from goblinshift.platform.settings import Settings
 from goblinshift.platform.telemetry import UserHasher
 from goblinshift.runs.finished import RunFinishedReporter
@@ -160,15 +160,15 @@ class _IdleListener:
 
 
 def _dispose_emitting_span(
-    otlp: pytest.MonkeyPatch, make_engine: Callable[[Settings], Engine], tracers: list[Tracer]
-) -> Callable[[Settings], Engine]:
+    otlp: pytest.MonkeyPatch, make_engine: Callable[..., Engine], tracers: list[Tracer]
+) -> Callable[..., Engine]:
     """`make_engine` cujo `dispose` emite um span pelo tracer do processo antes de fechar o pool.
 
     Representa qualquer passo da parada que ainda emite span antes do encerramento do tracing.
     """
 
-    def make(settings: Settings) -> Engine:
-        engine = make_engine(settings)
+    def make(settings: Settings, *, pool: PoolSize | None = None) -> Engine:
+        engine = make_engine(settings, pool=pool)
         dispose = engine.dispose
 
         def dispose_emitting_span() -> None:
@@ -318,8 +318,8 @@ def test_falha_ao_descartar_o_pool_da_manutencao_nao_pula_o_encerramento_do_trac
     shutdown = ShutdownFlag()
     _one_round(otlp, shutdown)
 
-    def make_engine_failing_dispose(settings: Settings) -> Engine:
-        engine = make_engine(settings)
+    def make_engine_failing_dispose(settings: Settings, *, pool: PoolSize | None = None) -> Engine:
+        engine = make_engine(settings, pool=pool)
         dispose = engine.dispose
 
         def dispose_and_fail() -> None:

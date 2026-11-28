@@ -55,6 +55,9 @@ WAIT_S = 30.0
 # prazo.
 POLL_INTERVAL_S = 60
 NOTIFY_DEADLINE_S = 10
+# Mensagem do `TimeoutError` do pool do SQLAlchemy. O worker roda com o `WORKER_POOL` (2 + 1, ADR
+# 073): renovação do lease, claim e coleta ao mesmo tempo não podem esgotá-lo.
+POOL_TIMEOUT_MESSAGE = "QueuePool limit"
 assert NOTIFY_DEADLINE_S * 3 < POLL_INTERVAL_S, (
     "prazo perto do polling: o claim não provaria o NOTIFY"
 )
@@ -97,6 +100,7 @@ def worker_process(
     try:
         wait_until(lambda: "worker pronto" in log.read_text(encoding="utf-8"))
         yield process
+        assert POOL_TIMEOUT_MESSAGE not in log.read_text(encoding="utf-8"), "pool do worker esgotou"
     finally:
         if process.poll() is None:
             process.send_signal(signal.SIGCONT)

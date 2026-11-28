@@ -46,7 +46,7 @@ import goblinshift.entrypoints.shutdown as process_shutdown
 from goblinshift.entrypoints.bootstrap import build_runner, process_tracer
 from goblinshift.entrypoints.shutdown import SHUTDOWN_POLL_S, ShutdownFlag
 from goblinshift.files.storage import FileStorage
-from goblinshift.platform.db import make_engine, make_session_factory
+from goblinshift.platform.db import WORKER_POOL, make_engine, make_session_factory
 from goblinshift.platform.settings import (
     EXIT_CONFIGURATION,
     ExecutorConfigError,
@@ -96,7 +96,7 @@ def main() -> int:
 
 
 def serve(settings: Settings, runner: Runner, shutdown: ShutdownFlag) -> None:
-    engine = make_engine(settings)
+    engine = make_engine(settings, pool=WORKER_POOL)
     factory = make_session_factory(engine)
     storage = FileStorage(settings.storage_root)
     lease = timedelta(seconds=settings.worker_lease_s)

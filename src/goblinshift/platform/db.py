@@ -3,6 +3,7 @@
 import time
 from collections.abc import Callable, Iterator
 from contextlib import contextmanager
+from dataclasses import dataclass
 
 import psycopg
 from sqlalchemy import Engine, MetaData, create_engine
@@ -41,7 +42,27 @@ def is_lock_contention(error: BaseException) -> bool:
     )
 
 
-def make_engine(settings: Settings) -> Engine:
+@dataclass(frozen=True)
+class PoolSize:
+    """Conexões que um processo mantém (`size`) e as que abre além delas no pico (`overflow`)."""
+
+    size: int
+    overflow: int
+
+
+# Pools dos processos fora da API (ADR 073). A API fica com o das settings (10 + 5), do qual o teto
+# do middleware deriva (ADR 050). O worker usa no máximo duas ao mesmo tempo (o laço e a renovação
+# do lease em paralelo); o `LISTEN` fica numa conexão própria, fora do pool. A manutenção roda os
+# ciclos um a um; o `gs-admin` e o migrate, uma transação por vez.
+WORKER_POOL = PoolSize(2, 1)
+MAINTENANCE_POOL = PoolSize(2, 1)
+ADMIN_POOL = PoolSize(1, 0)
+MIGRATE_POOL = PoolSize(1, 0)
+
+
+def make_engine(settings: Settings, *, pool: PoolSize | None = None) -> Engine:
+    """Engine com os timeouts de 3.2; `pool=None` usa o pool das settings (API e healthchecks)."""
+    size = PoolSize(settings.db_pool_size, settings.db_pool_max_overflow) if pool is None else pool
     options = " ".join(
         [
             f"-c statement_timeout={settings.db_statement_timeout_ms}",
@@ -53,8 +74,8 @@ def make_engine(settings: Settings) -> Engine:
     )
     return create_engine(
         settings.database_url,
-        pool_size=settings.db_pool_size,
-        max_overflow=settings.db_pool_max_overflow,
+        pool_size=size.size,
+        max_overflow=size.overflow,
         # Pool esgotado vira 503 rápido em vez de requisição pendurada.
         pool_timeout=settings.db_pool_timeout_s,
         pool_pre_ping=True,

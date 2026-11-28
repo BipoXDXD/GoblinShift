@@ -27,7 +27,7 @@ from goblinshift.entrypoints.api.app import create_app
 from goblinshift.entrypoints.maintenance import Cycle
 from goblinshift.entrypoints.shutdown import ShutdownFlag
 from goblinshift.platform import telemetry
-from goblinshift.platform.db import make_engine
+from goblinshift.platform.db import PoolSize, make_engine
 from goblinshift.platform.settings import Settings
 from goblinshift.platform.telemetry import UserHasher
 from goblinshift.runs.finished import RunFinishedReporter
@@ -56,12 +56,12 @@ class Events:
         self.add("tracing abre")
         return _Recording()
 
-    def engine_maker(self) -> Callable[[Settings], Engine]:
+    def engine_maker(self) -> Callable[..., Engine]:
         """`make_engine` de verdade (não conecta), com a criação e o `dispose` na linha do tempo."""
 
-        def make(settings: Settings) -> Engine:
+        def make(settings: Settings, *, pool: PoolSize | None = None) -> Engine:
             self.add("engine cria")
-            engine = make_engine(settings)
+            engine = make_engine(settings, pool=pool)
             dispose = engine.dispose
 
             def recorded_dispose(close: bool = True) -> None:
