@@ -1,6 +1,6 @@
 {
   "pilha": "build local + API falsa (web/e2e/support/fakeApi.ts)",
-  "commit": "9d0c3ecf1f70896af122f60c50d3ae40a0b2dc9e",
+  "commit": "6d39f6613c17c597f4bd8378917fd8b5a5bf5fda",
   "imagens": [
     {
       "arquivo": "bancada-celular.png",
@@ -19,7 +19,8 @@
       "tela": "Jornada do Image Forge",
       "viewport": "1280x800",
       "goblins": [
-        "ferrugem"
+        "ferrugem",
+        "rubia"
       ]
     },
     {
