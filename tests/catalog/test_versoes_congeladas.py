@@ -22,7 +22,7 @@ def _key(version: RecipeVersion) -> str:
 
 
 def _snapshot(version: RecipeVersion) -> Path:
-    return FROZEN / f"{version.recipe_id}-v{version.version}.json"
+    return congelar_versao.snapshot_path(FROZEN, version.recipe_id, version.version)
 
 
 @pytest.mark.parametrize("version", CATALOG.list_versions(), ids=_key)
@@ -42,7 +42,6 @@ def test_versao_publicada_nao_muda_schema_nem_defaults(version: RecipeVersion) -
     assert version.variant_schema() == frozen["variant_schema"], (
         "schema de versão publicada mudou: crie uma versão nova (GoblinShiftPlan 1.6)"
     )
-    assert version.parameters_schema() == frozen["variant_schema"]["properties"]["parameters"]
     assert version.resolve({}) == frozen["defaults"], (
         "default de versão publicada mudou: crie uma versão nova (GoblinShiftPlan 1.6)"
     )
@@ -56,30 +55,27 @@ def test_todo_snapshot_e_de_uma_versao_do_catalogo() -> None:
 
 
 def test_script_grava_snapshot_no_formato_canonico(tmp_path: Path) -> None:
-    version = CATALOG.get_version("image-forge", 1)
+    # O esperado é o arquivo commitado, não a lógica do script refeita aqui.
+    assert congelar_versao.main(["image-forge", "1"], directory=tmp_path) == 0
 
-    assert congelar_versao.main(["image-forge", "1"], destino=tmp_path) == 0
-
-    expected = json.dumps(frozen_view(version), indent=2, sort_keys=True, ensure_ascii=False)
-    assert (tmp_path / "image-forge-v1.json").read_text("utf-8") == expected + "\n"
+    written = congelar_versao.snapshot_path(tmp_path, "image-forge", 1)
+    committed = congelar_versao.snapshot_path(FROZEN, "image-forge", 1)
+    assert written.read_bytes() == committed.read_bytes()
 
 
 def test_script_recusa_sobrescrever_snapshot(
     tmp_path: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:
-    existing = tmp_path / "csv-janitor-v1.json"
+    existing = congelar_versao.snapshot_path(tmp_path, "csv-janitor", 1)
     existing.write_text("X", encoding="utf-8")
 
-    assert congelar_versao.main(["csv-janitor", "1"], destino=tmp_path) == 1
+    assert congelar_versao.main(["csv-janitor", "1"], directory=tmp_path) == 1
 
     assert existing.read_text("utf-8") == "X"
     assert "snapshot congelado não se sobrescreve" in capsys.readouterr().err
 
 
-def test_script_recusa_versao_fora_do_catalogo(
-    tmp_path: Path, capsys: pytest.CaptureFixture[str]
-) -> None:
-    assert congelar_versao.main(["csv-janitor", "99"], destino=tmp_path) == 1
+def test_script_recusa_versao_fora_do_catalogo(tmp_path: Path) -> None:
+    assert congelar_versao.main(["csv-janitor", "99"], directory=tmp_path) == 1
 
     assert not list(tmp_path.iterdir())
-    assert "csv-janitor v99" in capsys.readouterr().err

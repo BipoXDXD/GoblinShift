@@ -19,7 +19,12 @@ from goblinshift.catalog.versions import frozen_view
 FROZEN_DIR = Path(__file__).resolve().parent.parent / "tests" / "catalog" / "congeladas"
 
 
-def main(argv: Sequence[str] | None = None, *, destino: Path = FROZEN_DIR) -> int:
+def snapshot_path(directory: Path, recipe_id: str, version: int) -> Path:
+    """Onde mora o snapshot de uma versão; o teste usa o mesmo nome."""
+    return directory / f"{recipe_id}-v{version}.json"
+
+
+def main(argv: Sequence[str] | None = None, *, directory: Path = FROZEN_DIR) -> int:
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0] if __doc__ else None)
     parser.add_argument("recipe_id")
     parser.add_argument("version", type=int)
@@ -32,7 +37,7 @@ def main(argv: Sequence[str] | None = None, *, destino: Path = FROZEN_DIR) -> in
         return 1
 
     text = json.dumps(frozen_view(version), indent=2, sort_keys=True, ensure_ascii=False) + "\n"
-    path = destino / f"{version.recipe_id}-v{version.version}.json"
+    path = snapshot_path(directory, version.recipe_id, version.version)
     try:
         # "x": cria só se não existir, na mesma chamada que abre (sem janela entre checar e gravar).
         with path.open("x", encoding="utf-8") as snapshot:
