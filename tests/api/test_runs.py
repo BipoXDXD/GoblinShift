@@ -23,7 +23,7 @@ from goblinshift.files.limits import MAX_BATCH_FILES
 from goblinshift.files.states import ArtifactRole
 from goblinshift.files.storage import FileStorage
 from goblinshift.files.tables import artifact, stored_object
-from goblinshift.identity import Scope
+from goblinshift.identity import Scope, block_account
 from goblinshift.platform.db import unit_of_work
 from goblinshift.platform.settings import ExecutorConfigError, Settings
 from goblinshift.runs import acceptance
@@ -35,6 +35,7 @@ from goblinshift.runs.acceptance import (
 from goblinshift.runs.lifecycle import Status
 from goblinshift.runs.tables import run, run_input, run_output
 from tests.api.files_support import create_upload, send_content
+from tests.api.simulated_session import SimulatedSessions
 from tests.api.support import assert_problem
 from tests.identity.support import new_key, prepare_database
 from tests.runs.support import (
@@ -218,6 +219,27 @@ def create_run_with_key(
     key: str,
 ) -> httpx.Response:
     return post_run(client, account, body(ready_inputs(factory, storage, account.id)), key)
+
+
+def test_post_runs_de_conta_bloqueada_depois_da_autenticacao_da_401(
+    app: FastAPI, client: TestClient, factory: sessionmaker[Session], storage: FileStorage
+) -> None:
+    owner = new_owner(factory)
+    uploads = ready_inputs(factory, storage, owner)
+    # A sessão já foi aceita quando o bloqueio chega: a corrida entre a autenticação e a rota.
+    SimulatedSessions(app, BASE_TIME).sign_in(owner)
+    with unit_of_work(factory) as session:
+        assert block_account(session, owner, BASE_TIME)
+
+    response = client.post(RUNS, json=body(uploads), headers={"Idempotency-Key": str(uuid.uuid4())})
+
+    problem = assert_problem(response, 401, "AUTHENTICATION_REQUIRED")
+    assert problem["detail"] == "A sessão não vale mais para esta conta."
+    with factory() as session:
+        created = session.execute(
+            select(func.count()).select_from(run).where(run.c.owner_id == owner)
+        ).scalar_one()
+    assert created == 0
 
 
 @pytest.mark.parametrize("key", [None, "a" * 15, "a" * 65, "chave com espaco!"])

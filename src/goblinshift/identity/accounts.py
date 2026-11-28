@@ -326,6 +326,29 @@ class StoredKeyLimitError(Exception):
     """
 
 
+def lock_active_account(session: Session, owner_id: UUID) -> None:
+    """Confere que a conta está ativa e a trava em `FOR SHARE` até o fim da transação de quem chama.
+
+    Quem cria recurso da conta (Run, upload, preset) chama isto dentro da própria transação: o
+    Principal foi lido noutra, e o bloqueio ou o pedido de exclusão pode ter sido confirmado entre
+    as duas. O `FOR SHARE` espera o `UPDATE` de `block_account`, `request_account_deletion` e do
+    `logout-all` (`sessions.revoke_all_credentials`) e, depois do commit deles, relê a linha e a
+    recusa; o `FOR KEY SHARE` das FKs para a conta não conflita com ele. Conta que não existe,
+    bloqueada, pendente ou com exclusão pedida levanta `UnknownAccountError`.
+    """
+    account = session.execute(
+        select(app_user.c.id)
+        .where(
+            app_user.c.id == owner_id,
+            app_user.c.status == ACTIVE_STATUS,
+            app_user.c.deletion_requested_at.is_(None),
+        )
+        .with_for_update(read=True)
+    ).first()
+    if account is None:
+        raise UnknownAccountError(f"conta {owner_id} não existe ou não está ativa")
+
+
 def block_account(session: Session, owner_id: UUID, now: datetime) -> bool:
     """Bloqueia e revoga sessões e chaves; False se a conta não existir. Idempotente."""
     blocked = session.execute(
