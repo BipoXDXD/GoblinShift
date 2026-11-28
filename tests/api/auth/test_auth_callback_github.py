@@ -8,7 +8,12 @@ from fastapi.testclient import TestClient
 from sqlalchemy import select
 from sqlalchemy.orm import Session, sessionmaker
 
-from goblinshift.identity.providers import GITHUB_ISSUER, GITHUB_USER_URL, MAX_GITHUB_USER_BYTES
+from goblinshift.identity.providers import (
+    GITHUB_ISSUER,
+    GITHUB_USER_URL,
+    GOOGLE_ISSUER,
+    MAX_GITHUB_USER_BYTES,
+)
 from goblinshift.identity.tables import app_user
 from goblinshift.platform.db import metadata, unit_of_work
 from tests.api.auth.support import (
@@ -214,3 +219,23 @@ def test_conta_com_exclusao_pedida_nao_completa_login(
 
     assert_login_failed(login(client, fake, "github"))
     assert len(sessions.started) == 1
+
+
+def test_reauth_pelo_github_com_sessao_do_google_e_recusada(
+    client: TestClient,
+    fake: FakeProviders,
+    sessions: StoredSessions,
+    factory: sessionmaker[Session],
+    login_app: FastAPI,
+) -> None:
+    open_signup(login_app)
+    login(client, fake, "google")
+    [google_account] = [account["id"] for account in accounts(factory)]
+
+    response = login(client, fake, "github", reauth="1")
+
+    assert_login_failed(response)
+    assert sessions.revoked == []
+    assert sessions.started_for == [google_account]
+    assert [account["issuer"] for account in accounts(factory)] == [GOOGLE_ISSUER]
+    assert audit_events(factory)[-1] == ("LOGIN_FAILED", "failure", google_account)

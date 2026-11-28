@@ -13,6 +13,11 @@ header `X-Request-ID`), gravado no evento `LOGIN_FAILED` com a conta recusada: a
 recurso contra o bloqueio e o operador acha a conta (J-10). O código é aleatório e igual em forma
 para toda recusa; no fragmento, o navegador não o envia a servidor nenhum, nem no `Referer`.
 
+Reautenticação (`reauth=1`): o início guarda, no cookie de login, a conta da sessão que o
+navegador já tem, e o callback só aceita a identidade dessa mesma conta. Outra conta (ou outro
+provedor) é recusada antes de qualquer escrita: a sessão anterior continua valendo e nenhuma
+sessão recente nasce para quem não pediu a confirmação. Sem sessão válida, é um login comum.
+
 As rotas são `async` porque a integração Starlette do Authlib é; o banco é acessado numa thread
 do pool, em transação curta, e nunca durante uma chamada ao provedor.
 """
@@ -47,9 +52,13 @@ from goblinshift.identity import (
     ExternalIdentity,
     IssuedSession,
     LoginRefusal,
+    LoginRefused,
+    Principal,
     authenticate_session,
+    find_login_account,
     record_audit_event,
     resolve_login,
+    resolve_session,
     revoke_session,
     start_session,
 )
@@ -217,12 +226,21 @@ async def start_login(
     """Redireciona ao provedor com PKCE e `state`; só `return_to` e `reauth=1` são aceitos."""
     name = _provider_name(provider)
     login_provider = _providers(request).get(name)
+    factory: sessionmaker[Session] = request.app.state.session_factory
     if login_provider is None:
         attempt = _attempt(request, now)
-        factory: sessionmaker[Session] = request.app.state.session_factory
         await run_in_threadpool(_record_login_failure, factory, attempt)
         return _login_failed(attempt)
     request.session[_return_to_key(name)] = _safe_return_to(return_to)
+    reauth_user = None
+    if reauth == "1":
+        reauth_user = await run_in_threadpool(
+            _session_owner, factory, request.cookies.get(SESSION_COOKIE), now
+        )
+    if reauth_user is None:
+        request.session.pop(_reauth_key(name), None)
+    else:
+        request.session[_reauth_key(name)] = str(reauth_user)
     extra = {"prompt": REAUTH_PROMPT} if reauth == "1" else {}
     response: Response = await login_provider.oauth_app.authorize_redirect(
         request, _redirect_uri(request, name), **extra
@@ -237,6 +255,7 @@ async def finish_login(request: Request, provider: str, now: Now) -> Response:
     factory: sessionmaker[Session] = request.app.state.session_factory
     attempt = _attempt(request, now)
     return_to = _safe_return_to(request.session.pop(_return_to_key(name), None))
+    reauth_user = _parse_reauth_user(request.session.pop(_reauth_key(name), None))
     login_provider = _providers(request).get(name)
     if login_provider is None:
         await run_in_threadpool(_record_login_failure, factory, attempt)
@@ -257,6 +276,7 @@ async def finish_login(request: Request, provider: str, now: Now) -> Response:
         web.csrf_key,
         request.cookies.get(SESSION_COOKIE),
         attempt,
+        reauth_user,
     )
     if isinstance(result, LoginRefusal):
         logger.info("login %s recusado: conta %s", name, result.reason.name)
@@ -285,10 +305,18 @@ def _complete_login(
     csrf_key: bytes,
     previous_token: str | None,
     attempt: LoginAttempt,
+    reauth_user: UUID | None,
 ) -> IssuedSession | LoginRefusal:
-    """Conta, sessão nova e auditoria numa transação só (a conta pendente também é gravada)."""
+    """Conta, sessão nova e auditoria numa transação só (a conta pendente também é gravada).
+
+    Com `reauth_user`, a identidade precisa ser a dessa conta, conferida antes de qualquer
+    escrita: senão a recusa é auditada na conta da sessão, e nada mais muda.
+    """
     now = attempt.now
     with unit_of_work(factory) as session:
+        if reauth_user is not None and find_login_account(session, identity) != reauth_user:
+            _record(session, AuditEventType.LOGIN_FAILED, reauth_user, attempt)
+            return LoginRefusal(reauth_user, LoginRefused.REAUTH_MISMATCH)
         resolved = resolve_login(session, identity, signup_open=signup_open, now=now)
         if isinstance(resolved, LoginRefusal):
             _record(session, AuditEventType.LOGIN_FAILED, resolved.account_id, attempt)
@@ -308,6 +336,15 @@ def _revoke_previous_session(session: Session, token: str | None, now: datetime)
     previous = authenticate_session(session, token, now)
     if previous is not None and previous.session_id is not None:
         revoke_session(session, previous.session_id, now)
+
+
+def _session_owner(factory: sessionmaker[Session], token: str | None, now: datetime) -> UUID | None:
+    """Dono da sessão válida do cookie, sem registrar o uso (é só o início do login)."""
+    if token is None:
+        return None
+    with unit_of_work(factory) as session:
+        resolved = resolve_session(session, token, now)
+    return resolved.owner_id if isinstance(resolved, Principal) else None
 
 
 def _record_login_failure(factory: sessionmaker[Session], attempt: LoginAttempt) -> None:
@@ -354,6 +391,20 @@ def _redirect_uri(request: Request, name: ProviderName) -> str:
 
 def _return_to_key(name: ProviderName) -> str:
     return f"return_to_{name.value}"
+
+
+def _reauth_key(name: ProviderName) -> str:
+    return f"reauth_{name.value}"
+
+
+def _parse_reauth_user(value: object) -> UUID | None:
+    """A conta guardada no início; o cookie é assinado, mas o valor é conferido mesmo assim."""
+    if not isinstance(value, str):
+        return None
+    try:
+        return UUID(value)
+    except ValueError:
+        return None
 
 
 def _safe_return_to(value: object) -> str:

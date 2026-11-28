@@ -26,7 +26,7 @@ from goblinshift.entrypoints.api import auth_login
 from goblinshift.entrypoints.api.problems import REQUEST_ID_HEADER
 from goblinshift.identity import csrf_token_matches
 from goblinshift.identity.providers import GOOGLE_ISSUER, GOOGLE_TOKEN_URL
-from goblinshift.identity.tables import app_user, login_state
+from goblinshift.identity.tables import app_user, login_state, web_session
 from goblinshift.platform.db import unit_of_work
 from goblinshift.platform.settings import WebIdentityConfig
 from tests.api.auth.support import (
@@ -167,6 +167,91 @@ def test_cookie_de_sessao_desconhecido_nao_atrapalha_o_login(
     [issued] = sessions.started
     assert issued.issued_for(client.cookies["__Host-gs_session"])
     assert sessions.revoked == []
+
+
+# --- Reautenticação só vale para a conta da sessão --------------------------------------------
+
+
+def test_reauth_com_outra_conta_e_recusada_e_mantem_a_sessao(
+    client: TestClient,
+    fake: FakeProviders,
+    sessions: StoredSessions,
+    factory: sessionmaker[Session],
+    login_app: FastAPI,
+) -> None:
+    open_signup(login_app)
+    fake.google_subject = "sub-a"
+    login(client, fake, "google")
+    [account_a] = [account["id"] for account in accounts(factory)]
+    fake.google_subject = "sub-b"
+
+    response = login(client, fake, "google", reauth="1")
+
+    assert_login_failed(response)
+    assert sessions.revoked == []
+    assert len(sessions.started) == 1
+    assert [account["subject"] for account in accounts(factory)] == ["sub-a"]
+    assert audit_events(factory)[-1] == ("LOGIN_FAILED", "failure", account_a)
+
+
+def test_reauth_com_a_mesma_conta_abre_sessao_recente_e_revoga_a_anterior(
+    client: TestClient,
+    fake: FakeProviders,
+    sessions: StoredSessions,
+    factory: sessionmaker[Session],
+    login_app: FastAPI,
+) -> None:
+    open_signup(login_app)
+    login(client, fake, "google")
+    [account] = accounts(factory)
+
+    response = login(client, fake, "google", reauth="1", return_to="/acesso")
+
+    assert response.status_code == 303
+    assert response.headers["location"] == "/acesso"
+    first, second = sessions.started
+    assert second.issued_for(client.cookies["__Host-gs_session"])
+    assert sessions.revoked == [first.session_id]
+    assert sessions.started_for == [account["id"], account["id"]]
+    assert audit_events(factory)[-1] == ("LOGIN_SUCCEEDED", "success", account["id"])
+
+
+def test_reauth_sem_sessao_valida_vira_login_comum(
+    client: TestClient,
+    fake: FakeProviders,
+    sessions: StoredSessions,
+    factory: sessionmaker[Session],
+    login_app: FastAPI,
+) -> None:
+    open_signup(login_app)
+
+    response = login(client, fake, "google", reauth="1")
+
+    assert response.status_code == 303
+    [account] = accounts(factory)
+    assert sessions.started_for == [account["id"]]
+    assert audit_events(factory) == [("LOGIN_SUCCEEDED", "success", account["id"])]
+
+
+def test_reauth_com_sessao_revogada_vira_login_comum(
+    client: TestClient,
+    fake: FakeProviders,
+    sessions: StoredSessions,
+    factory: sessionmaker[Session],
+    login_app: FastAPI,
+) -> None:
+    open_signup(login_app)
+    fake.google_subject = "sub-a"
+    login(client, fake, "google")
+    with unit_of_work(factory) as session:
+        session.execute(web_session.update().values(revoked_at=func.now()))
+    fake.google_subject = "sub-b"
+
+    response = login(client, fake, "google", reauth="1")
+
+    assert response.status_code == 303
+    assert [account["subject"] for account in accounts(factory)] == ["sub-a", "sub-b"]
+    assert sessions.started[-1].issued_for(client.cookies["__Host-gs_session"])
 
 
 # --- Cadastro fechado e contas recusadas -----------------------------------------------------

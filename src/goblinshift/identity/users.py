@@ -11,6 +11,7 @@ from datetime import datetime
 from enum import Enum, auto
 from uuid import UUID
 
+from sqlalchemy import select
 from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.orm import Session
 
@@ -35,6 +36,8 @@ class LoginRefused(Enum):
     BLOCKED = auto()
     PENDING_APPROVAL = auto()
     DELETION_REQUESTED = auto()
+    # Reautenticação (`reauth=1`) que voltou com a identidade de outra conta, ou de nenhuma.
+    REAUTH_MISMATCH = auto()
 
 
 @dataclass(frozen=True)
@@ -43,6 +46,16 @@ class LoginRefusal:
 
     account_id: UUID
     reason: LoginRefused
+
+
+def find_login_account(session: Session, identity: ExternalIdentity) -> UUID | None:
+    """A conta da identidade, sem criar nem atualizar nada; None se ela ainda não existe."""
+    user_id: UUID | None = session.execute(
+        select(app_user.c.id).where(
+            app_user.c.issuer == identity.issuer, app_user.c.subject == identity.subject
+        )
+    ).scalar_one_or_none()
+    return user_id
 
 
 def resolve_login(

@@ -7,7 +7,13 @@ import pytest
 from sqlalchemy import func, insert, select, update
 from sqlalchemy.orm import Session, sessionmaker
 
-from goblinshift.identity import ExternalIdentity, LoginRefusal, LoginRefused, resolve_login
+from goblinshift.identity import (
+    ExternalIdentity,
+    LoginRefusal,
+    LoginRefused,
+    find_login_account,
+    resolve_login,
+)
 from goblinshift.identity.tables import app_user, web_session
 from goblinshift.platform.db import unit_of_work
 
@@ -169,3 +175,26 @@ def test_mesmo_sujeito_em_provedores_diferentes_sao_contas_diferentes(
 
     assert google != github
     assert count_accounts(factory) == 2
+
+
+def find(factory: sessionmaker[Session], identity: ExternalIdentity) -> UUID | None:
+    with unit_of_work(factory) as session:
+        return find_login_account(session, identity)
+
+
+def test_find_login_account_acha_a_conta_pela_identidade(factory: sessionmaker[Session]) -> None:
+    google = active_account(factory, GOOGLE)
+    active_account(factory, GITHUB)
+
+    assert find(factory, GOOGLE) == google
+
+
+def test_find_login_account_nao_cria_conta(factory: sessionmaker[Session]) -> None:
+    assert find(factory, GOOGLE) is None
+    assert count_accounts(factory) == 0
+
+
+def test_find_login_account_separa_os_provedores(factory: sessionmaker[Session]) -> None:
+    active_account(factory, GOOGLE)
+
+    assert find(factory, ExternalIdentity(GITHUB.issuer, GOOGLE.subject, "x")) is None
