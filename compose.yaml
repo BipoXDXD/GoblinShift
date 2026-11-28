@@ -87,6 +87,10 @@ services:
       interval: 5s
       timeout: 3s
       retries: 20
+    # 60 s para o checkpoint final do fast shutdown, sem SIGKILL no meio (o padrão é 10 s), e
+    # 128 MiB de /dev/shm para as queries paralelas (o padrão é 64 MiB; conta no teto de memória).
+    stop_grace_period: 60s
+    shm_size: 128m
     networks: [internal]
     restart: unless-stopped
     logging: *logging
@@ -267,7 +271,8 @@ services:
     depends_on:
       openobserve:
         condition: service_started
-    # IP fixo (ADR 051, C1): o Nginx manda o access log por syslog para um IP, sem DNS. Igual
+    # IP fixo (ADR 051, C1), reservado para o syslog do access log do Nginx, que ainda não está
+    # ligado: hoje o access log é só local (docker/nginx/templates/default.conf.template). Igual
     # ao de deploy/coolify/infra.json. O IP só fica reservado com o Collector de pé: parado, um
     # container dinâmico pode pegá-lo, e aí o Collector não sobe (Address already in use; o
     # roteiro do deploy manda abortar).

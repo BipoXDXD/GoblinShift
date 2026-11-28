@@ -1,6 +1,8 @@
-# Produção na VPS compartilhada (docs/GoblinShiftPlan.md, 3.8 e ADR 014).
-# O Nginx do GoblinShift entra na rede `edge` no IP reservado a ele, que o trecho do projeto
-# na borda (deploy/edge/conf.d/goblinshift.caddy) usa. Nenhuma porta é publicada pelo projeto.
+# Referência da cópia parada em /srv/goblinshift/app (docs/GoblinShiftPlan.md, 3.8 e ADR 014):
+# a produção não sobe por este arquivo. Ela roda os recursos do Coolify, deploy/coolify/app.json
+# (aplicação) e deploy/coolify/infra.json (PostgreSQL e telemetria), e a borda usa o site
+# docker/gateway/sites/goblinshift.dev.caddy. Mantenha os dois lados coerentes ao mudar um deles.
+# Nenhuma porta é publicada pelo projeto.
 #
 # Executor (fatia 4): o worker e a manutenção falam com o executor-ctl do host pelo socket em
 # /run/goblinshift (grupo gs-exec, GID 61001) e preparam a área de trabalho no filesystem de
