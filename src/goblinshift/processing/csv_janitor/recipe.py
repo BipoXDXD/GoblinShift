@@ -1,4 +1,4 @@
-"""Receita csv-janitor, versão 1: `clean_table` sobre o contrato de 3.2.
+"""Receita csv-janitor: `clean_table` sobre o contrato de 3.2, a mesma classe em toda versão.
 
 Cada tabela aceita vira um CSV com nome derivado do original; cada tabela recusada vira
 `ItemRejected` com o código da biblioteca. Rejeitar todas não é falha da receita: o relatório
