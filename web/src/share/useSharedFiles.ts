@@ -1,22 +1,23 @@
 import { useEffect, useRef, useState } from "react";
 
-import { takeSharedFiles } from "./sharedInbox";
+import { peekShared, takeSharedFiles } from "./sharedInbox";
 
 export interface SharedFiles {
   /** O compartilhamento tinha vencido ou já fora usado. */
   readonly expired: boolean;
-  /** Arquivos recebidos que esperam a pessoa decidir; nada foi enviado ainda. */
-  readonly pending: readonly File[];
-  /** A pessoa aceitou: os arquivos vão para o lote. */
-  readonly accept: () => void;
-  readonly discard: () => void;
+  /** Nomes dos arquivos que esperam a decisão; eles seguem na caixa de entrada até lá. */
+  readonly pending: readonly string[];
+  /** A pessoa aceitou: os arquivos saem da caixa e vão para o lote. */
+  readonly accept: () => Promise<void>;
+  /** A pessoa recusou: os arquivos saem da caixa sem envio. */
+  readonly discard: () => Promise<void>;
 }
 
 /**
- * Tira da caixa de entrada os arquivos do compartilhamento `id`, uma vez só, e os segura até a
- * pessoa decidir (ADR 064): qualquer site pode fazer o POST do `share_target`, então a Bancada
- * nunca envia o que chegou por ele sem um clique. Só roda onde a Bancada já abriu, isto é, com
- * sessão: sem login, os arquivos esperam na caixa até a volta do "Entrar".
+ * Espia os nomes do compartilhamento `id` e espera a pessoa decidir (ADR 064): qualquer site pode
+ * fazer o POST do `share_target`, então a Bancada nunca envia o que chegou por ele sem um clique.
+ * Até a decisão os arquivos ficam na caixa, e recarregar a página não os perde. Só roda onde a
+ * Bancada já abriu, isto é, com sessão: sem login, eles esperam a volta do "Entrar".
  *
  * A guarda por `ref` cobre o efeito duplo do StrictMode, e a leitura é assíncrona, sem `setState`
  * síncrono no efeito.
@@ -26,32 +27,41 @@ export function useSharedFiles(
   onAccept: (files: readonly File[]) => void,
 ): SharedFiles {
   const [expired, setExpired] = useState(false);
-  const [pending, setPending] = useState<readonly File[]>([]);
-  const taken = useRef<string | null>(null);
+  const [pending, setPending] = useState<readonly string[]>([]);
+  const peeked = useRef<string | null>(null);
   useEffect(() => {
-    if (id === null || taken.current === id) {
+    if (id === null || peeked.current === id) {
       return;
     }
-    taken.current = id;
-    void takeSharedFiles(id)
+    peeked.current = id;
+    void peekShared(id)
       .catch(() => "expired" as const)
-      .then((result) => {
-        if (result === "expired") {
+      .then((names) => {
+        if (names === "expired") {
           setExpired(true);
         } else {
-          setPending(result);
+          setPending(names);
         }
       });
   }, [id]);
+
+  const take = async (): Promise<readonly File[] | "expired"> => {
+    setPending([]);
+    return id === null ? "expired" : takeSharedFiles(id).catch(() => "expired" as const);
+  };
   return {
     expired,
     pending,
-    accept: () => {
-      onAccept(pending);
-      setPending([]);
+    accept: async () => {
+      const files = await take();
+      if (files === "expired") {
+        setExpired(true);
+      } else {
+        onAccept(files);
+      }
     },
-    discard: () => {
-      setPending([]);
+    discard: async () => {
+      await take();
     },
   };
 }

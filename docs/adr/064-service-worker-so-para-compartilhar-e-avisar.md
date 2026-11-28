@@ -30,7 +30,10 @@ deploy novo vale na próxima navegação.
   (`peekSharedNames`, `takeShared`) e no `activate` do service worker. Os tetos são os do
   servidor: até 100 arquivos, 50 MiB por arquivo (256 MiB para vídeo) e 512 MiB no total. Fora
   deles nada é gravado; se um `put` falha (cota), o que já foi gravado daquele id é apagado. Nos
-  dois casos a resposta é o `303 /?compartilhamento=indisponivel`. Os arquivos ficam só no
+  dois casos a resposta é o `303 /?compartilhamento=indisponivel`. Os valores repetem os de
+  `files/limits.py`, e `tests/test_share_inbox_limits.py` confere que os dois lados batem. O teto
+  por arquivo de 50 MiB depende do #567 (`MAX_FILE_BYTES` sobe de 32 MiB para 50 MiB): até ele
+  entrar, o teste do arquivo falha, e por isso o #577 entra depois do #567. Os arquivos ficam só no
   aparelho e só vão ao servidor pelo fluxo normal da Bancada (intenções, cotas, `PUT` do conteúdo),
   depois do login.
 - **Build:** o `sw.ts` tem um build próprio do Vite, em IIFE, depois do da página
@@ -60,7 +63,8 @@ cota e criando execuções que a pessoa não pediu.
 
 **Mitigação:** o que vem do compartilhamento nunca dispara envio. A Bancada mostra os nomes em
 "Arquivos recebidos" e espera o clique em "Enviar os arquivos recebidos" (ou "Descartar"); só então
-os arquivos entram no lote, pelo mesmo caminho do seletor de arquivos. Os tetos e o prazo da caixa de
+os arquivos saem da caixa de entrada e entram no lote, pelo mesmo caminho do seletor de arquivos.
+Até a decisão eles ficam na caixa, e recarregar a Bancada não os perde. Os tetos e o prazo da caixa de
 entrada limitam o que um POST de fora consegue ocupar no aparelho.
 
 ## Alternativas descartadas

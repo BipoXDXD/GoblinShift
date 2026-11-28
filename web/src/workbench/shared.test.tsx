@@ -1,4 +1,4 @@
-import { screen, within } from "@testing-library/react";
+import { screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
@@ -56,18 +56,45 @@ describe("Bancada aberta pelo compartilhamento", () => {
     const received = await screen.findByRole("region", { name: "Arquivos recebidos" });
     expect(within(received).getByText("clientes.csv")).toBeVisible();
     expect(within(received).getByText("pedidos.csv")).toBeVisible();
-    expect(await peekSharedNames(caches, SHARE_ID, Date.now())).toBe("expired");
     expect(uploadRequests(api.requests)).toEqual([]);
     expect(screen.getByText("A bancada está vazia")).toBeVisible();
   });
 
-  it("descartar os arquivos recebidos não envia nada", async () => {
+  it("recarregar antes do clique mantém os arquivos na caixa de entrada", async () => {
+    await seedShared(caches, [csv("clientes.csv")], { id: SHARE_ID });
+    const first = render();
+    await screen.findByRole("region", { name: "Arquivos recebidos" });
+    first.unmount();
+
+    render();
+
+    const received = await screen.findByRole("region", { name: "Arquivos recebidos" });
+    expect(within(received).getByText("clientes.csv")).toBeVisible();
+    expect(await peekSharedNames(caches, SHARE_ID, Date.now())).toEqual(["clientes.csv"]);
+  });
+
+  it("a seção dos arquivos recebidos recebe o foco ao aparecer", async () => {
+    await seedShared(caches, [csv("clientes.csv")], { id: SHARE_ID });
+
+    render();
+
+    const heading = await screen.findByRole("heading", { name: "Arquivos recebidos" });
+    await waitFor(() => {
+      expect(heading).toHaveFocus();
+    });
+  });
+
+  it("descartar apaga da caixa, não envia nada e devolve o foco à escolha de arquivos", async () => {
     await seedShared(caches, [csv("clientes.csv")], { id: SHARE_ID });
     const { api } = render();
 
     await userEvent.click(await screen.findByRole("button", { name: "Descartar" }));
 
-    expect(screen.queryByRole("region", { name: "Arquivos recebidos" })).toBeNull();
+    await waitFor(() => {
+      expect(screen.queryByRole("region", { name: "Arquivos recebidos" })).toBeNull();
+    });
+    expect(screen.getByLabelText("Escolher arquivos")).toHaveFocus();
+    expect(await peekSharedNames(caches, SHARE_ID, Date.now())).toBe("expired");
     expect(uploadRequests(api.requests)).toEqual([]);
   });
 
@@ -83,6 +110,8 @@ describe("Bancada aberta pelo compartilhamento", () => {
     expect(await within(list).findByText("clientes.csv")).toBeVisible();
     expect(within(list).getByText("pedidos.csv")).toBeVisible();
     expect(screen.queryByRole("region", { name: "Arquivos recebidos" })).toBeNull();
+    expect(screen.getByLabelText("Escolher arquivos")).toHaveFocus();
+    expect(await peekSharedNames(caches, SHARE_ID, Date.now())).toBe("expired");
   });
 
   it("compartilhamento sobrevive ao login", async () => {

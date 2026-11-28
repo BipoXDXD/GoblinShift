@@ -202,7 +202,10 @@ export function Workbench({
               chosenCount={entries.length}
               onFiles={batch.add}
             />
-            <SharedFilesPrompt shared={shared} />
+            <SharedFilesPrompt
+              shared={shared}
+              onDone={() => document.getElementById(FILES_FIELD_ID)?.focus()}
+            />
             {entries.length === 0 ? (
               <EmptyState
                 title={TEXT.workbench.noFilesYet}
