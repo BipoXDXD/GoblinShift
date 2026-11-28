@@ -207,7 +207,12 @@ def test_promocao_real_espera_ci_da_main_e_confere_origem_dos_artefatos() -> Non
     publish = jobs["publish-images"]
     assert publish["needs"] == "gates"
     assert publish["if"] == "needs.gates.outputs.eligible == 'true'"
-    assert publish["permissions"] == {"contents": "read", "actions": "read", "packages": "write"}
+    assert publish["permissions"] == {
+        "contents": "read",
+        "actions": "read",
+        "attestations": "read",
+        "packages": "write",
+    }
     assert "publish-images" in jobs["deploy"]["needs"]
     steps = {step["name"]: step for step in publish["steps"] if "name" in step}
     receipt = steps["Fetch the exact CI attempt receipt"]["with"]

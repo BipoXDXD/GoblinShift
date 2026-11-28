@@ -349,6 +349,16 @@ def test_exclusao_de_conta_atrasada(telemetry: Telemetry, overdue: int, fires: b
     assert bool(cause_rows(telemetry, "causa-exclusao-de-conta-atrasada", stream)) is fires
 
 
+@pytest.mark.parametrize(("overdue", "fires"), [(0, False), (1, True)])
+def test_auditoria_atrasada(telemetry: Telemetry, overdue: int, fires: bool) -> None:
+    stream = unique_stream("auditoria")
+    traces = telemetry.traces(stream)
+    traces.maintenance_cycle(audit_events_overdue=overdue)
+    traces.flush()
+
+    assert bool(cause_rows(telemetry, "causa-auditoria-atrasada", stream)) is fires
+
+
 @pytest.mark.parametrize(
     ("reserved", "fires"),
     [
@@ -429,6 +439,7 @@ def test_span_que_nao_e_da_manutencao_nao_dispara_as_causas_dela(telemetry: Tele
                 "maintenance.runs_stuck_stopping": 3,
                 "maintenance.purge_limit_reached": 1,
                 "maintenance.accounts_deletion_overdue": 1,
+                "maintenance.audit_events_overdue": 1,
                 "maintenance.missing_sweep_skipped": 1,
                 "maintenance.missing_governor_tripped": 1,
                 "maintenance.objects_marked_missing": 1,
@@ -451,6 +462,7 @@ def test_span_que_nao_e_da_manutencao_nao_dispara_as_causas_dela(telemetry: Tele
         "causa-execucao-presa",
         "causa-limitador-de-exclusoes",
         "causa-exclusao-de-conta-atrasada",
+        "causa-auditoria-atrasada",
         "causa-storage-sem-sentinela",
         "causa-limitador-de-ausentes",
         "causa-objetos-ausentes",

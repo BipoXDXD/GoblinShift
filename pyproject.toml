@@ -153,6 +153,7 @@ markers = [
     "host_python: roda também no Python do host (3.12), só com stdlib, pytest, PyYAML, cryptography, vermin e mypy",
     "real_clock: lembrete que depende da data de hoje; fora da CI de PR, roda no workflow security-txt.yml",
     "arte: precisa de Blender e ImageMagick locais; fora do CI",
+    "oasdiff: roda o oasdiff da imagem fixada em scripts/openapi-breaking.sh (precisa de Docker)",
 ]
 
 # Fitness functions da arquitetura (docs/GoblinShiftPlan.md, seção 3.2).

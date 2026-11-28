@@ -80,7 +80,8 @@ jobs:
         # sob runsc, que depende deste; aqui ficariam minutos acima do orçamento.
         # `--fail-on-skip`: teste pulado reprova (tests/skip_guard.py). O que só roda como root fica
         # fora daqui (`needs_root`) e roda no passo seguinte. Os da arte (`arte`) precisam de Blender
-        # e ImageMagick locais e não rodam na CI.
+        # e ImageMagick locais e não rodam na CI. Os do `oasdiff` rodam aqui mesmo: baixam a imagem
+        # fixada em scripts/openapi-breaking.sh e levam segundos.
         run: uv run pytest --fail-on-skip -m "not openobserve and not executor_image and not needs_root and not real_clock and not arte"
       - name: Testes que exigem root (runner descartável, sudo sem senha)
         # Política nativa de imagens e troca de UID na área de trabalho do executor-ctl. O runner
@@ -177,6 +178,14 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
+          # O primeiro pai traz a spec anterior para o oasdiff (ADR 061).
+          fetch-depth: 2
+      # No pull_request, HEAD é o merge sintético e HEAD^1 é a ponta da main; no push da main,
+      # HEAD^1 é a main anterior. Quebra aceita só com ADR em docs/api/quebras-aceitas.txt.
+      - name: Contrato /api/v1 só aditivo (oasdiff breaking contra o primeiro pai)
+        run: |
+          git show HEAD^1:web/openapi/openapi.json > "$RUNNER_TEMP/openapi-base.json"
+          ./scripts/openapi-breaking.sh "$RUNNER_TEMP/openapi-base.json" web/openapi/openapi.json
       # Instala exatamente a versão de .python-version, sem depender do catálogo embutido no uv.
       - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
         with:
@@ -487,6 +496,12 @@ jobs:
     name: Imagem
     runs-on: ubuntu-24.04
     timeout-minutes: 30
+    # OIDC e escrita de atestado no nível do job, não do workflow; o atestado sai só no push
+    # (#442, 68c; D10).
+    permissions:
+      contents: read
+      id-token: write
+      attestations: write
     outputs:
       digest: ${{ steps.build.outputs.digest }}
       artifact: ${{ steps.layout.outputs.artifact-id }}
@@ -524,6 +539,16 @@ jobs:
           scripts/ci-oci.sh registry
           scripts/ci-oci.sh stage app "$INDEX_DIGEST" "$RUNNER_TEMP/oci-app"
           scripts/ci-oci.sh scan app "$INDEX_DIGEST"
+      # Proveniência do índice que passou no scan, ligada a este run; o publish-images do
+      # coolify.yml confere o atestado antes de gravar no GHCR. Sem push ao registro: a imagem
+      # só chega ao GHCR pelo publish-images, e o atestado fica na API de atestados do GitHub.
+      - name: Atestar a proveniência do índice
+        if: github.event_name == 'push'
+        uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8 # v4.2.2
+        with:
+          subject-name: ghcr.io/bipoxdxd/goblinshift
+          subject-digest: ${{ steps.build.outputs.digest }}
+          push-to-registry: false
       - id: layout
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
@@ -536,6 +561,12 @@ jobs:
     name: Imagem do executor
     runs-on: ubuntu-24.04
     timeout-minutes: 60
+    # OIDC e escrita de atestado no nível do job, não do workflow; o atestado sai só no push
+    # (#442, 68c; D10).
+    permissions:
+      contents: read
+      id-token: write
+      attestations: write
     outputs:
       digest: ${{ steps.build.outputs.digest }}
       artifact: ${{ steps.layout.outputs.artifact-id }}
@@ -570,6 +601,13 @@ jobs:
           scripts/ci-oci.sh registry
           scripts/ci-oci.sh stage executor "$INDEX_DIGEST" "$RUNNER_TEMP/oci-executor"
           scripts/ci-oci.sh scan executor "$INDEX_DIGEST"
+      - name: Atestar a proveniência do índice
+        if: github.event_name == 'push'
+        uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8 # v4.2.2
+        with:
+          subject-name: ghcr.io/bipoxdxd/goblinshift-executor
+          subject-digest: ${{ steps.build.outputs.digest }}
+          push-to-registry: false
       - id: layout
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
@@ -582,6 +620,12 @@ jobs:
     name: Imagem do Nginx com a SPA
     runs-on: ubuntu-24.04
     timeout-minutes: 30
+    # OIDC e escrita de atestado no nível do job, não do workflow; o atestado sai só no push
+    # (#442, 68c; D10).
+    permissions:
+      contents: read
+      id-token: write
+      attestations: write
     outputs:
       digest: ${{ steps.build.outputs.digest }}
       artifact: ${{ steps.layout.outputs.artifact-id }}
@@ -616,6 +660,13 @@ jobs:
           scripts/ci-oci.sh registry
           scripts/ci-oci.sh stage web "$INDEX_DIGEST" "$RUNNER_TEMP/oci-web"
           scripts/ci-oci.sh scan web "$INDEX_DIGEST"
+      - name: Atestar a proveniência do índice
+        if: github.event_name == 'push'
+        uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8 # v4.2.2
+        with:
+          subject-name: ghcr.io/bipoxdxd/goblinshift-web
+          subject-digest: ${{ steps.build.outputs.digest }}
+          push-to-registry: false
       - id: layout
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:

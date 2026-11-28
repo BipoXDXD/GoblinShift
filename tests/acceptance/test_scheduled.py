@@ -2,7 +2,8 @@
 
 O script só roda na VPS, como root. Aqui `docker`, `python3` e `curl` são falsos que registram,
 numa única lista, cada chamada na ordem em que aconteceu; o `curl` registra a URL que leu do
-stdin, que é por onde ela passa (deploy/backup/lib.sh).
+stdin, que é por onde ela passa (deploy/backup/lib.sh). A trava da publicação é um arquivo do
+tmp_path e o `flock` é o de verdade.
 """
 
 import configparser
@@ -12,6 +13,8 @@ import shutil
 import signal
 import subprocess
 import time
+from collections.abc import Iterator
+from contextlib import contextmanager
 from pathlib import Path
 
 import pytest
@@ -33,15 +36,39 @@ CHECK_URL = "https://hc-ping.com/0b1c2d3e-CANARY-aceitacao"
 WORKER = "w0rk3r"
 SCRIPT_TIMEOUT_S = 30
 SIGTERM_EXIT = 128 + signal.SIGTERM
+# EX_TEMPFAIL: a trava da publicação estava ocupada ou ausente e nada foi tocado.
+LOCK_BUSY_EXIT = 75
+# Folga do TimeoutStartSec sobre o pior caso calculado, para o pull da imagem das sondas.
+PULL_ALLOWANCE_S = 15 * 60
+# Folga da tolerância do check semanal sobre sorteio + prazo do serviço.
+GRACE_MARGIN_MIN = 30
+# /proc/uptime: abaixo de 30 min o script espera o worker religar; acima, segue como sempre.
+JUST_BOOTED_S = 60
+LONG_AFTER_BOOT_S = 99999
 
 FAKE_DOCKER = """#!/bin/sh
+# O marcador do primeiro `start` lento nasce antes do registro: o teste sinaliza assim que vê a
+# chamada no registro, e o `start` repetido pelo trap precisa achar o marcador para não dormir
+# de novo.
+slow_start=
+if [ "$1" = start ] && [ -n "$FAKE_START_SLEEP_S" ] && [ ! -e "$FAKE_CALLS.start" ]; then
+  : >"$FAKE_CALLS.start"
+  slow_start=1
+fi
 echo "docker $*" >>"$FAKE_CALLS"
 case "$1" in
-  ps) [ -n "$FAKE_WORKER" ] && echo "$FAKE_WORKER"; exit "${FAKE_PS_RC:-0}" ;;
+  ps)
+    # O worker só aparece a partir da consulta FAKE_WORKER_FROM_PS (o religamento da máquina).
+    n=$(($(cat "$FAKE_CALLS.ps" 2>/dev/null || echo 0) + 1))
+    echo "$n" >"$FAKE_CALLS.ps"
+    if [ -n "$FAKE_WORKER" ] && [ "$n" -ge "${FAKE_WORKER_FROM_PS:-1}" ]; then
+      echo "$FAKE_WORKER"
+    fi
+    exit "${FAKE_PS_RC:-0}"
+    ;;
   stop) sleep "${FAKE_STOP_SLEEP_S:-0}"; exit "${FAKE_STOP_RC:-0}" ;;
   start)
-    if [ -n "$FAKE_START_SLEEP_S" ] && [ ! -e "$FAKE_CALLS.start" ]; then
-      : >"$FAKE_CALLS.start"
+    if [ -n "$slow_start" ]; then
       sleep "$FAKE_START_SLEEP_S"
     fi
     exit "${FAKE_START_RC:-0}"
@@ -80,6 +107,11 @@ echo "python3 $* (em $(basename "$PWD"))" >>"$FAKE_CALLS"
 sleep "${FAKE_ACCEPTANCE_SLEEP_S:-0}"
 exit "${FAKE_ACCEPTANCE_RC:-0}"
 """
+# O python3 que confere, durante a aceitação, se a trava da publicação continua com o script.
+FAKE_PYTHON_PROBING_LOCK = """#!/bin/sh
+if flock -n "$ACCEPTANCE_RELEASE_LOCK" true; then trava=livre; else trava=ocupada; fi
+echo "python3 trava $trava" >>"$FAKE_CALLS"
+"""
 FAKE_CURL = """#!/bin/sh
 echo "curl-argv $*" >>"$FAKE_ARGV"
 echo "curl $(sed -n 's/^url = "\\(.*\\)"$/\\1/p')" >>"$FAKE_CALLS"
@@ -101,6 +133,8 @@ def fakes(tmp_path: Path) -> Path:
         command = bin_dir / name
         command.write_text(body)
         command.chmod(0o755)
+    (tmp_path / "release.lock").touch()
+    (tmp_path / "uptime").write_text(f"{LONG_AFTER_BOOT_S}.42 1.00\n")
     return tmp_path
 
 
@@ -110,6 +144,8 @@ def script_env(fakes: Path, url: str | None, worker: str) -> dict[str, str]:
         "FAKE_CALLS": str(fakes / "calls"),
         "FAKE_ARGV": str(fakes / "argv"),
         "FAKE_WORKER": worker,
+        "ACCEPTANCE_RELEASE_LOCK": str(fakes / "release.lock"),
+        "ACCEPTANCE_PROC_UPTIME": str(fakes / "uptime"),
     }
     if url is not None:
         env["ACCEPTANCE_HEALTHCHECK_URL"] = url
@@ -122,10 +158,12 @@ def scheduled(
     url: str | None = CHECK_URL,
     worker: str = WORKER,
     running: str = "true",
+    extra_env: dict[str, str] | None = None,
     **rc: int,
 ) -> tuple[subprocess.CompletedProcess[str], list[str]]:
     env = {
         **script_env(fakes, url, worker),
+        **(extra_env or {}),
         "FAKE_RUNNING": running,
         **{f"FAKE_{name.upper()}_RC": str(code) for name, code in rc.items()},
     }
@@ -147,13 +185,15 @@ def interrupted(fakes: Path, *, reached: str, group: bool, **env: str) -> tuple[
     O systemd sinaliza o cgroup inteiro (`group`); o sinal só no bash cobre o instante entre dois
     comandos. O novo grupo de processos deixa o sinal longe do pytest.
     """
-    process = subprocess.Popen(  # noqa: S603 - script do repositório
-        ["bash", str(SCRIPT)],  # noqa: S607 - o bash do PATH, como na unit
-        env={**script_env(fakes, CHECK_URL, WORKER), **env},
-        stdout=subprocess.DEVNULL,
-        stderr=subprocess.DEVNULL,
-        start_new_session=True,
-    )
+    worker = env.pop("FAKE_WORKER", WORKER)
+    with (fakes / "stderr").open("w") as stderr:
+        process = subprocess.Popen(  # noqa: S603 - script do repositório
+            ["bash", str(SCRIPT)],  # noqa: S607 - o bash do PATH, como na unit
+            env={**script_env(fakes, CHECK_URL, worker), **env},
+            stdout=subprocess.DEVNULL,
+            stderr=stderr,
+            start_new_session=True,
+        )
     calls = fakes / "calls"
     deadline = time.monotonic() + SCRIPT_TIMEOUT_S
     while not (calls.exists() and reached in calls.read_text()):
@@ -287,6 +327,27 @@ def test_sigterm_no_cliente_do_start_repete_o_religamento(fakes: Path) -> None:
     ]
 
 
+def test_start_lento_fica_marcado_antes_de_a_chamada_aparecer(fakes: Path) -> None:
+    # O teste do SIGTERM sinaliza assim que vê a chamada no registro: se o marcador do start lento
+    # viesse depois, o start repetido pelo trap dormiria os 30 s inteiros. Com o registro numa FIFO
+    # sem leitor, o fake trava ao abri-lo, e só a ordem decide se o marcador já existe nesse ponto.
+    calls = fakes / "calls"
+    os.mkfifo(calls)
+    process = subprocess.Popen(  # noqa: S603 - fake do próprio teste
+        [str(fakes / "bin" / "docker"), "start", WORKER],
+        env={**script_env(fakes, CHECK_URL, WORKER), "FAKE_START_SLEEP_S": "0"},
+    )
+    try:
+        deadline = time.monotonic() + 5
+        while not (fakes / "calls.start").exists() and time.monotonic() < deadline:
+            time.sleep(0.01)
+        assert (fakes / "calls.start").exists()
+    finally:
+        with calls.open() as reader:
+            reader.read()
+        process.wait(timeout=SCRIPT_TIMEOUT_S)
+
+
 @pytest.mark.parametrize("state", ["false", ""])
 def test_worker_que_nao_ficou_rodando_reprova_mesmo_com_o_start_aceito(
     fakes: Path, state: str
@@ -315,6 +376,163 @@ def test_lista_de_workers_ilegivel_reprova_sem_rodar_a_aceitacao(fakes: Path) ->
 
     assert result.returncode == 1
     assert calls == [f"curl {CHECK_URL}/start", worker_lookup(), f"curl {CHECK_URL}/fail"]
+
+
+@contextmanager
+def release_lock_held(path: Path) -> Iterator[None]:
+    """Segura a trava como o receptor da publicação: outro processo, `flock` exclusivo.
+
+    Um processo só (o `sleep` herda o descritor), para que matá-lo solte a trava e feche o pipe.
+    """
+    holder = subprocess.Popen(  # noqa: S603 - script fixo
+        [  # noqa: S607 - o bash e o flock do PATH, como na unit
+            "bash",
+            "-c",
+            'exec 9>>"$1" && flock 9 && echo segurando && exec sleep 60',
+            "_",
+            str(path),
+        ],
+        stdout=subprocess.PIPE,
+        text=True,
+    )
+    try:
+        assert holder.stdout is not None
+        assert holder.stdout.readline().strip() == "segurando"
+        yield
+    finally:
+        holder.kill()
+        holder.communicate(timeout=SCRIPT_TIMEOUT_S)
+
+
+def test_trava_ocupada_nao_para_o_worker(fakes: Path) -> None:
+    # Uma publicação em curso recriaria worker e manutenção no meio das sondas: o script espera
+    # até o prazo e desiste sem tocar em nada.
+    with release_lock_held(fakes / "release.lock"):
+        result, calls = scheduled(fakes, extra_env={"ACCEPTANCE_LOCK_WAIT_S": "0.5"})
+
+    assert result.returncode == LOCK_BUSY_EXIT
+    assert "publicação" in result.stderr
+    assert calls == [f"curl {CHECK_URL}/fail"]
+
+
+def test_trava_ausente_nao_para_o_worker(fakes: Path) -> None:
+    (fakes / "release.lock").unlink()
+
+    result, calls = scheduled(fakes)
+
+    assert result.returncode == LOCK_BUSY_EXIT
+    assert calls == [f"curl {CHECK_URL}/fail"]
+
+
+def test_trava_liberada_dentro_do_prazo_segue_com_o_teste(fakes: Path) -> None:
+    # O `flock` do script passa por um registrador: a trava só é solta depois que o script já
+    # pediu a trava com prazo, sem depender de sleep.
+    real_flock = shutil.which("flock")
+    assert real_flock is not None
+    shim = fakes / "bin" / "flock"
+    shim.write_text(f'#!/bin/sh\necho "flock $*" >>"$FAKE_CALLS"\nexec {real_flock} "$@"\n')
+    shim.chmod(0o755)
+    calls_file = fakes / "calls"
+    with release_lock_held(fakes / "release.lock"):
+        process = subprocess.Popen(  # noqa: S603 - script do repositório
+            ["bash", str(SCRIPT)],  # noqa: S607 - o bash do PATH, como na unit
+            env={**script_env(fakes, CHECK_URL, WORKER), "ACCEPTANCE_LOCK_WAIT_S": "20"},
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.PIPE,
+            text=True,
+        )
+        deadline = time.monotonic() + SCRIPT_TIMEOUT_S
+        while not (calls_file.exists() and "flock -w 20 9" in calls_file.read_text()):
+            assert time.monotonic() < deadline, "o script não pediu a trava"
+            time.sleep(0.01)
+        assert f"curl {CHECK_URL}/start" not in calls_file.read_text()
+    _, stderr = process.communicate(timeout=SCRIPT_TIMEOUT_S)
+    calls = calls_file.read_text().splitlines()
+
+    assert process.returncode == 0, stderr
+    assert calls[:2] == ["flock -w 20 9", f"curl {CHECK_URL}/start"]
+    assert "python3 -E -s -B -m acceptance.run (em deploy)" in calls
+
+
+def test_trava_livre_e_segurada_durante_o_teste(fakes: Path) -> None:
+    (fakes / "bin" / "python3").write_text(FAKE_PYTHON_PROBING_LOCK)
+
+    result, calls = scheduled(fakes)
+
+    assert result.returncode == 0, result.stderr
+    assert "python3 trava ocupada" in calls
+
+
+def booted(fakes: Path, seconds: int) -> None:
+    (fakes / "uptime").write_text(f"{seconds}.17 3.00\n")
+
+
+def test_logo_depois_do_boot_espera_o_worker_aparecer(fakes: Path) -> None:
+    # Persistent=true roda o teste perdido logo depois do boot: o worker pode ainda não ter subido.
+    booted(fakes, JUST_BOOTED_S)
+
+    result, calls = scheduled(
+        fakes,
+        extra_env={"FAKE_WORKER_FROM_PS": "2", "ACCEPTANCE_WORKER_POLL_S": "0"},
+    )
+
+    assert result.returncode == 0, result.stderr
+    assert calls.count(worker_lookup()) >= 2
+    stop = calls.index(f"docker stop --time=30 {WORKER}")
+    assert stop < calls.index("python3 -E -s -B -m acceptance.run (em deploy)")
+
+
+@pytest.mark.parametrize(
+    "uptime", [f"{LONG_AFTER_BOOT_S}.17 3.00\n", None], ids=["longe", "ilegivel"]
+)
+def test_longe_do_boot_ou_uptime_ilegivel_nao_espera(fakes: Path, uptime: str | None) -> None:
+    if uptime is None:
+        (fakes / "uptime").unlink()
+    else:
+        (fakes / "uptime").write_text(uptime)
+
+    result, calls = scheduled(
+        fakes,
+        extra_env={"FAKE_WORKER_FROM_PS": "2", "ACCEPTANCE_WORKER_POLL_S": "0"},
+    )
+
+    assert result.returncode == 0, result.stderr
+    assert calls.count(worker_lookup()) == 1
+    assert f"docker stop --time=30 {WORKER}" not in calls
+
+
+def test_worker_que_nao_aparece_no_prazo_segue_sem_parar(fakes: Path) -> None:
+    booted(fakes, JUST_BOOTED_S)
+
+    result, calls = scheduled(
+        fakes,
+        worker="",
+        extra_env={"ACCEPTANCE_WORKER_WAIT_S": "1", "ACCEPTANCE_WORKER_POLL_S": "0.2"},
+    )
+
+    assert result.returncode == 0, result.stderr
+    assert calls.count(worker_lookup()) >= 2
+    assert not [call for call in calls if call.startswith("docker stop")]
+    assert "python3 -E -s -B -m acceptance.run (em deploy)" in calls
+    assert "worker" in result.stderr
+
+
+@pytest.mark.parametrize("group", [True, False], ids=["cgroup", "so-o-bash"])
+def test_sigterm_na_espera_depois_do_boot_sai_sem_tocar_no_worker(fakes: Path, group: bool) -> None:
+    booted(fakes, JUST_BOOTED_S)
+
+    code, calls = interrupted(
+        fakes,
+        reached=worker_lookup(),
+        group=group,
+        FAKE_WORKER_FROM_PS="1000",
+        ACCEPTANCE_WORKER_POLL_S="0.2",
+    )
+
+    assert code == SIGTERM_EXIT
+    assert not [c for c in calls if c.startswith(("docker stop", "docker start", "python3"))]
+    assert calls[-1] == f"curl {CHECK_URL}/fail"
+    assert "não apareceu" not in (fakes / "stderr").read_text()
 
 
 def test_sem_a_url_nao_roda_nada(fakes: Path) -> None:
@@ -399,11 +617,34 @@ def test_servico_root_so_tem_as_capabilities_das_sondas() -> None:
         assert service[directive] == "yes", directive
 
 
-def test_servico_tem_prazo_acima_das_sondas() -> None:
-    # A sonda de disco tem até 900 s e as outras somam 720 s, fora o pull da imagem.
-    service = unit(SERVICE)["Service"]
+def worst_case_run_s() -> int:
+    """Pior caso de uma rodada, das constantes do script e do run.py, fora o pull da imagem.
 
-    assert service["TimeoutStartSec"] == "1h"
+    Espera pela trava, espera pelo worker depois do boot, parada do worker e da manutenção e o
+    prazo de cada sonda.
+    """
+    script = SCRIPT.read_text()
+    run_py = (ACCEPTANCE_DIR / "run.py").read_text()
+
+    def default(name: str) -> int:
+        match = re.search(rf'^{name}="\$\{{\w+:-(\d+)\}}"$', script, re.M)
+        assert match is not None, name
+        return int(match[1])
+
+    worker_stop = re.search(r"^WORKER_STOP_S=(\d+)$", script, re.M)
+    maintenance_stop = re.search(r"^MAINTENANCE_STOP_S = (\d+)$", run_py, re.M)
+    probes = [int(s) for s in re.findall(r'run_probe\(host, "\w+", timeout_s=(\d+)\)', run_py)]
+    assert worker_stop is not None
+    assert maintenance_stop is not None
+    assert len(probes) == 6, probes
+    stops = int(worker_stop[1]) + int(maintenance_stop[1])
+    return default("LOCK_WAIT_S") + default("WORKER_WAIT_S") + stops + sum(probes)
+
+
+def test_servico_tem_prazo_acima_do_pior_caso_com_folga_para_o_pull() -> None:
+    timeout = _minutes_of(unit(SERVICE)["Service"]["TimeoutStartSec"]) * 60
+
+    assert timeout >= worst_case_run_s() + PULL_ALLOWANCE_S
 
 
 def test_timer_e_semanal_com_jitter_e_recupera_execucao_perdida() -> None:
@@ -439,10 +680,27 @@ def test_runbook_tem_o_check_semanal_com_periodo_de_7_dias() -> None:
     runbook = (ROOT / "deploy" / "openobserve" / "README.md").read_text()
 
     assert re.search(
-        r"^\| `aceitação semanal` \| healthchecks\.io \| 7 dias / 2 h \|", runbook, re.M
+        r"^\| `aceitação semanal` \| healthchecks\.io \| 7 dias / \d+ h \|", runbook, re.M
     )
     assert "aceitação diária" not in runbook
     assert "aceitação diária" not in (ROOT / "README.md").read_text()
+
+
+def test_tolerancia_do_check_semanal_cobre_o_sorteio_e_o_prazo_do_servico() -> None:
+    # O sucesso desta semana pode chegar até sorteio + prazo do serviço depois do da semana
+    # passada (que pode ter saído logo no começo da janela).
+    match = re.search(
+        r"^\| `aceitação semanal` \| healthchecks\.io \| 7 dias / (\d+) h \|",
+        (ROOT / "deploy" / "openobserve" / "README.md").read_text(),
+        re.M,
+    )
+    assert match is not None
+    timer = unit(TIMER)["Timer"]
+    service = unit(SERVICE)["Service"]
+    latest = _minutes_of(timer["RandomizedDelaySec"]) + _minutes_of(service["TimeoutStartSec"])
+
+    assert int(match[1]) * 60 >= latest + GRACE_MARGIN_MIN
+    assert f"7 dias, tolerância de {match[1]} h" in (ROOT / "README.md").read_text()
 
 
 def unit_at(path: Path) -> configparser.ConfigParser:
