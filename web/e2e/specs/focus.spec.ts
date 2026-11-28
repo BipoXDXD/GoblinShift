@@ -93,6 +93,9 @@ test("Oficina: o Tab segue a leitura, do pular para o conteúdo aos cartões @ke
     "Histórico",
     "Acesso",
     "Tema Sistema",
+    // O primeiro uso vem antes do palco na ordem do DOM (HomePage): a um clique no celular.
+    "Testar com um exemplo",
+    "ou escolha uma receita",
     // O seletor do elenco do palco 3D (ADR 038); sem GPU, como no CI, a cena não monta e o palco
     // e os botões Girar e Pose inicial não entram no Tab.
     "Rúbia",
@@ -106,6 +109,8 @@ test("Oficina: o Tab segue a leitura, do pular para o conteúdo aos cartões @ke
     "Abrir a Bancada da Downloads Detox",
     "Abrir a Bancada da PDF Press",
     "Abrir a Bancada da Media Mill",
+    // O "Primeira vez?" das execuções recentes, que a API falsa começa vazias.
+    "Teste com um arquivo de exemplo.",
     // O rodapé vem depois de todo o conteúdo.
     "Termos de Uso",
     "Aviso de Privacidade",
