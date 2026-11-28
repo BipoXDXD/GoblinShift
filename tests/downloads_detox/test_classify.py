@@ -248,3 +248,17 @@ def test_v1_nao_reconhece_pdf_dentro_de_png() -> None:
     assert classify(io.BytesIO(samples.pdf()), "a.png", V1_FORMATS) == Refusal(
         "o conteúdo não tem a assinatura de PNG"
     )
+
+
+@pytest.mark.parametrize(
+    ("name", "data", "label"),
+    [
+        pytest.param("a.webp", b"RIFF", "WebP", id="riff-sozinho"),
+        pytest.param("a.pdf", b"%PDF", "PDF", id="pdf-sem-hifen"),
+        pytest.param("a.gif", b"GIF8", "GIF", id="gif-truncado"),
+    ],
+)
+def test_assinatura_truncada_e_recusada(name: str, data: bytes, label: str) -> None:
+    assert classify(io.BytesIO(data), name, V2_FORMATS) == Refusal(
+        f"o conteúdo não tem a assinatura de {label}"
+    )

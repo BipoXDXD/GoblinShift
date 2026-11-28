@@ -3,6 +3,7 @@
 Só biblioteca padrão: o Detox classifica e copia bytes, nunca decodifica conteúdo.
 """
 
+from goblinshift.processing.downloads_detox.classify import V1_FORMATS, V2_FORMATS
 from goblinshift.processing.downloads_detox.params import (
     DEFAULT_NAME_PREFIX,
     MAX_NAME_PREFIX_CHARS,
@@ -27,6 +28,8 @@ __all__ = [
     "MAX_NAME_PREFIX_CHARS",
     "MAX_TOTAL_INPUT_BYTES",
     "RECIPE_ID",
+    "V1_FORMATS",
+    "V2_FORMATS",
     "VERSION",
     "VERSION_2",
     "DownloadsDetox",

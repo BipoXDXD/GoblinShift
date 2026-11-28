@@ -1,11 +1,11 @@
 """Classificação de uma entrada por assinatura, extensão e UTF-8 incremental (1.4).
 
-Nada é decodificado nem aberto: imagens, PDF e ZIP são reconhecidos pelos primeiros bytes (só o
-primeiro bloco lido), e texto
-por uma passada do decodificador UTF-8. A extensão tem de estar na lista e ser coerente com a
-assinatura; incoerência é recusa, nunca adivinhação (A11). ZIP é opaco: um JAR, APK, DOCX ou
-XLSX chamado `.zip` passa como ZIP, porque só abrindo o arquivo daria para distingui-los. PDF
-também é opaco: JavaScript, anexos e formulários só se veem abrindo, e isso é do PDF Press.
+Nada é decodificado nem aberto: imagens, PDF e ZIP são reconhecidos pelos primeiros bytes, só
+no primeiro bloco lido, e texto por uma passada do decodificador UTF-8. A extensão tem de estar
+entre as aceitas pela versão e ser coerente com a assinatura; incoerência é recusa, nunca
+adivinhação (A11). ZIP é opaco: um JAR, APK, DOCX ou XLSX chamado `.zip` passa como ZIP, porque
+só abrindo o arquivo daria para distingui-los. PDF também é opaco: JavaScript, anexos e
+formulários só se veem abrindo, e isso é do PDF Press.
 """
 
 import codecs

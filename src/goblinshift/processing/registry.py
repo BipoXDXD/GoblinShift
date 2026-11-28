@@ -12,8 +12,7 @@ from typing import Protocol
 
 from goblinshift.processing import csv_janitor, downloads_detox, image_forge, media_mill, pdf_press
 from goblinshift.processing.csv_janitor import recipe as csv_janitor_recipe
-from goblinshift.processing.downloads_detox import DownloadsDetox
-from goblinshift.processing.downloads_detox.classify import V2_FORMATS
+from goblinshift.processing.downloads_detox import V1_FORMATS, V2_FORMATS, DownloadsDetox
 from goblinshift.processing.image_forge.recipe import ImageForgeV1
 from goblinshift.processing.media_mill.recipe import MediaMillV1
 from goblinshift.processing.pdf_press.recipe import PdfPressV1
@@ -58,7 +57,7 @@ _IMAGE_FORGE_V1: _Bound[image_forge.Params] = _Bound(
     image_forge.params_from_mapping, ImageForgeV1()
 )
 _DOWNLOADS_DETOX_V1: _Bound[downloads_detox.Params] = _Bound(
-    downloads_detox.params_from_mapping, DownloadsDetox()
+    downloads_detox.params_from_mapping, DownloadsDetox(accepted=V1_FORMATS)
 )
 # Mesmos parâmetros nas duas versões; a v2 muda só os formatos aceitos.
 _DOWNLOADS_DETOX_V2: _Bound[downloads_detox.Params] = _Bound(
