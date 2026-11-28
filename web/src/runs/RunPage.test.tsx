@@ -20,6 +20,7 @@ import { TEXT } from "../text";
 await preloadRoutes(`/execucoes/${RUN_ID}`, "/termos");
 
 const ARTIFACT_ID = "7d3c2a1e-0000-4000-8000-0000000000aa";
+const PACKAGE_ID = "7d3c2a1e-0000-4000-8000-0000000000ab";
 
 const publishedResults = {
   published: true,
@@ -98,8 +99,6 @@ describe("Execução", () => {
 
     const link = await screen.findByRole("link", { name: "Baixar clientes.csv" });
     expect(link).toHaveAttribute("href", `/api/v1/artifacts/${ARTIFACT_ID}/download`);
-    // Sem `download`: o `attachment` da API decide, e a navegação que falha volta com `?falha=`.
-    expect(link).not.toHaveAttribute("download");
     expect(link).toHaveClass("min-h-11");
     const results = screen.getByRole("region", { name: "Resultados" });
     expect(within(results).getByText(/arquivo processado/)).toBeInTheDocument();
@@ -128,7 +127,7 @@ describe("Execução", () => {
       await screen.findByRole("link", {
         name: "Baixar resultado.zip (pacote com todos os arquivos)",
       }),
-    ).not.toHaveAttribute("download");
+    ).toBeVisible();
   });
 
   it("concluída sem arquivos publicados mostra o estado vazio", async () => {
@@ -595,11 +594,17 @@ describe("falha do download que volta à tela", () => {
     expect(screen.queryByRole("alert")).toBeNull();
   });
 
-  it("tira ?falha= da URL e o aviso some ao clicar em Baixar", async () => {
+  it("tira ?falha= da URL e mantém o aviso", async () => {
     const { router } = setupSucceeded(`/execucoes/${RUN_ID}?falha=GONE`);
 
     expect(await screen.findByRole("alert")).toBeVisible();
     expect(currentUrl(router)).toBe(`/execucoes/${RUN_ID}`);
+  });
+
+  it("o aviso da falha some ao clicar em Baixar", async () => {
+    setupSucceeded(`/execucoes/${RUN_ID}?falha=GONE`);
+
+    await screen.findByRole("alert");
     // O jsdom não navega: o clique só precisa chegar ao React, sem tentar sair da página.
     const blockNavigation = (event: Event) => {
       event.preventDefault();
@@ -613,12 +618,29 @@ describe("falha do download que volta à tela", () => {
     expect(screen.queryByRole("alert")).toBeNull();
   });
 
-  it("o link de download navega sem o atributo download", async () => {
-    setupSucceeded(`/execucoes/${RUN_ID}`);
-
-    expect(await screen.findByRole("link", { name: /^Baixar clientes\.csv/ })).not.toHaveAttribute(
-      "download",
+  it("os links de download navegam sem o atributo download", async () => {
+    setup(
+      () => jsonResponse(runBody({ status: "succeeded" })),
+      () =>
+        jsonResponse({
+          ...publishedResults,
+          artifacts: [
+            {
+              artifact_id: PACKAGE_ID,
+              logical_name: "pacote",
+              role: "package",
+              file_name: "resultado.zip",
+              availability: "available",
+              source_artifact_id: null,
+            },
+            ...publishedResults.artifacts,
+          ],
+        }),
     );
+
+    // O `attachment` da API decide o nome, e a navegação que falha volta com `?falha=`.
+    const links = await screen.findAllByRole("link", { name: /^Baixar / });
+    expect(links.map((link) => link.hasAttribute("download"))).toEqual([false, false]);
   });
 
   it("não tem violações do axe com o aviso", async () => {
