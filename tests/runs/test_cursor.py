@@ -24,52 +24,58 @@ POSITION = Position(
     run_id=UUID("01900000-0000-7000-8000-000000000001"),
 )
 SCOPE: dict[str, str | None] = {"recipe_id": "csv-janitor", "status": None}
+OWNER = UUID("01900000-0000-7000-8000-0000000000aa")
+OTHER = UUID("01900000-0000-7000-8000-0000000000bb")
 
 
 def test_cursor_devolve_a_posicao_codificada() -> None:
-    token = encode_cursor(POSITION, SCOPE, secret=SECRET, now=NOW)
+    token = encode_cursor(POSITION, SCOPE, owner_id=OWNER, secret=SECRET, now=NOW)
 
-    assert decode_cursor(token, SCOPE, secret=SECRET, now=NOW) == POSITION
+    assert decode_cursor(token, SCOPE, owner_id=OWNER, secret=SECRET, now=NOW) == POSITION
 
 
 def test_cursor_vale_ate_24_horas() -> None:
-    token = encode_cursor(POSITION, SCOPE, secret=SECRET, now=NOW)
+    token = encode_cursor(POSITION, SCOPE, owner_id=OWNER, secret=SECRET, now=NOW)
     last_moment = NOW + timedelta(hours=24)
 
-    assert decode_cursor(token, SCOPE, secret=SECRET, now=last_moment) == POSITION
+    assert decode_cursor(token, SCOPE, owner_id=OWNER, secret=SECRET, now=last_moment) == POSITION
 
 
 def test_cursor_vencido_e_recusado() -> None:
-    token = encode_cursor(POSITION, SCOPE, secret=SECRET, now=NOW)
+    token = encode_cursor(POSITION, SCOPE, owner_id=OWNER, secret=SECRET, now=NOW)
 
     with pytest.raises(InvalidCursorError):
-        decode_cursor(token, SCOPE, secret=SECRET, now=NOW + timedelta(hours=24, seconds=1))
+        decode_cursor(
+            token, SCOPE, owner_id=OWNER, secret=SECRET, now=NOW + timedelta(hours=24, seconds=1)
+        )
 
 
 def test_cursor_com_filtros_diferentes_e_recusado() -> None:
-    token = encode_cursor(POSITION, SCOPE, secret=SECRET, now=NOW)
+    token = encode_cursor(POSITION, SCOPE, owner_id=OWNER, secret=SECRET, now=NOW)
     other_scope = {**SCOPE, "status": "queued"}
 
     with pytest.raises(CursorScopeMismatchError):
-        decode_cursor(token, other_scope, secret=SECRET, now=NOW)
+        decode_cursor(token, other_scope, owner_id=OWNER, secret=SECRET, now=NOW)
 
 
 def test_cursor_assinado_com_outro_segredo_e_recusado() -> None:
-    token = encode_cursor(POSITION, SCOPE, secret=SECRET, now=NOW)
+    token = encode_cursor(POSITION, SCOPE, owner_id=OWNER, secret=SECRET, now=NOW)
 
     with pytest.raises(InvalidCursorError):
-        decode_cursor(token, SCOPE, secret=b"outro-segredo-de-32-bytes-......", now=NOW)
+        decode_cursor(
+            token, SCOPE, owner_id=OWNER, secret=b"outro-segredo-de-32-bytes-......", now=NOW
+        )
 
 
 def test_cursor_com_payload_adulterado_e_recusado() -> None:
-    token = encode_cursor(POSITION, SCOPE, secret=SECRET, now=NOW)
+    token = encode_cursor(POSITION, SCOPE, owner_id=OWNER, secret=SECRET, now=NOW)
     payload_b64, signature = token.split(".")
-    payload = json.loads(base64.urlsafe_b64decode(payload_b64 + "=" * (-len(payload_b64) % 4)))
+    payload = json.loads(unb64url(payload_b64))
     payload["i"] = "01900000-0000-7000-8000-000000000099"
     forged = base64.urlsafe_b64encode(json.dumps(payload).encode()).decode().rstrip("=")
 
     with pytest.raises(InvalidCursorError):
-        decode_cursor(f"{forged}.{signature}", SCOPE, secret=SECRET, now=NOW)
+        decode_cursor(f"{forged}.{signature}", SCOPE, owner_id=OWNER, secret=SECRET, now=NOW)
 
 
 @pytest.mark.parametrize(
@@ -78,7 +84,40 @@ def test_cursor_com_payload_adulterado_e_recusado() -> None:
 )
 def test_cursor_malformado_e_recusado(token: str) -> None:
     with pytest.raises(InvalidCursorError):
-        decode_cursor(token, SCOPE, secret=SECRET, now=NOW)
+        decode_cursor(token, SCOPE, owner_id=OWNER, secret=SECRET, now=NOW)
+
+
+def test_payload_do_cursor_nao_traz_o_id_da_conta() -> None:
+    token = encode_cursor(POSITION, {}, owner_id=OWNER, secret=SECRET, now=NOW)
+    body = unb64url(token.split(".")[0])
+
+    assert str(OWNER).encode() not in body
+    assert OWNER.hex.encode() not in body
+
+
+def test_cursor_de_outra_conta_e_recusado() -> None:
+    token = encode_cursor(POSITION, {}, owner_id=OWNER, secret=SECRET, now=NOW)
+
+    with pytest.raises(InvalidCursorError, match="assinatura do cursor não confere"):
+        decode_cursor(token, {}, owner_id=OTHER, secret=SECRET, now=NOW)
+
+
+def test_cursor_da_versao_anterior_e_recusado() -> None:
+    # Formato v1, emitido antes do deploy: dono no escopo em claro e HMAC só do body.
+    v1 = {**VALID_PAYLOAD, "v": 1, "f": {**SCOPE, "owner_id": str(OWNER)}}
+    body = b64url(json.dumps(v1).encode())
+    token = f"{body}.{b64url(hmac.new(SECRET, body.encode(), hashlib.sha256).digest())}"
+
+    with pytest.raises(InvalidCursorError):
+        decode_cursor(token, SCOPE, owner_id=OWNER, secret=SECRET, now=NOW)
+
+
+def test_cursor_v1_assinado_no_formato_novo_cai_na_versao() -> None:
+    # Mesmo com a assinatura nova (segredo vazado), a versão 1 não é aceita.
+    v1 = signed_payload(v=1, f={**SCOPE, "owner_id": str(OWNER)})
+
+    with pytest.raises(InvalidCursorError, match="versão de cursor desconhecida"):
+        decode_cursor(v1, SCOPE, owner_id=OWNER, secret=SECRET, now=NOW)
 
 
 def test_divergencia_de_filtros_tambem_e_cursor_invalido() -> None:
@@ -89,7 +128,7 @@ def test_divergencia_de_filtros_tambem_e_cursor_invalido() -> None:
 # --- Payload de assinatura válida: o cursor continua sendo dado externo --------------------------
 
 VALID_PAYLOAD = {
-    "v": 1,
+    "v": 2,
     "d": "desc",
     "f": SCOPE,
     "t": "2026-10-13T11:59:30.123456+00:00",
@@ -102,10 +141,15 @@ def b64url(raw: bytes) -> str:
     return base64.urlsafe_b64encode(raw).decode().rstrip("=")
 
 
+def unb64url(text: str) -> bytes:
+    return base64.urlsafe_b64decode(text + "=" * (-len(text) % 4))
+
+
 def signed(raw: bytes) -> str:
     """Token com assinatura correta, como o de um segredo vazado ou de um formato antigo."""
     body = b64url(raw)
-    return f"{body}.{b64url(hmac.new(SECRET, body.encode(), hashlib.sha256).digest())}"
+    message = OWNER.bytes + b"." + body.encode()
+    return f"{body}.{b64url(hmac.new(SECRET, message, hashlib.sha256).digest())}"
 
 
 def signed_payload(**changes: object) -> str:
@@ -118,7 +162,9 @@ def without(key: str) -> bytes:
 
 def test_payload_assinado_a_mao_e_aceito_quando_bem_formado() -> None:
     # Garante que os casos abaixo caem na regra do payload, não na conferência da assinatura.
-    assert decode_cursor(signed_payload(), SCOPE, secret=SECRET, now=NOW) == POSITION
+    assert (
+        decode_cursor(signed_payload(), SCOPE, owner_id=OWNER, secret=SECRET, now=NOW) == POSITION
+    )
 
 
 @pytest.mark.parametrize(
@@ -135,13 +181,13 @@ def test_payload_assinado_a_mao_e_aceito_quando_bem_formado() -> None:
 )
 def test_payload_assinado_fora_do_formato_e_recusado(raw: bytes, message: str) -> None:
     with pytest.raises(InvalidCursorError, match=message):
-        decode_cursor(signed(raw), SCOPE, secret=SECRET, now=NOW)
+        decode_cursor(signed(raw), SCOPE, owner_id=OWNER, secret=SECRET, now=NOW)
 
 
 @pytest.mark.parametrize(
     ("changes", "message"),
     [
-        pytest.param({"v": 2}, "versão de cursor desconhecida", id="versao-futura"),
+        pytest.param({"v": 3}, "versão de cursor desconhecida", id="versao-futura"),
         pytest.param({"x": "amanha"}, "payload do cursor inválido", id="validade-texto"),
         pytest.param({"t": 1791979200}, "payload do cursor inválido", id="data-numero"),
         pytest.param({"i": 1}, "payload do cursor inválido", id="id-numero"),
@@ -153,34 +199,40 @@ def test_campo_de_tipo_errado_no_payload_assinado_e_recusado(
     changes: dict[str, object], message: str
 ) -> None:
     with pytest.raises(InvalidCursorError, match=message):
-        decode_cursor(signed_payload(**changes), SCOPE, secret=SECRET, now=NOW)
+        decode_cursor(signed_payload(**changes), SCOPE, owner_id=OWNER, secret=SECRET, now=NOW)
 
 
 def test_cursor_de_outra_direcao_com_os_mesmos_filtros_e_recusado() -> None:
     with pytest.raises(CursorScopeMismatchError):
-        decode_cursor(signed_payload(d="asc"), SCOPE, secret=SECRET, now=NOW)
+        decode_cursor(signed_payload(d="asc"), SCOPE, owner_id=OWNER, secret=SECRET, now=NOW)
 
 
 def test_validade_em_ponto_flutuante_no_payload_assinado_e_recusada() -> None:
     with pytest.raises(InvalidCursorError, match="payload do cursor inválido"):
-        decode_cursor(signed_payload(x=1791979200.0), SCOPE, secret=SECRET, now=NOW)
+        decode_cursor(signed_payload(x=1791979200.0), SCOPE, owner_id=OWNER, secret=SECRET, now=NOW)
 
 
 @pytest.mark.parametrize(
     "version",
-    [pytest.param(True, id="booleano"), pytest.param(1.0, id="ponto-flutuante")],
+    [pytest.param(2.0, id="ponto-flutuante"), pytest.param("2", id="texto")],
 )
-def test_versao_igual_a_1_so_por_coercao_e_recusada(version: object) -> None:
+def test_versao_igual_a_2_so_por_coercao_e_recusada(version: object) -> None:
     with pytest.raises(InvalidCursorError):
-        decode_cursor(signed_payload(v=version), SCOPE, secret=SECRET, now=NOW)
+        decode_cursor(signed_payload(v=version), SCOPE, owner_id=OWNER, secret=SECRET, now=NOW)
 
 
 def test_data_sem_fuso_no_payload_assinado_e_recusada() -> None:
     with pytest.raises(InvalidCursorError):
-        decode_cursor(signed_payload(t="2026-10-13T11:59:30.123456"), SCOPE, secret=SECRET, now=NOW)
+        decode_cursor(
+            signed_payload(t="2026-10-13T11:59:30.123456"),
+            SCOPE,
+            owner_id=OWNER,
+            secret=SECRET,
+            now=NOW,
+        )
 
 
 def test_data_com_outro_fuso_conserva_o_instante() -> None:
     token = signed_payload(t="2026-10-13T08:59:30.123456-03:00")
 
-    assert decode_cursor(token, SCOPE, secret=SECRET, now=NOW) == POSITION
+    assert decode_cursor(token, SCOPE, owner_id=OWNER, secret=SECRET, now=NOW) == POSITION
