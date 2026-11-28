@@ -143,6 +143,12 @@ function gateBody({ recipe, source, uploadServices, catalog, loaded }: GateBodyI
       <Workbench
         recipe={recipe}
         form={prefilled.form}
+        systemPresets={version?.system_presets ?? []}
+        formWith={(defaults) =>
+          version === null
+            ? null
+            : recipe.formFor({ ...version, defaults: { ...version.defaults, ...defaults } })
+        }
         notice={prefilled.notice}
         sourcePreset={prefilled.preset}
         uploadServices={uploadServices}

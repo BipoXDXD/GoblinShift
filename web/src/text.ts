@@ -184,6 +184,11 @@ export const TEXT = {
   },
   workbench: {
     title: (recipe: string) => `Bancada: ${recipe}`,
+    systemPresets: {
+      title: "Ajustes prontos",
+      hint: "Preenchem o formulário; você pode mudar antes de executar.",
+      applied: (name: string) => `Ajuste pronto ${name} aplicado.`,
+    },
     backHome: "Oficina",
     filesHeading: "Arquivos de entrada",
     chooseFiles: "Escolher arquivos",

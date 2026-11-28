@@ -31,6 +31,8 @@ const catalogSchema = z.object({
 
 export type Catalog = z.infer<typeof catalogSchema>;
 export type CatalogVersion = z.infer<typeof catalogVersionSchema>;
+/** Ajuste pronto do sistema (D3): só leitura, fora dos presets da conta. */
+export type SystemPreset = CatalogVersion["system_presets"][number];
 
 export const CATALOG_QUERY_KEY = ["catalog"] as const;
 

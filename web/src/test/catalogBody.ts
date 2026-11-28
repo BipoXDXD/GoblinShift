@@ -3,9 +3,54 @@ import type { CatalogVersion } from "../catalog/api";
 // Corpo de GET /api/v1/catalog como a API o devolve hoje (só os trechos do schema que a interface
 // lê). Cada teste do Vitest parte daqui e troca o que precisa com `withVersion` (catalog.ts). Fica
 // num módulo sem Vitest porque a API falsa do E2E (e2e/support/fakeApi.ts) serve o mesmo corpo.
-// Nenhuma receita da interface lê os ajustes prontos ainda. Tipado à parte porque o `as const`
-// abaixo deixaria o `[]` somente leitura, e o tipo do catálogo é uma lista comum.
+// Só o image-forge v2 tem ajustes prontos. Tipados à parte porque o `as const` abaixo deixaria as
+// listas somente leitura, e o tipo do catálogo é uma lista comum.
 const NO_SYSTEM_PRESETS: CatalogVersion["system_presets"] = [];
+
+/** Os parâmetros resolvidos de um ajuste pronto do image-forge v2: os defaults com as trocas. */
+function imageForgePreset(changes: Readonly<Record<string, unknown>>): Record<string, unknown> {
+  return {
+    fit: "contain",
+    jpeg_background: "#FFFFFF",
+    jpeg_quality: 85,
+    make_thumbnails: false,
+    max_height: 1600,
+    max_width: 1600,
+    output_format: "preserve",
+    scale_percent: 100,
+    webp_lossless: false,
+    webp_quality: 80,
+    ...changes,
+  };
+}
+
+const IMAGE_FORGE_SYSTEM_PRESETS: CatalogVersion["system_presets"] = [
+  {
+    key: "web-1600",
+    name: "Web 1600",
+    parameters: imageForgePreset({ output_format: "webp" }),
+  },
+  {
+    key: "email-1024",
+    name: "E-mail 1024",
+    parameters: imageForgePreset({
+      max_width: 1024,
+      max_height: 1024,
+      output_format: "jpeg",
+      jpeg_quality: 80,
+    }),
+  },
+  {
+    key: "redes-1080",
+    name: "Redes 1080",
+    parameters: imageForgePreset({
+      fit: "cover",
+      max_width: 1080,
+      max_height: 1080,
+      output_format: "jpeg",
+    }),
+  },
+];
 
 export const CATALOG_BODY = {
   recipes: [
@@ -97,7 +142,7 @@ export const CATALOG_BODY = {
             webp_lossless: false,
             webp_quality: 80,
           },
-          system_presets: NO_SYSTEM_PRESETS,
+          system_presets: IMAGE_FORGE_SYSTEM_PRESETS,
           parameters_schema: {
             type: "object",
             properties: {

@@ -1,5 +1,6 @@
 import { useMutation } from "@tanstack/react-query";
 import {
+  Fragment,
   useEffect,
   useId,
   useMemo,
@@ -18,6 +19,7 @@ import { ApiError } from "../api/response";
 import type { RunCommand } from "../api/types";
 import { PATHS, runPath } from "../app/paths";
 import { GoblinIllustration } from "../art/GoblinIllustration";
+import type { SystemPreset } from "../catalog/api";
 import {
   ErrorSummary,
   formIssue,
@@ -44,12 +46,20 @@ import { useUploadBatch, type UploadEntry, type UploadServices } from "../upload
 import { orderEntries, runInputs, uploadAnnouncement, type RunInputs } from "./inputs";
 import { DeletionFailures } from "./DeletionFailures";
 import { SavePreset } from "./SavePreset";
+import { SystemPresets } from "./SystemPresets";
 import { UpdatePreset } from "./UpdatePreset";
 import { UploadEntryView } from "./UploadEntryView";
 
 const FILES_FIELD_ID = "bancada-arquivos";
 // O resumo de erros cita o campo de arquivos pelo título da seção, não pelo botão de escolher.
 const FILES_FIELD: FormField = { fieldId: FILES_FIELD_ID, label: TEXT.workbench.filesHeading };
+
+/** O último ajuste pronto aplicado; `count` remonta os campos também ao reaplicar o mesmo. */
+interface AppliedPreset {
+  readonly key: string;
+  readonly name: string;
+  readonly count: number;
+}
 
 type PendingRemoval =
   | { readonly kind: "one"; readonly localId: string; readonly name: string }
@@ -59,6 +69,10 @@ interface WorkbenchProps {
   readonly recipe: RecipeModule;
   /** Formulário com os defaults e limites da versão no catálogo. */
   readonly form: RecipeForm;
+  /** Ajustes prontos da versão (D3); lista vazia na receita sem ajustes. */
+  readonly systemPresets: readonly SystemPreset[];
+  /** O formulário da mesma versão com outros valores iniciais: o de um ajuste pronto aplicado. */
+  readonly formWith: (defaults: Readonly<Record<string, unknown>>) => RecipeForm | null;
   readonly uploadServices: UploadServices;
   /** De onde vieram os parâmetros (preset), logo abaixo do título; `null` sem aviso. */
   readonly notice?: ReactNode;
@@ -78,7 +92,9 @@ interface Submission {
  */
 export function Workbench({
   recipe,
-  form,
+  form: initialForm,
+  systemPresets,
+  formWith,
   uploadServices,
   notice = null,
   sourcePreset = null,
@@ -87,7 +103,9 @@ export function Workbench({
   const navigate = useNavigate();
   const batch = useUploadBatch(uploadServices);
   const [order, setOrder] = useState<readonly string[]>([]);
-  const [draft, setDraft] = useState<RecipeDraft<RecipeId>>(form.initialDraft);
+  const [form, setForm] = useState(initialForm);
+  const [applied, setApplied] = useState<AppliedPreset | null>(null);
+  const [draft, setDraft] = useState<RecipeDraft<RecipeId>>(initialForm.initialDraft);
   const [attempt, setAttempt] = useState(0);
   const [pendingRemoval, setPendingRemoval] = useState<PendingRemoval | null>(null);
   const focusFilesAfterRemoval = useRef(false);
@@ -148,6 +166,17 @@ export function Workbench({
       document.getElementById(FILES_FIELD_ID)?.focus();
     }
   }, [pendingRemoval]);
+
+  // Aplicar troca só o formulário: arquivos, ordem e o resultado do último envio ficam como estão.
+  const applyPreset = (preset: SystemPreset): void => {
+    const next = formWith(preset.parameters);
+    if (next === null) {
+      return;
+    }
+    setForm(next);
+    setDraft(next.initialDraft);
+    setApplied({ key: preset.key, name: preset.name, count: (applied?.count ?? 0) + 1 });
+  };
 
   const onSubmit = (event: SubmitEvent<HTMLFormElement>): void => {
     event.preventDefault();
@@ -243,11 +272,15 @@ export function Workbench({
                 <h2 id={parametersHeadingId} className={SECTION_LABEL}>
                   {TEXT.workbench.parametersHeading}
                 </h2>
-                {form.renderFields({
-                  errors: fieldErrors,
-                  onDraftChange: setDraft,
-                  inputs: readyInputs,
-                })}
+                <SystemPresets presets={systemPresets} onApply={applyPreset} />
+                {/* A key remonta só os campos, com os valores do ajuste; o resto da Bancada fica. */}
+                <Fragment key={applied === null ? "" : `${applied.key}-${String(applied.count)}`}>
+                  {form.renderFields({
+                    errors: fieldErrors,
+                    onDraftChange: setDraft,
+                    inputs: readyInputs,
+                  })}
+                </Fragment>
               </div>
             </Card>
             {/* Secundárias antes da primária: Executar fecha o conteúdo e a ordem do Tab. */}
@@ -268,7 +301,13 @@ export function Workbench({
           </div>
         </div>
         <LiveRegion
-          message={mutation.isPending ? TEXT.workbench.creatingRun : null}
+          message={
+            mutation.isPending
+              ? TEXT.workbench.creatingRun
+              : applied === null
+                ? null
+                : TEXT.workbench.systemPresets.applied(applied.name)
+          }
           visuallyHidden
         />
         <ConfirmDialog

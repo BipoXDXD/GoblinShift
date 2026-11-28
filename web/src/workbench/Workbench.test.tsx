@@ -810,6 +810,59 @@ describe("Bancada", () => {
     });
   });
 
+  it("mostra os três ajustes da versão e nenhum na receita sem ajustes", async () => {
+    const { unmount } = await setup({ recipe: "image-forge" });
+
+    const group = screen.getByRole("group", { name: "Ajustes prontos" });
+    expect(
+      within(group)
+        .getAllByRole("button")
+        .map((button) => button.textContent),
+    ).toEqual(["Web 1600", "E-mail 1024", "Redes 1080"]);
+    unmount();
+
+    await setup({ recipe: "csv-janitor" });
+    expect(screen.queryByRole("group", { name: "Ajustes prontos" })).toBeNull();
+  });
+
+  it("aplicar um ajuste pronto mantém os arquivos e anuncia", async () => {
+    const { user } = await setup({ recipe: "image-forge" });
+    await user.upload(screen.getByLabelText("Escolher arquivos"), [
+      new File(["png"], "a.png", { type: "image/png" }),
+      new File(["png"], "b.png", { type: "image/png" }),
+    ]);
+    await waitUntilSent(2);
+
+    await user.click(screen.getByRole("button", { name: "Redes 1080" }));
+
+    const list = screen.getByRole("list", { name: "Ordem de processamento" });
+    expect(list).toHaveTextContent("a.png");
+    expect(list).toHaveTextContent("b.png");
+    expect(screen.getByRole("radio", { name: "Preencher e cortar o centro" })).toBeChecked();
+    expect(screen.getByRole("textbox", { name: "Largura máxima, em pixels" })).toHaveValue("1080");
+    expect(
+      screen
+        .getAllByRole("status")
+        .some((region) => region.textContent === "Ajuste pronto Redes 1080 aplicado."),
+    ).toBe(true);
+  });
+
+  it("executar depois de aplicar envia os parâmetros do ajuste com recipe_version 2", async () => {
+    const { user, api } = await setup({ recipe: "image-forge" });
+    await user.upload(screen.getByLabelText("Escolher arquivos"), [
+      new File(["png"], "foto.png", { type: "image/png" }),
+    ]);
+    await waitUntilSent(1);
+
+    await user.click(screen.getByRole("button", { name: "E-mail 1024" }));
+    await user.click(screen.getByRole("button", { name: "Executar" }));
+
+    await screen.findByRole("heading", { level: 1, name: "Execução" });
+    const body = await bodyOf(runRequests(api.requests)[0]);
+    expect(body).toMatchObject({ recipe_id: "image-forge", recipe_version: 2 });
+    expect(body.parameters).toEqual(catalogVersion("image-forge").system_presets[1]?.parameters);
+  });
+
   it("Image Forge: erro do servidor no campo aparece no campo", async () => {
     const { user } = await setup({
       recipe: "image-forge",
