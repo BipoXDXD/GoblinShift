@@ -137,7 +137,7 @@ describe("runInputs", () => {
       runInputsWithLimits(entries, { maxInputs: 5, maxTotalBytes: 1_500, maxFileBytes: null }),
     ).toEqual({
       ok: false,
-      message: "Os arquivos somam 2 KiB; o máximo por execução é 1,5 KiB.",
+      message: "Os arquivos somam 2 KB; o máximo por execução é 1,5 KB.",
     });
   });
 });
@@ -192,7 +192,7 @@ describe("runInputs com teto por arquivo", () => {
 
     expect(runInputsWithLimits(entries, limits(1_500))).toEqual({
       ok: false,
-      message: "grande.mp4 tem 2 KiB; o máximo por arquivo nesta receita é 1,5 KiB.",
+      message: "grande.mp4 tem 2 KB; o máximo por arquivo nesta receita é 1,5 KB.",
     });
   });
 });

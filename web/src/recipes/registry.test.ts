@@ -59,7 +59,7 @@ describe("formFor", () => {
     expect(form?.inputLimits).toEqual({
       maxInputs: 100,
       maxTotalBytes: 503316480,
-      maxFileBytes: 33554432,
+      maxFileBytes: 52428800,
     });
   });
 

@@ -25,7 +25,7 @@ export function meBody(overrides: MeOverrides = {}): Schemas["MeResponse"] {
       input_bytes_per_24h: 2_000_000_000,
       storage_bytes: 5_000_000_000,
       active_runs: 1,
-      file_bytes: 33_554_432,
+      file_bytes: 52_428_800,
       video_file_bytes: 268_435_456,
       batch_files: 50,
       batch_bytes: 536_870_912,

@@ -182,8 +182,8 @@ describe("Acesso: uso e cotas", () => {
 
     const usage = await section("Uso e cotas");
     expect(usage).toHaveTextContent("Execuções nas últimas 24 horas3 de 20");
-    expect(usage).toHaveTextContent("11,9 MiB de 2 GiB");
-    expect(usage).toHaveTextContent("38,1 MiB de 4 GiB");
+    expect(usage).toHaveTextContent("11,9 MB de 2 GB");
+    expect(usage).toHaveTextContent("38,1 MB de 4 GB");
     expect(within(usage).getAllByRole("meter")).toHaveLength(3);
     expect(usage).toHaveTextContent(/A cota diária começa a liberar em 15\/10\/2026/);
     expect(within(usage).queryByText("No limite")).toBeNull();
@@ -206,8 +206,8 @@ describe("Acesso: uso e cotas", () => {
     setup();
 
     const usage = await section("Uso e cotas");
-    expect(usage).toHaveTextContent("Por arquivo32 MiB");
-    expect(usage).toHaveTextContent("Por vídeo256 MiB");
+    expect(usage).toHaveTextContent("Por arquivo50 MB");
+    expect(usage).toHaveTextContent("Por vídeo256 MB");
   });
 
   it("chama os limites de por execução, como a Bancada", async () => {
@@ -237,7 +237,7 @@ describe("Acesso: uso e cotas", () => {
 
     const usage = await section("Uso e cotas");
     expect(usage).toHaveTextContent("0 de 20");
-    expect(usage).toHaveTextContent("0 bytes de 1,9 GiB");
+    expect(usage).toHaveTextContent("0 bytes de 1,9 GB");
     expect(usage).not.toHaveTextContent("A cota diária");
   });
 
