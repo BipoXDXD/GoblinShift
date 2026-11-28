@@ -17,6 +17,11 @@ MAX_TOTAL_INPUT_BYTES = 256 * MIB
 # Objetos por documento, pelo /Size do trailer e pela contagem real: um PDF de 200 páginas comum
 # fica em poucos milhares; acima disto é tratado como bomba de objetos.
 MAX_OBJECTS_PER_DOCUMENT = 100_000
+# Bytes decodificados na compressão sem perdas (ADR 070), por stream e somados na execução: teto
+# que cabe nos 2 GiB e, com zlib nível 9 em 1 vCPU, em bem menos que os 10 min da tentativa.
+# Moram aqui, e não em `compression.py`, porque `Limits` é importado sem o pikepdf.
+MAX_STREAM_DECODED_BYTES = 64 * MIB
+MAX_RUN_DECODED_BYTES = 512 * MIB
 
 
 @dataclass(frozen=True)
@@ -27,3 +32,5 @@ class Limits:
     max_output_pages: int = MAX_OUTPUT_PAGES
     max_output_documents: int = MAX_OUTPUT_DOCUMENTS
     max_objects_per_document: int = MAX_OBJECTS_PER_DOCUMENT
+    max_stream_decoded_bytes: int = MAX_STREAM_DECODED_BYTES
+    max_run_decoded_bytes: int = MAX_RUN_DECODED_BYTES

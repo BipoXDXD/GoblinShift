@@ -3,12 +3,20 @@
 import hashlib
 import io
 import json
+import zlib
 
 import pikepdf
 import pytest
 
 from goblinshift.processing.output_dir import FileSystemOutputDir
-from goblinshift.processing.pdf_press import RECIPE_ID, Limits, Operation, PageRange, Params
+from goblinshift.processing.pdf_press import (
+    RECIPE_ID,
+    Compression,
+    Limits,
+    Operation,
+    PageRange,
+    Params,
+)
 from goblinshift.processing.pdf_press.recipe import PdfPress
 from goblinshift.processing.recipe import (
     FailureCode,
@@ -466,3 +474,98 @@ def test_documento_composto_nunca_traz_info_nem_xmp_do_catalogo(
     with pikepdf.open(work.out_dir / "merged.pdf") as pdf:
         assert "/Info" not in pdf.trailer
         assert "/Metadata" not in pdf.Root
+
+
+# --- v2: compressão sem perdas e tamanho antes/depois (ADR 070) -------------------------------
+
+LOSSLESS = Params(compression=Compression.LOSSLESS)
+
+
+def test_lossless_relata_tamanho_antes_e_depois(work: Workspace) -> None:
+    work.add("a.pdf", samples.document("a", pages=2, compress=False))
+    work.add("b.pdf", samples.document("b", compress=False))
+
+    report = work.run(LOSSLESS)
+
+    first, second = report.items
+    assert isinstance(first, ItemOk)
+    assert isinstance(second, ItemOk)
+    before = first.counts["bytes_before_compression"]
+    after = first.counts["bytes_after_compression"]
+    assert before > after == len(work.read("merged.pdf"))
+    assert set(second.counts) == {"pages", "output_pages"}
+    assert report.details["compression"] == "lossless"
+    assert {"streams_recompressed", "streams_kept"} <= set(report.details)
+
+
+def test_lossless_soma_os_documentos_do_item(work: Workspace) -> None:
+    work.add("a.pdf", samples.document("a", pages=2, compress=False))
+
+    report = work.run(Params(Operation.SPLIT, compression=Compression.LOSSLESS))
+
+    [item] = report.items
+    assert isinstance(item, ItemOk)
+    sizes = len(work.read("a-p001.pdf")) + len(work.read("a-p002.pdf"))
+    assert item.counts["bytes_after_compression"] == sizes
+
+
+def test_lossless_conta_streams_recomprimidos_e_mantidos(work: Workspace) -> None:
+    def poorly_compressed(pdf: pikepdf.Pdf) -> None:
+        content = pdf.pages[0].obj.Contents
+        content.write(zlib.compress(content.read_bytes() * 500, 0), filter=pikepdf.Name.FlateDecode)
+
+    work.add("a.pdf", samples.document("a", mutate=poorly_compressed))
+
+    report = work.run(LOSSLESS)
+
+    assert report.details["streams_recompressed"] == 1
+    assert report.details["streams_kept"] == 0
+
+
+def test_lossless_gera_object_streams_e_versao_1_5(work: Workspace) -> None:
+    work.add("a.pdf", samples.document("a", version="1.4"))
+
+    work.run(LOSSLESS)
+
+    merged = work.read("merged.pdf")
+    assert merged.startswith(b"%PDF-1.5")
+    with pikepdf.open(io.BytesIO(merged)) as pdf:
+        assert (
+            any(
+                isinstance(o, pikepdf.Stream) and o.get("/Type") == pikepdf.Name.ObjStm
+                for o in pdf.objects
+            )
+            or b"/ObjStm" in merged
+        )
+
+
+def test_sem_compressao_relatorio_igual_ao_da_v1(work: Workspace) -> None:
+    work.add("a.pdf", samples.document("a"))
+
+    report = work.run()
+
+    [item] = report.items
+    assert isinstance(item, ItemOk)
+    assert set(item.counts) == {"pages", "output_pages"}
+    assert "compression" not in report.details
+
+
+def test_lossless_continua_deterministico(
+    work: Workspace, tmp_path_factory: pytest.TempPathFactory
+) -> None:
+    other = Workspace(tmp_path_factory.mktemp("outra"))
+    for workspace in (work, other):
+        workspace.add("a.pdf", samples.document("a", pages=2, compress=False))
+        workspace.run(LOSSLESS)
+
+    assert work.read("merged.pdf") == other.read("merged.pdf")
+
+
+def test_lossless_respeita_o_teto_de_objetos(work: Workspace) -> None:
+    work.add("a.pdf", samples.document("a", mutate=samples.extra_objects(50)))
+
+    with pytest.raises(RecipeFailure) as caught:
+        work.run(LOSSLESS, recipe=PdfPress(limits=Limits(max_objects_per_document=20)))
+
+    assert caught.value.code is FailureCode.INPUT_LIMIT_EXCEEDED
+    assert work.output_paths() == []

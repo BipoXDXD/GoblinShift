@@ -15,7 +15,10 @@ Na v2 (ADR 070):
   que ela já tinha, inclusive o herdado da árvore de páginas, que o qpdf resolve ao copiar;
 - `strip_annotation_metadata`: tira autor (`/T`) e datas (`/M`, `/CreationDate`) de cada
   anotação das páginas e do `/Popup` dela; o texto da nota (`/Contents`) fica. Sem a opção, a
-  anotação fica como está. As URIs dos links ficam como estão.
+  anotação fica como está. As URIs dos links ficam como estão;
+- compressão sem perdas (com um `FlateRecompressor`): a composição é gravada primeiro num
+  contador de bytes, com as opções da v1, e esse é o tamanho "antes"; depois o Flate é
+  recomprimido e o documento é gravado com object streams (o qpdf sobe a versão para 1.5).
 
 Opções de gravação:
 - `stream_decode_level=none`: os streams vão como estão, sem descomprimir; uma bomba de
@@ -25,27 +28,45 @@ Opções de gravação:
   versão menor que a dos recursos copiados.
 """
 
-from collections.abc import Mapping
-from typing import BinaryIO
+import io
+from collections.abc import Buffer, Mapping
+from dataclasses import dataclass
+from typing import BinaryIO, cast
 
 import pikepdf
 
 from goblinshift.processing.pdf_press.composition import PlannedDocument
+from goblinshift.processing.pdf_press.compression import FlateRecompressor, RecompressionStats
 from goblinshift.processing.pdf_press.inspection import InspectedDocument
 
 _PRIVATE_METADATA_KEYS = ("/Metadata", "/PieceInfo", "/LastModified")
 _ANNOTATION_METADATA_KEYS = ("/T", "/M", "/CreationDate")
 
 
-class DocumentWriter:
-    """Grava os documentos planejados de uma execução; uma instância por execução."""
+@dataclass(frozen=True)
+class WrittenDocument:
+    # Tamanho da mesma composição gravada sem compressão; None quando não se pediu compressão.
+    bytes_uncompressed: int | None
+    bytes_written: int
 
-    def __init__(self, *, strip_annotation_metadata: bool) -> None:
+
+class DocumentWriter:
+    """Grava os documentos planejados de uma execução; uma instância por execução.
+
+    Sem `recompressor`, grava como a v1. Com ele, comprime sem perdas e acumula em
+    `recompression` os streams recomprimidos e mantidos de todos os documentos.
+    """
+
+    def __init__(
+        self, *, strip_annotation_metadata: bool, recompressor: FlateRecompressor | None = None
+    ) -> None:
         self._strip_annotation_metadata = strip_annotation_metadata
+        self._recompressor = recompressor
+        self.recompression = RecompressionStats(recompressed=0, kept=0)
 
     def write(
         self, planned: PlannedDocument, sources: Mapping[int, InspectedDocument], sink: BinaryIO
-    ) -> None:
+    ) -> WrittenDocument:
         """Grava `planned` em `sink`; `sources` são as entradas abertas, pela posição."""
         with pikepdf.new() as composed:
             for page in planned.pages:
@@ -55,12 +76,54 @@ class DocumentWriter:
             _drop_private_metadata(composed)
             if self._strip_annotation_metadata:
                 _drop_annotation_metadata(composed)
-            composed.save(
-                sink,
-                min_version=_highest_version(planned, sources),
-                stream_decode_level=pikepdf.StreamDecodeLevel.none,
-                deterministic_id=True,
-            )
+            version = _highest_version(planned, sources)
+            written = _ByteCounter(sink)
+            if self._recompressor is None:
+                _save(composed, written, version)
+                return WrittenDocument(None, written.count)
+            uncompressed = _ByteCounter(None)
+            _save(composed, uncompressed, version)
+            self.recompression += self._recompressor.recompress(composed)
+            _save(composed, written, version, pikepdf.ObjectStreamMode.generate)
+            return WrittenDocument(uncompressed.count, written.count)
+
+
+def _save(
+    pdf: pikepdf.Pdf,
+    sink: io.RawIOBase,
+    version: str,
+    object_streams: pikepdf.ObjectStreamMode = pikepdf.ObjectStreamMode.preserve,
+) -> None:
+    pdf.save(
+        # O pikepdf só chama write(); o contador não buscável basta (sem linearizar).
+        cast(BinaryIO, sink),
+        min_version=version,
+        stream_decode_level=pikepdf.StreamDecodeLevel.none,
+        deterministic_id=True,
+        object_stream_mode=object_streams,
+    )
+
+
+class _ByteCounter(io.RawIOBase):
+    """Conta os bytes gravados e os repassa a `target`; sem `target`, só conta.
+
+    Não é buscável: o qpdf grava em sequência quando não linearizado.
+    """
+
+    def __init__(self, target: BinaryIO | None) -> None:
+        super().__init__()
+        self._target = target
+        self.count = 0
+
+    def writable(self) -> bool:
+        return True
+
+    def write(self, data: Buffer, /) -> int:
+        view = memoryview(data)
+        if self._target is not None:
+            self._target.write(view)
+        self.count += view.nbytes
+        return view.nbytes
 
 
 def _drop_private_metadata(pdf: pikepdf.Pdf) -> None:
