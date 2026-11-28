@@ -89,3 +89,14 @@ def test_snapshot_novo_passa(tmp_path: Path) -> None:
     result = _check(repo, base)
 
     assert result.returncode == 0, result.stderr
+
+
+def test_snapshot_renomeado_falha(tmp_path: Path) -> None:
+    repo, base = _repo_with_snapshot(tmp_path)
+    (repo / EXISTING).rename(repo / SNAPSHOTS / "image-forge-v1-antigo.json")
+    _commit_all(repo)
+
+    result = _check(repo, base)
+
+    assert result.returncode == 1
+    assert str(EXISTING) in result.stderr

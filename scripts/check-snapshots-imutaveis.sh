@@ -3,7 +3,8 @@
 #
 # `tests/catalog/test_versoes_congeladas.py` compara o catálogo com `tests/catalog/congeladas/`,
 # mas não vê o histórico: apagar um snapshot e regerá-lo com o código novo passaria. Este script
-# compara a pasta com a base do PR e recusa arquivo modificado, apagado ou renomeado. Arquivo novo
+# compara a pasta com a base do PR e recusa arquivo modificado, apagado ou renomeado (sem detecção
+# de renomeação, o caminho antigo aparece como apagado). Arquivo novo
 # (versão nova) passa.
 #
 # Uso: ./scripts/check-snapshots-imutaveis.sh SHA_BASE
@@ -18,7 +19,7 @@ if [[ $# -ne 1 || -z $1 ]]; then
 fi
 base="$1"
 
-changed="$(git diff --name-only --diff-filter=MDR "$base" HEAD -- "$SNAPSHOTS")"
+changed="$(git diff --name-only --no-renames --diff-filter=MD "$base" HEAD -- "$SNAPSHOTS")"
 
 if [[ -n $changed ]]; then
   echo "FALHA: snapshot congelado mudou, sumiu ou foi renomeado (crie uma versão nova):" >&2
