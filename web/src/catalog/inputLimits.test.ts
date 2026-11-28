@@ -8,7 +8,7 @@ describe("inputLimitsOf", () => {
     expect(inputLimitsOf(catalogVersion("csv-janitor"))).toEqual({
       maxInputs: 5,
       maxTotalBytes: null,
-      maxFileBytes: 52428800,
+      maxFileBytes: 8388608,
     });
   });
 

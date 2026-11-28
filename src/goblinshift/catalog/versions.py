@@ -158,7 +158,9 @@ CSV_JANITOR_V1 = RecipeVersion(
     parameters_model=CsvJanitorV1Parameters,
     limits={
         "max_inputs": csv_janitor.MAX_TABLES,
-        "max_input_bytes": COMMON_MAX_INPUT_BYTES,
+        # O teto da tabela, que o executor aplica (D8, ADR 062): limite operacional, fora da
+        # versão. Com o comum, um CSV acima dele subia inteiro para ser rejeitado na execução.
+        "max_input_bytes": Limits().table_bytes,
         **dataclasses.asdict(Limits()),
     },
 )

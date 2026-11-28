@@ -31,6 +31,7 @@ from goblinshift.processing.csv_janitor import (
 )
 from goblinshift.processing.registry import RECIPES
 
+TABLE_BYTES = 8 * 1024 * 1024
 DEFAULTS: dict[str, object] = {
     "case_rules": [],
     "deduplicate_by": [],
@@ -192,8 +193,9 @@ def test_versao_atual_publica_limites_efetivos() -> None:
     assert version.status is VersionStatus.CURRENT
     assert version.limits == {
         "max_inputs": 5,
-        "max_input_bytes": 50 * 1024 * 1024,
-        "table_bytes": 8 * 1024 * 1024,
+        # D8 (ADR 062): a v1 publica o teto da tabela, que o executor aplica, e não o comum.
+        "max_input_bytes": TABLE_BYTES,
+        "table_bytes": TABLE_BYTES,
         "records": 20_000,
         "columns": 100,
         "record_bytes": 1024 * 1024,
@@ -202,9 +204,11 @@ def test_versao_atual_publica_limites_efetivos() -> None:
 
 
 def test_toda_versao_declara_o_teto_por_entrada() -> None:
-    # A aceitação aplica `max_input_bytes` a cada entrada; o envio só olha o nome (ADR 036).
+    # A aceitação aplica `max_input_bytes` a cada entrada; o envio só olha o nome (ADR 036). Só o
+    # CSV Janitor fica abaixo do teto comum, no teto da tabela que o executor aplica (D8, ADR 062).
     for version in CATALOG.list_versions():
-        assert version.limits["max_input_bytes"] >= MAX_FILE_BYTES
+        floor = TABLE_BYTES if version.recipe_id == "csv-janitor" else MAX_FILE_BYTES
+        assert version.limits["max_input_bytes"] >= floor
 
 
 def test_teto_comum_do_catalogo_e_o_do_envio() -> None:

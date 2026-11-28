@@ -11,7 +11,7 @@ export const CATALOG_BODY = {
           status: "current",
           limits: {
             max_inputs: 5,
-            max_input_bytes: 52428800,
+            max_input_bytes: 8388608,
             table_bytes: 8388608,
             records: 20000,
             columns: 100,

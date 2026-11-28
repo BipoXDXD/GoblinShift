@@ -24,6 +24,7 @@ SECURITY_TXT_WORKFLOW = WORKFLOWS / "security-txt.yml"
 REAL_CLOCK_SELECTOR = "-m real_clock"
 REAL_CLOCK_EXCLUSION = "not real_clock"
 ARTE_EXCLUSION = "not arte"
+HEAVY_MARKER = "heavy"
 MARKER_SELECTOR = re.compile(r"""-m\s+(?:"([^"]*)"|'([^']*)'|(\S+))""")
 NEGATION_PREFIX = "not "
 AND_SEPARATOR = " and "
@@ -140,6 +141,15 @@ def test_chamadas_da_ci_que_so_excluem_marcadores_repetem_a_exclusao(exclusion: 
 
     assert negations, _pytest_commands()
     assert all(exclusion in command for command in negations), negations
+
+
+def test_job_de_verificacoes_roda_os_testes_heavy() -> None:
+    # O `addopts` tira os `heavy` (pior caso de 50 MiB, ADR 062) do padrão local; o `-m` das
+    # Verificações substitui o dele e não pode repetir essa exclusão.
+    commands = [command for job, command in _pytest_commands() if job == CHECKS_JOB]
+
+    assert any(_only_negations(command) for command in commands), commands
+    assert all(HEAVY_MARKER not in command for command in commands), commands
 
 
 def test_workflow_do_security_txt_roda_o_lembrete_e_reprova_se_pulado() -> None:
