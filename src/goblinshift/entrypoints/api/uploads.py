@@ -7,7 +7,7 @@ ocupando uma vaga de transferência, sem transação aberta durante a transferê
 Inexistente e de outra conta dão o mesmo 404; expirado ou excluído do próprio dono, 410.
 """
 
-from datetime import datetime
+from datetime import datetime, timedelta
 from functools import partial
 from typing import Annotated, Any, Literal
 from uuid import UUID
@@ -67,6 +67,7 @@ from goblinshift.files.limits import (
     MAX_NAME_CHARS,
     MAX_VIDEO_FILE_BYTES,
     MIB,
+    TRANSFER_MAX_DURATION,
     VIDEO_EXTENSIONS,
 )
 from goblinshift.files.states import Availability, TransferDirection, UploadState
@@ -85,6 +86,11 @@ from goblinshift.platform.db import retry_on_pool_timeout
 router = APIRouter(tags=["uploads"])
 
 # Nomes do serviço que mudam na borda HTTP.
+# O prazo do texto vem da constante: mudar o prazo total muda a frase junto (1.7).
+_TOO_SLOW_DETAIL = (
+    "A conexão está lenta demais para enviar este arquivo em "
+    f"{TRANSFER_MAX_DURATION // timedelta(minutes=1)} minutos; o upload falhou."
+)
 _API_FIELD_NAMES = {"expected_size": "size"}
 
 
@@ -234,10 +240,7 @@ async def put_upload_content(
     except FilesError as error:
         raise _upload_problem(error) from None
     except TransferTooSlowError:
-        raise ApiProblem(
-            ProblemCode.REQUEST_TIMEOUT,
-            "A conexão está lenta demais para enviar este arquivo em 10 minutos; o upload falhou.",
-        ) from None
+        raise ApiProblem(ProblemCode.REQUEST_TIMEOUT, _TOO_SLOW_DETAIL) from None
     except TransferTimeoutError:
         raise ApiProblem(
             ProblemCode.REQUEST_TIMEOUT,
