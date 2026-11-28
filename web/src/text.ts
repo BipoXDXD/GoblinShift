@@ -189,6 +189,8 @@ export const TEXT = {
       hint: "Preenchem o formulário; você pode mudar antes de executar.",
       applied: (name: string) => `Ajuste pronto ${name} aplicado.`,
     },
+    olderVersionLoaded: (version: number) =>
+      `Vieram da versão ${String(version)} da receita e abriram na versão atual com os mesmos valores.`,
     backHome: "Oficina",
     filesHeading: "Arquivos de entrada",
     chooseFiles: "Escolher arquivos",

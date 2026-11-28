@@ -94,7 +94,7 @@ export const CATALOG_BODY = {
       versions: [
         {
           version: 1,
-          status: "current",
+          status: "deprecated",
           limits: {
             max_inputs: 100,
             max_input_bytes: 33554432,

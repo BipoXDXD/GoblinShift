@@ -14,8 +14,9 @@ import {
 } from "../test/fakeApi";
 import { presetBody, PRESET_ID } from "../test/presets";
 import { renderRoutes } from "../test/renderRoutes";
+import { TEXT } from "../text";
 
-await preloadRoutes("/bancada/csv-janitor", "/historico");
+await preloadRoutes("/bancada/csv-janitor", "/bancada/image-forge", "/historico");
 
 const PARAMETERS = {
   input_delimiter: ",",
@@ -85,6 +86,36 @@ describe("Bancada aberta pela execução (reutilizar parâmetros)", () => {
 
     expect(await screen.findByText(/não estão mais guardados/)).toBeVisible();
     expect(screen.getByLabelText("Delimitador dos arquivos de saída")).toHaveValue(",");
+  });
+
+  it("parâmetros da v1 abrem na v2 com aviso", async () => {
+    setup(
+      () =>
+        jsonResponse(
+          runBody({
+            recipe_id: "image-forge",
+            recipe_version: 1,
+            status: "succeeded",
+            parameters: {
+              max_width: 800,
+              max_height: 1600,
+              output_format: "png",
+              jpeg_quality: 85,
+              jpeg_background: "#FFFFFF",
+              make_thumbnails: false,
+            },
+          }),
+        ),
+      `/bancada/image-forge?execucao=${RUN_ID}`,
+    );
+
+    const notice = await screen.findByText(/^Parâmetros da execução de /);
+    expect(notice).toHaveTextContent(TEXT.workbench.olderVersionLoaded(1));
+    expect(screen.getByRole("combobox", { name: "Formato de saída" })).toHaveValue("png");
+    expect(screen.getByRole("textbox", { name: "Largura máxima, em pixels" })).toHaveValue("800");
+    expect(
+      screen.getByRole("radio", { name: "Caber na caixa (mantém a proporção)" }),
+    ).toBeChecked();
   });
 
   it("execução de outra receita abre os padrões e avisa", async () => {

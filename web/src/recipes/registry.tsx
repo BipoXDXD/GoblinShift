@@ -52,6 +52,11 @@ export interface RecipeModule<K extends RecipeId = RecipeId> {
    * arquivos, então um preset ou uma execução reusada abre sem eles, no default.
    */
   readonly uploadBoundParameters?: readonly string[];
+  /**
+   * Versões anteriores cujos parâmetros o formulário abre sem conversão, sobre os defaults da
+   * versão atual (a atual é superconjunto delas): um preset ou execução da v1 abre na Bancada da v2.
+   */
+  readonly opensVersions?: readonly number[];
 }
 
 interface FormParts<K extends RecipeId, S> {
@@ -103,6 +108,8 @@ const RECIPES: { readonly [K in RecipeId]: RecipeModule<K> } = {
     // MPO (fotos de celular) costuma vir com extensão .jpg; .mpo cobre o resto (1.2). WebP e GIF
     // estáticos entram na v2; a animação é recusada no executor.
     accept: ".jpg,.jpeg,.png,.mpo,.webp,.gif,image/jpeg,image/png,image/webp,image/gif",
+    // A v2 é superconjunto da v1 (catalog/image_forge_v2.py): os mesmos campos, faixas e defaults.
+    opensVersions: [1],
     formFor: catalogForm({
       settingsOf: imageForgeSettings,
       initialDraft: (settings) => parseImageForge(settings.defaults, settings),

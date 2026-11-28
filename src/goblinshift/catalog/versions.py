@@ -15,7 +15,7 @@ import dataclasses
 import re
 from collections.abc import Callable, Iterable, Mapping
 from dataclasses import dataclass, field
-from datetime import datetime
+from datetime import UTC, date, datetime
 from enum import StrEnum
 from typing import Any
 
@@ -226,10 +226,15 @@ CSV_JANITOR_V1 = RecipeVersion(
 
 _IMAGE_LIMITS = image_forge.Limits()
 
+# Merge da Bancada da v2 (PR C de paridade-image-forge): a v1 vira `deprecated` (D1) e é aceita
+# até o primeiro dia do mês depois de 90 dias desta data (1.6). A retirada fica num PR posterior.
+IMAGE_FORGE_V2_RELEASED_ON = date(2026, 11, 28)
+
 IMAGE_FORGE_V1 = RecipeVersion(
     recipe_id=image_forge.RECIPE_ID,
     version=image_forge.VERSION,
-    status=VersionStatus.CURRENT,
+    status=VersionStatus.DEPRECATED,
+    sunset_at=datetime(2027, 3, 1, tzinfo=UTC),
     parameters_model=ImageForgeV1Parameters,
     limits={
         "max_inputs": image_forge.MAX_INPUTS,
@@ -240,7 +245,8 @@ IMAGE_FORGE_V1 = RecipeVersion(
     },
 )
 
-# Ao lado da v1, com os mesmos limites (ADR 066): a v1 continua aceita até a Bancada mudar.
+# Ao lado da v1, com os mesmos limites (ADR 066). A Bancada só mostra a v2 e abre nela os
+# parâmetros da v1 (superconjunto); a v1 segue aceita pela API até o `sunset_at`.
 IMAGE_FORGE_V2 = RecipeVersion(
     recipe_id=image_forge.RECIPE_ID,
     version=image_forge.VERSION_2,

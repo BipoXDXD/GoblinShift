@@ -67,7 +67,7 @@ def test_versao_traz_estado_limites_e_defaults_resolvidos() -> None:
 
     assert version_of(body, "image-forge") == {
         "version": 1,
-        "status": "current",
+        "status": "deprecated",
         "limits": {
             "max_inputs": 100,
             "max_input_bytes": 32 * 1024 * 1024,
@@ -273,11 +273,11 @@ def with_deprecated_csv_janitor(monkeypatch: pytest.MonkeyPatch) -> None:
 
 
 def test_detalhe_traz_exatamente_as_chaves_do_contrato() -> None:
-    body = version_detail_response(CATALOG.get_version("image-forge", 1)).model_dump(mode="json")
+    body = version_detail_response(CATALOG.get_version("image-forge", 2)).model_dump(mode="json")
 
     assert body.keys() == DETAIL_KEYS
     assert body["recipe_id"] == "image-forge"
-    assert body["version"] == 1
+    assert body["version"] == 2
     assert body["status"] == "current"
     assert body["sunset_at"] is None
 

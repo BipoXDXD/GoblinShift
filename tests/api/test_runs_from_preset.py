@@ -1,6 +1,7 @@
 """`POST /presets/{preset_id}/runs`: nova execução com a configuração do preset (1.1 e 1.6)."""
 
 import uuid
+from email.utils import format_datetime
 from pathlib import Path
 from typing import Any
 
@@ -10,6 +11,7 @@ from fastapi.testclient import TestClient
 from sqlalchemy import select
 from sqlalchemy.orm import Session, sessionmaker
 
+from goblinshift.catalog import CATALOG
 from goblinshift.files.limits import MAX_BATCH_FILES
 from goblinshift.files.storage import FileStorage
 from goblinshift.identity import Scope
@@ -36,14 +38,18 @@ def storage(tmp_path: Path) -> FileStorage:
 
 
 def create_preset(
-    client: TestClient, account: Account, recipe_id: str = "csv-janitor", **parameters: Any
+    client: TestClient,
+    account: Account,
+    recipe_id: str = "csv-janitor",
+    recipe_version: int = 1,
+    **parameters: Any,
 ) -> dict[str, Any]:
     response = client.post(
         PRESETS,
         json={
             "name": f"p-{uuid.uuid4()}",
             "recipe_id": recipe_id,
-            "recipe_version": 1,
+            "recipe_version": recipe_version,
             "parameters": parameters,
         },
         headers=account.headers,
@@ -114,6 +120,23 @@ def test_preset_do_detox_executa_com_os_parametros_guardados(
 
     assert response.status_code == 202, response.text
     assert stored_run(factory, response.json()["id"]).recipe_id == "downloads-detox"
+
+
+def test_preset_v1_abre_e_executa_depois_da_v2(
+    client: TestClient, factory: sessionmaker[Session], storage: FileStorage
+) -> None:
+    # Review Focus 1: o preset da v1 continua rodando a v1 até a retirada, avisando o `Sunset`.
+    account = Account(factory)
+    preset = create_preset(client, account, "image-forge", output_format="png")
+    sunset_at = CATALOG.get_version("image-forge", 1).sunset_at
+    assert sunset_at is not None
+
+    response = run_preset(client, account, preset["id"], ready_inputs(factory, storage, account.id))
+
+    assert response.status_code == 202, response.text
+    assert response.headers["sunset"] == format_datetime(sunset_at, usegmt=True)
+    assert (response.json()["recipe_id"], response.json()["recipe_version"]) == ("image-forge", 1)
+    assert stored_run(factory, response.json()["id"]).parameters["output_format"] == "png"
 
 
 def test_replay_com_a_mesma_chave_devolve_a_mesma_execucao(

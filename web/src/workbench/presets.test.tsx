@@ -20,6 +20,7 @@ import { presetBody, PRESET_ID } from "../test/presets";
 import { escapeIsBlocked, forceClose } from "../test/dialog";
 import { recordDescriptionOnFocus } from "../test/focus";
 import { renderRoutes } from "../test/renderRoutes";
+import { TEXT } from "../text";
 
 await preloadRoutes("/", "/bancada/csv-janitor", "/bancada/image-forge");
 
@@ -442,6 +443,27 @@ describe("Bancada aberta com um preset", () => {
       await screen.findByText(/Este preset é de outra receita ou de uma versão/),
     ).toBeVisible();
     expect(screen.getByLabelText("Delimitador dos arquivos de saída")).toHaveValue(",");
+  });
+
+  it("parâmetros da v1 abrem na v2 com aviso", async () => {
+    setup(`/bancada/image-forge?preset=${PRESET_ID}`, {
+      [`GET /api/v1/presets/${PRESET_ID}`]: () =>
+        jsonResponse(
+          presetBody({
+            recipe_id: "image-forge",
+            recipe_version: 1,
+            parameters: { output_format: "jpeg", jpeg_quality: 70 },
+          }),
+        ),
+    });
+
+    const notice = await screen.findByText(/^Parâmetros do preset Clientes do mês\./);
+    expect(notice).toHaveTextContent(TEXT.workbench.olderVersionLoaded(1));
+    expect(screen.getByRole("combobox", { name: "Formato de saída" })).toHaveValue("jpeg");
+    expect(screen.getByRole("textbox", { name: "Qualidade do JPEG" })).toHaveValue("70");
+    expect(
+      screen.getByRole("radio", { name: "Caber na caixa (mantém a proporção)" }),
+    ).toBeChecked();
   });
 
   it("preset de outra versão da receita abre com os parâmetros padrão e avisa", async () => {

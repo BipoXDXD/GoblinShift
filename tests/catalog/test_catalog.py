@@ -2,7 +2,7 @@
 
 import json
 from dataclasses import replace
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from typing import Any
 
 import pytest
@@ -17,7 +17,7 @@ from goblinshift.catalog import (
     VersionStatus,
 )
 from goblinshift.catalog.csv_janitor_v1 import CsvJanitorV1Parameters
-from goblinshift.catalog.versions import COMMON_MAX_INPUT_BYTES
+from goblinshift.catalog.versions import COMMON_MAX_INPUT_BYTES, IMAGE_FORGE_V2_RELEASED_ON
 from goblinshift.files.limits import MAX_FILE_BYTES
 from goblinshift.processing import downloads_detox, image_forge
 from goblinshift.processing.csv_janitor import (
@@ -252,7 +252,6 @@ def test_catalogo_lista_as_receitas_implementadas_na_versao_1() -> None:
 def test_image_forge_publica_os_limites_de_1_7() -> None:
     version = CATALOG.get_version("image-forge", 1)
 
-    assert version.status is VersionStatus.CURRENT
     assert version.limits == {
         "max_inputs": 100,
         "max_input_bytes": 32 * 1024 * 1024,
@@ -463,3 +462,23 @@ def test_ajuste_pronto_com_parametros_invalidos_e_recusado_pelo_modelo_da_versao
 def test_chave_de_ajuste_pronto_fora_do_formato_de_slug_e_recusada(key: str) -> None:
     with pytest.raises(ValueError, match="chave de ajuste pronto fora do formato"):
         SystemPreset(key, "A", {})
+
+
+def test_image_forge_v1_fica_deprecated_por_90_dias_ou_mais() -> None:
+    v1 = CATALOG.get_version("image-forge", 1)
+
+    assert v1.status is VersionStatus.DEPRECATED
+    assert v1.sunset_at is not None
+    assert v1.sunset_at.date() >= IMAGE_FORGE_V2_RELEASED_ON + timedelta(days=90)
+
+
+def test_sunset_da_image_forge_v1_e_o_primeiro_dia_do_mes_em_utc() -> None:
+    sunset_at = CATALOG.get_version("image-forge", 1).sunset_at
+
+    assert sunset_at is not None
+    assert (sunset_at.day, sunset_at.hour, sunset_at.minute, sunset_at.utcoffset()) == (
+        1,
+        0,
+        0,
+        timedelta(0),
+    )
