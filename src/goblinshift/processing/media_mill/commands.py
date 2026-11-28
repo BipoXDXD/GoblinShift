@@ -20,7 +20,13 @@ decidida pela receita): um contêiner que declara 2 s com horas de áudio não g
 corte conta amostras decodificadas, não instantes: o `pts` vem do arquivo e pode ser comprimido
 (30 s de Opus com instantes de 0 a 2 s), as amostras não. O filtro `ashowinfo`, depois do corte,
 registra cada quadro de áudio (instante, amostras e taxa), para a receita saber se a faixa passava
-da duração aceita.
+da duração aceita. Com início de trecho (v2), o `atrim` ganha `start_sample` e o `asetpts` zera os
+instantes, para o `ashowinfo` contar o trecho a partir de 0.
+
+A codificação vem de `encoding_for` (formato, bitrate de lista fechada e taxa da fonte): WAV e
+FLAC são os da v1, na taxa da fonte; MP3 sai sem ID3 nem cabeçalho Xing (nem metadados nem versão
+do encoder), AAC em `.m4a` (muxer `ipod`) e Opus sempre a 48 kHz. MP3 e AAC mantêm 44,1 e 48 kHz e
+reamostram as outras taxas para 48 kHz (D7).
 
 `-loglevel level+…` prefixa cada linha do stderr com o nível (`[error]`, `[info]`), e
 `read_log` separa o que é erro de decodificação e os instantes informados pelos filtros
@@ -35,7 +41,7 @@ from dataclasses import dataclass
 from fractions import Fraction
 from pathlib import Path
 
-from goblinshift.processing.media_mill.params import AudioFormat
+from goblinshift.processing.media_mill.params_v2 import BITRATES_KBPS, LOSSY, AudioFormatV2
 from goblinshift.processing.media_mill.signature import Container
 
 JPEG_QUALITY = 3  # escala -q:v do mjpeg: 2 (melhor) a 31; 3 fica perto de qualidade 90
@@ -49,11 +55,9 @@ _FRAME_SIZE = re.compile(rb"\bs:([0-9]+)x([0-9]+)")
 # texto do arquivo (título da faixa) também aparece no log, sempre depois de `[info]` ou de espaços.
 _SHOWINFO = b"[Parsed_showinfo_"
 _ASHOWINFO = b"[Parsed_ashowinfo_"
-_AUDIO_ENCODERS = {
-    AudioFormat.WAV: ("-c:a", "pcm_s16le", "-f", "wav"),
-    # O FLAC aceita 16 e 32 bits; a amostra é fixada em 16 bits (1.5).
-    AudioFormat.FLAC: ("-c:a", "flac", "-sample_fmt", "s16", "-f", "flac"),
-}
+OPUS_SAMPLE_RATE_HZ = 48_000
+# Taxas que o MP3 e o AAC mantêm; as outras saem reamostradas para 48 kHz (D7).
+_KEPT_RATES_HZ = frozenset({44_100, 48_000})
 PROBE_ENTRIES = (
     "format=format_name,duration"
     ":stream=index,codec_type,codec_name,width,height,sample_aspect_ratio,avg_frame_rate,"
@@ -88,6 +92,52 @@ class Box:
     height: int
 
 
+@dataclass(frozen=True)
+class AudioEncoding:
+    """Como o áudio sai: argumentos do encoder e do muxer, extensão e taxa de saída."""
+
+    codec_args: tuple[str, ...]
+    extension: str
+    sample_rate_hz: int
+
+
+def encoding_for(
+    audio_format: AudioFormatV2, bitrate_kbps: int, source_rate_hz: int
+) -> AudioEncoding:
+    """Codificação de um formato; o bitrate só vale nos com perda e precisa estar na lista."""
+    if audio_format in LOSSY and bitrate_kbps not in BITRATES_KBPS[audio_format]:
+        raise ValueError(f"bitrate {bitrate_kbps!r} fora da lista de {audio_format.value}")
+    bitrate = f"{bitrate_kbps}k"
+    codec: tuple[str, ...]
+    kept_rate = source_rate_hz if source_rate_hz in _KEPT_RATES_HZ else OPUS_SAMPLE_RATE_HZ
+    match audio_format:
+        case AudioFormatV2.WAV:
+            return AudioEncoding(("-c:a", "pcm_s16le", "-f", "wav"), ".wav", source_rate_hz)
+        case AudioFormatV2.FLAC:
+            # O FLAC aceita 16 e 32 bits; a amostra é fixada em 16 bits (1.5).
+            codec = ("-c:a", "flac", "-sample_fmt", "s16", "-f", "flac")
+            return AudioEncoding(codec, ".flac", source_rate_hz)
+        case AudioFormatV2.MP3:
+            codec = (
+                "-c:a",
+                "libmp3lame",
+                "-b:a",
+                bitrate,
+                "-write_xing",
+                "0",
+                "-id3v2_version",
+                "0",
+                "-f",
+                "mp3",
+            )
+            return AudioEncoding(codec, ".mp3", kept_rate)
+        case AudioFormatV2.AAC:
+            return AudioEncoding(("-c:a", "aac", "-b:a", bitrate, "-f", "ipod"), ".m4a", kept_rate)
+        case AudioFormatV2.OPUS:
+            codec = ("-c:a", "libopus", "-b:a", bitrate, "-f", "opus")
+            return AudioEncoding(codec, ".opus", OPUS_SAMPLE_RATE_HZ)
+
+
 def probe_argv(ffprobe: Path, source: Source) -> list[str]:
     return [
         str(ffprobe),
@@ -111,19 +161,27 @@ def audio_argv(
     source: Source,
     *,
     stream_order: int,
-    sample_rate: int,
     channels: int,
-    audio_format: AudioFormat,
+    encoding: AudioEncoding,
+    start_sample: int = 0,
     cut_samples: int,
     target: Path,
 ) -> list[str]:
-    """Uma faixa de áudio, na taxa e nos canais de origem (sem resample nem downmix), 16 bits.
+    """Uma faixa de áudio, nos canais de origem (sem downmix), na taxa da codificação.
 
-    Grava no máximo `cut_samples` amostras decodificadas; o `ashowinfo`, depois do corte, registra
-    cada quadro que passou.
+    Grava as amostras decodificadas de `start_sample` até antes de `cut_samples`, contadas na taxa
+    da fonte; o `ashowinfo`, depois do corte, registra cada quadro que passou.
     """
     if isinstance(cut_samples, bool) or not isinstance(cut_samples, int) or cut_samples <= 0:
         raise ValueError(f"corte do áudio precisa ser um inteiro positivo: {cut_samples!r}")
+    if (
+        isinstance(start_sample, bool)
+        or not isinstance(start_sample, int)
+        or not 0 <= start_sample < cut_samples
+    ):
+        raise ValueError(
+            f"início do corte precisa ser um inteiro de 0 até antes do fim: {start_sample!r}"
+        )
     return [
         *_ffmpeg_head(ffmpeg, "info"),
         *source.input_options(),
@@ -136,12 +194,12 @@ def audio_argv(
         "-dn",
         *_no_metadata(),
         "-af",
-        f"atrim=end_sample={cut_samples},ashowinfo",
+        _audio_filter(start_sample, cut_samples),
         "-ar",
-        str(sample_rate),
+        str(encoding.sample_rate_hz),
         "-ac",
         str(channels),
-        *_AUDIO_ENCODERS[audio_format],
+        *encoding.codec_args,
         *_bitexact("a"),
         "-n",
         str(target),
@@ -270,6 +328,15 @@ class _AudioCount:
             return None
         total = sum(Fraction(samples, rate) for rate, samples in self._by_rate.items())
         return float(total - Fraction(*self._last))
+
+
+def _audio_filter(start_sample: int, cut_samples: int) -> str:
+    if start_sample == 0:
+        # Exatamente o filtro da v1, sem trecho.
+        return f"atrim=end_sample={cut_samples},ashowinfo"
+    return (
+        f"atrim=start_sample={start_sample}:end_sample={cut_samples},asetpts=PTS-STARTPTS,ashowinfo"
+    )
 
 
 def _ffmpeg_head(ffmpeg: Path, level: str) -> list[str]:

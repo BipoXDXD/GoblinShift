@@ -23,6 +23,7 @@ from goblinshift.processing.media_mill.commands import (
     Box,
     Source,
     audio_argv,
+    encoding_for,
     last_frame_before_argv,
     probe_argv,
     read_log,
@@ -30,6 +31,7 @@ from goblinshift.processing.media_mill.commands import (
 )
 from goblinshift.processing.media_mill.limits import MAX_INPUTS, Limits
 from goblinshift.processing.media_mill.params import AudioFormat, Params
+from goblinshift.processing.media_mill.params_v2 import DEFAULT_BITRATE_KBPS, AudioFormatV2
 from goblinshift.processing.media_mill.probe import (
     Inspected,
     inspect,
@@ -255,9 +257,12 @@ class _Mill:
             self._tools.ffmpeg,
             source,
             stream_order=audio.order,
-            sample_rate=audio.sample_rate,
             channels=audio.channels,
-            audio_format=self._params.audio_format,
+            encoding=encoding_for(
+                AudioFormatV2(self._params.audio_format.value),
+                DEFAULT_BITRATE_KBPS,
+                audio.sample_rate,
+            ),
             cut_samples=cut_samples,
             target=target,
         )

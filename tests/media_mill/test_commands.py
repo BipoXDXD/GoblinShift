@@ -4,15 +4,21 @@ from pathlib import Path
 
 import pytest
 
-from goblinshift.processing.media_mill import AudioFormat
 from goblinshift.processing.media_mill.commands import (
+    AudioEncoding,
     Box,
     Source,
     audio_argv,
+    encoding_for,
     last_frame_before_argv,
     probe_argv,
     read_log,
     thumbnail_argv,
+)
+from goblinshift.processing.media_mill.params_v2 import (
+    BITRATES_KBPS,
+    DEFAULT_BITRATE_KBPS,
+    AudioFormatV2,
 )
 from goblinshift.processing.media_mill.signature import Container
 
@@ -31,9 +37,8 @@ def all_commands(container: Container) -> dict[str, list[str]]:
             FFMPEG,
             source,
             stream_order=1,
-            sample_rate=48000,
             channels=2,
-            audio_format=AudioFormat.FLAC,
+            encoding=encoding_for(AudioFormatV2.FLAC, DEFAULT_BITRATE_KBPS, 48000),
             cut_samples=144000,
             target=TARGET,
         ),
@@ -107,9 +112,8 @@ def test_wav_e_pcm_de_16_bits() -> None:
         FFMPEG,
         Source(INPUT, Container.MOV),
         stream_order=0,
-        sample_rate=44100,
         channels=1,
-        audio_format=AudioFormat.WAV,
+        encoding=encoding_for(AudioFormatV2.WAV, DEFAULT_BITRATE_KBPS, 44100),
         cut_samples=132300,
         target=TARGET,
     )
@@ -117,14 +121,14 @@ def test_wav_e_pcm_de_16_bits() -> None:
     assert (option(argv, "-c:a"), argv[argv.index("-c:a") + 3]) == ("pcm_s16le", "wav")
 
 
-def audio_cut_at(cut_samples: int) -> list[str]:
+def audio_cut_at(cut_samples: int, start_sample: int = 0) -> list[str]:
     return audio_argv(
         FFMPEG,
         Source(INPUT, Container.MOV),
         stream_order=0,
-        sample_rate=48000,
         channels=2,
-        audio_format=AudioFormat.WAV,
+        encoding=encoding_for(AudioFormatV2.WAV, DEFAULT_BITRATE_KBPS, 48000),
+        start_sample=start_sample,
         cut_samples=cut_samples,
         target=TARGET,
     )
@@ -146,6 +150,170 @@ def test_audio_corta_em_amostras_e_registra_os_quadros_depois_do_corte() -> None
 def test_corte_do_audio_so_aceita_inteiro_positivo(cut: object) -> None:
     with pytest.raises(ValueError, match="inteiro positivo"):
         audio_cut_at(cut)  # type: ignore[arg-type]  # o tipo errado é o próprio caso
+
+
+# Linha de comando do áudio da v1 como estava no `main` antes da v2: o WAV e o FLAC não mudam.
+_V1_HEAD = [
+    str(FFMPEG),
+    "-nostdin",
+    "-hide_banner",
+    "-nostats",
+    "-loglevel",
+    "level+info",
+    "-threads",
+    "1",
+    "-filter_threads",
+    "1",
+    "-protocol_whitelist",
+    "file",
+    "-f",
+    "mov",
+    "-enable_drefs",
+    "0",
+    "-i",
+    "file:/work/inputs/0000.bin",
+    "-map",
+    "0:a:0",
+    "-vn",
+    "-sn",
+    "-dn",
+    "-map_metadata",
+    "-1",
+    "-map_chapters",
+    "-1",
+    "-af",
+    "atrim=end_sample=132300,ashowinfo",
+    "-ar",
+    "44100",
+    "-ac",
+    "1",
+]
+_V1_TAIL = ["-fflags", "+bitexact", "-flags:a", "+bitexact", "-n", str(TARGET)]
+
+
+@pytest.mark.parametrize(
+    ("audio_format", "codec"),
+    [
+        (AudioFormatV2.WAV, ["-c:a", "pcm_s16le", "-f", "wav"]),
+        (AudioFormatV2.FLAC, ["-c:a", "flac", "-sample_fmt", "s16", "-f", "flac"]),
+    ],
+)
+def test_argv_da_v1_nao_muda(audio_format: AudioFormatV2, codec: list[str]) -> None:
+    argv = audio_argv(
+        FFMPEG,
+        Source(INPUT, Container.MOV),
+        stream_order=0,
+        channels=1,
+        encoding=encoding_for(audio_format, DEFAULT_BITRATE_KBPS, 44100),
+        cut_samples=132300,
+        target=TARGET,
+    )
+
+    assert argv == [*_V1_HEAD, *codec, *_V1_TAIL]
+
+
+def test_mp3_sem_id3_nem_xing_no_bitrate_pedido() -> None:
+    encoding = encoding_for(AudioFormatV2.MP3, 160, 44100)
+
+    assert encoding == AudioEncoding(
+        codec_args=(
+            "-c:a",
+            "libmp3lame",
+            "-b:a",
+            "160k",
+            "-write_xing",
+            "0",
+            "-id3v2_version",
+            "0",
+            "-f",
+            "mp3",
+        ),
+        extension=".mp3",
+        sample_rate_hz=44100,
+    )
+
+
+def test_aac_vai_em_m4a() -> None:
+    encoding = encoding_for(AudioFormatV2.AAC, 256, 48000)
+
+    assert encoding.codec_args == ("-c:a", "aac", "-b:a", "256k", "-f", "ipod")
+    assert (encoding.extension, encoding.sample_rate_hz) == (".m4a", 48000)
+
+
+@pytest.mark.parametrize("source_rate", [8000, 22050, 44100, 48000])
+def test_opus_sai_sempre_a_48_khz(source_rate: int) -> None:
+    encoding = encoding_for(AudioFormatV2.OPUS, 96, source_rate)
+
+    assert encoding.codec_args == ("-c:a", "libopus", "-b:a", "96k", "-f", "opus")
+    assert (encoding.extension, encoding.sample_rate_hz) == (".opus", 48000)
+
+
+@pytest.mark.parametrize("audio_format", [AudioFormatV2.MP3, AudioFormatV2.AAC])
+@pytest.mark.parametrize(
+    ("source_rate", "output_rate"), [(22050, 48000), (32000, 48000), (44100, 44100), (48000, 48000)]
+)
+def test_taxa_fora_de_44_1_e_48_vira_48_no_mp3_e_no_aac(
+    audio_format: AudioFormatV2, source_rate: int, output_rate: int
+) -> None:
+    assert encoding_for(audio_format, 128, source_rate).sample_rate_hz == output_rate
+
+
+@pytest.mark.parametrize("audio_format", [AudioFormatV2.WAV, AudioFormatV2.FLAC])
+def test_sem_perda_mantem_a_taxa_da_fonte(audio_format: AudioFormatV2) -> None:
+    assert encoding_for(audio_format, DEFAULT_BITRATE_KBPS, 22050).sample_rate_hz == 22050
+
+
+def test_listas_de_bitrate_de_cada_formato_com_perda() -> None:
+    # D6 (a): todas com o default 192, sem valor que o encoder cortaria em silêncio.
+    assert BITRATES_KBPS == {
+        AudioFormatV2.MP3: (128, 160, 192, 256, 320),
+        AudioFormatV2.AAC: (96, 128, 160, 192, 256),
+        AudioFormatV2.OPUS: (64, 96, 128, 160, 192),
+    }
+    assert all(DEFAULT_BITRATE_KBPS in rates for rates in BITRATES_KBPS.values())
+
+
+@pytest.mark.parametrize(
+    ("audio_format", "bitrate"),
+    [(AudioFormatV2.AAC, 320), (AudioFormatV2.OPUS, 256), (AudioFormatV2.MP3, 96)],
+)
+def test_bitrate_fora_da_lista_do_formato_nao_vira_comando(
+    audio_format: AudioFormatV2, bitrate: int
+) -> None:
+    with pytest.raises(ValueError, match="bitrate"):
+        encoding_for(audio_format, bitrate, 48000)
+
+
+def test_mp3_vai_para_a_linha_de_comando_com_a_taxa_da_codificacao() -> None:
+    argv = audio_argv(
+        FFMPEG,
+        Source(INPUT, Container.MOV),
+        stream_order=0,
+        channels=2,
+        encoding=encoding_for(AudioFormatV2.MP3, 192, 22050),
+        cut_samples=48000,
+        target=TARGET,
+    )
+
+    assert option(argv, "-ar") == "48000"
+    assert option(argv, "-c:a") == "libmp3lame"
+    assert argv[-6:] == _V1_TAIL
+
+
+def test_corte_com_inicio_zera_os_instantes_da_saida() -> None:
+    argv = audio_cut_at(96000, start_sample=24000)
+
+    # Os instantes da saída recomeçam do zero: o `ashowinfo` conta o trecho, não o arquivo.
+    assert option(argv, "-af") == (
+        "atrim=start_sample=24000:end_sample=96000,asetpts=PTS-STARTPTS,ashowinfo"
+    )
+
+
+@pytest.mark.parametrize("start", [-1, 1.5, True, "0", 96000, 96001])
+def test_inicio_do_corte_so_aceita_inteiro_nao_negativo(start: object) -> None:
+    # Inteiro de 0 até antes do fim do corte; o resto não vira linha de comando.
+    with pytest.raises(ValueError, match="início do corte"):
+        audio_cut_at(96000, start_sample=start)  # type: ignore[arg-type]  # o caso é o tipo errado
 
 
 def test_miniatura_busca_o_alvo_e_grava_um_jpeg_na_caixa() -> None:

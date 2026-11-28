@@ -17,7 +17,8 @@ from PIL import Image
 
 from goblinshift.processing.media_mill import RECIPE_ID, AudioFormat, Params
 from goblinshift.processing.media_mill import recipe as mill_recipe
-from goblinshift.processing.media_mill.commands import Source, audio_argv
+from goblinshift.processing.media_mill.commands import Source, audio_argv, encoding_for
+from goblinshift.processing.media_mill.params_v2 import DEFAULT_BITRATE_KBPS, AudioFormatV2
 from goblinshift.processing.media_mill.recipe import MediaMillV1
 from goblinshift.processing.media_mill.signature import Container
 from goblinshift.processing.media_mill.tools import Tools
@@ -512,9 +513,8 @@ def test_corte_do_audio_conta_amostras_mesmo_com_instantes_comprimidos(
         Tools.discover().ffmpeg,
         Source(clips.path("webm_audio_timestamps_compressed"), Container.WEBM),
         stream_order=0,
-        sample_rate=48000,
         channels=2,
-        audio_format=AudioFormat.WAV,
+        encoding=encoding_for(AudioFormatV2.WAV, DEFAULT_BITRATE_KBPS, 48000),
         cut_samples=96000,
         target=target,
     )
