@@ -25,13 +25,13 @@ echo "deb [arch=$(dpkg --print-architecture) signed-by=${keyring}] https://stora
 apt_rede=(-o Acquire::http::Timeout=30 -o Acquire::https::Timeout=30 -o Acquire::Retries=3)
 sudo apt-get update -q "${apt_rede[@]}" -o Dir::Etc::sourcelist=sources.list.d/gvisor.list -o Dir::Etc::sourceparts=- -o APT::Get::List-Cleanup=0
 sudo apt-get install -yq "${apt_rede[@]}" "runsc=${GVISOR_VERSION}"
-runsc --version | head -n 1
+runsc --version | sed -n 1p
 
 # O runner é efêmero e só roda este job, então reiniciar o Docker aqui não derruba nada.
 # Na VPS isso nunca se faz: lá o Docker é só recarregado (deploy/gvisor.sh), porque o host é
 # compartilhado com outro projeto.
-if ! docker info --format '{{json .Runtimes}}' | grep -q '"runsc"'; then
+if ! docker info --format '{{json .Runtimes}}' | grep '"runsc"' >/dev/null; then
   sudo runsc install
 fi
 sudo systemctl restart docker
-docker info --format '{{json .Runtimes}}' | grep -q '"runsc"'
+docker info --format '{{json .Runtimes}}' | grep '"runsc"' >/dev/null
