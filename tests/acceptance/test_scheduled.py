@@ -47,6 +47,14 @@ JUST_BOOTED_S = 60
 LONG_AFTER_BOOT_S = 99999
 
 FAKE_DOCKER = """#!/bin/sh
+# O marcador do primeiro `start` lento nasce antes do registro: o teste sinaliza assim que vê a
+# chamada no registro, e o `start` repetido pelo trap precisa achar o marcador para não dormir
+# de novo.
+slow_start=
+if [ "$1" = start ] && [ -n "$FAKE_START_SLEEP_S" ] && [ ! -e "$FAKE_CALLS.start" ]; then
+  : >"$FAKE_CALLS.start"
+  slow_start=1
+fi
 echo "docker $*" >>"$FAKE_CALLS"
 case "$1" in
   ps)
@@ -60,8 +68,7 @@ case "$1" in
     ;;
   stop) sleep "${FAKE_STOP_SLEEP_S:-0}"; exit "${FAKE_STOP_RC:-0}" ;;
   start)
-    if [ -n "$FAKE_START_SLEEP_S" ] && [ ! -e "$FAKE_CALLS.start" ]; then
-      : >"$FAKE_CALLS.start"
+    if [ -n "$slow_start" ]; then
       sleep "$FAKE_START_SLEEP_S"
     fi
     exit "${FAKE_START_RC:-0}"
