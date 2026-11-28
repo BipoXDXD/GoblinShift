@@ -288,7 +288,9 @@ def test_arquivo_de_40_mib_com_nome_de_video_so_entra_no_media_mill(
     account = Account(factory)
     size = 40 * 1024 * 1024
     item = create_upload(client, account.headers, name="x.mp4", size=size)
-    send_content(client, account.headers, item, b"\0" * size)
+    # O envio de vídeo confere a assinatura: o conteúdo abre com uma caixa `ftyp` mínima de MP4.
+    mp4_header = b"\x00\x00\x00\x18ftypisom"
+    send_content(client, account.headers, item, mp4_header.ljust(size, b"\0"))
     before = count_rows(factory)
     payload = {**body([uuid.UUID(item["id"])]), "recipe_id": recipe_id}
 

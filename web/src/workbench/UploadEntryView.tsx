@@ -2,9 +2,9 @@ import { CircleAlert, CircleCheck, Clock, LoaderCircle, Ban, type LucideIcon } f
 import { useRef, type ReactElement, type ReactNode } from "react";
 
 import { Button } from "../components/ui/Button";
-import { describeFailure } from "../components/feedback/ProblemAlert";
 import { formatBytes } from "../format";
 import { TEXT } from "../text";
+import { uploadFailureMessage } from "../upload/failureMessage";
 import type { UploadEntry, UploadEntryState } from "../upload/useUploadBatch";
 
 const T = TEXT.workbench.upload;
@@ -90,7 +90,7 @@ function UploadState({ state, name }: { state: UploadEntryState; name: string })
     case "failed":
       return (
         <StateLine icon={CircleAlert} tone="danger">
-          {describeFailure(state.failure).message}
+          {uploadFailureMessage(state.failure)}
         </StateLine>
       );
     case "canceled":

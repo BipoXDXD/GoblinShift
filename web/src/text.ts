@@ -226,6 +226,13 @@ export const TEXT = {
       remove: "Remover",
       announceReady: (name: string) => `${name} enviado.`,
       announceFailed: (name: string) => `Falha ao enviar ${name}.`,
+      // `errors[].code` do 422 do envio do conteúdo; o front não conhece o teto comum em bytes.
+      contentErrors: {
+        // Formatos que `processing/media_mill/signature.py` reconhece; MKV (DocType `matroska`) não.
+        signature_mismatch:
+          "Arquivos grandes só são aceitos se forem vídeo, como MP4, MOV ou WebM.",
+        size_mismatch: "O arquivo chegou com tamanho diferente do esperado. Envie de novo.",
+      },
     },
     removal: {
       titleOne: (name: string) => `Remover ${name}?`,

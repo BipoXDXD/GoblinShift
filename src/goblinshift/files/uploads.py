@@ -27,6 +27,7 @@ from goblinshift.files.errors import (
     UploadGoneError,
     UploadNotFoundError,
     UploadObjectNotPendingError,
+    UploadSignatureMismatchError,
     UploadSizeMismatchError,
     UploadStateConflictError,
 )
@@ -34,6 +35,7 @@ from goblinshift.files.limits import (
     INCOMPLETE_UPLOAD_TTL,
     MAX_BATCH_BYTES,
     MAX_BATCH_FILES,
+    MAX_FILE_BYTES,
     MAX_LIVE_UPLOADS_PER_ACCOUNT,
     MAX_NAME_CHARS,
     MAX_UPLOADS_CREATED_PER_DAY,
@@ -47,6 +49,8 @@ from goblinshift.files.states import Availability, ObjectState, UploadState
 from goblinshift.files.storage import ContentTooLargeError, FileStorage
 from goblinshift.files.tables import stored_object, upload
 from goblinshift.platform.db import retry_on_pool_timeout
+from goblinshift.processing.media_mill.rejection import MediaRejected
+from goblinshift.processing.media_mill.signature import HEADER_BYTES, detect_container
 from goblinshift.processing.names import has_unsafe_char
 
 logger = logging.getLogger(__name__)
@@ -220,6 +224,9 @@ def receive_content(
         claim = _claim_writer(session, owner_id, upload_id)
     storage_key, expected_size = claim.storage_key, claim.expected_size
     deadline = started + claim.time_left.total_seconds()
+    if expected_size > MAX_FILE_BYTES:
+        # Só vídeo passa do teto comum (`max_file_bytes_for`); a extensão não prova que é vídeo.
+        chunks = _require_video_signature(chunks)
     try:
         sha256, size = storage.create_exclusive(
             storage_key, _until_expiry(chunks, deadline, clock), max_bytes=expected_size
@@ -555,6 +562,29 @@ def _until_expiry(
         if clock() >= deadline:
             raise UploadGoneError
         yield chunk
+
+
+def _require_video_signature(chunks: Iterable[bytes]) -> Iterator[bytes]:
+    """Repassa os blocos só se os primeiros `HEADER_BYTES` bytes forem de MP4, MOV ou WebM.
+
+    Acumula o cabeçalho, mesmo fatiado em blocos pequenos, e confere antes de entregar o primeiro
+    byte; depois repassa os blocos sem copiar. Conteúdo menor que o cabeçalho é conferido inteiro.
+    """
+    iterator = iter(chunks)
+    held: list[bytes] = []
+    held_bytes = 0
+    for chunk in iterator:
+        held.append(chunk)
+        held_bytes += len(chunk)
+        if held_bytes >= HEADER_BYTES:
+            break
+    try:
+        # Cada bloco contribui no máximo com `HEADER_BYTES`: um bloco grande não é copiado.
+        detect_container(b"".join(chunk[:HEADER_BYTES] for chunk in held)[:HEADER_BYTES])
+    except MediaRejected:
+        raise UploadSignatureMismatchError from None
+    yield from held
+    yield from iterator
 
 
 def _complete(

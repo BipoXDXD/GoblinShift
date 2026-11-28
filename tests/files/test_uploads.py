@@ -10,15 +10,18 @@ import pytest
 from sqlalchemy import func, select, update
 from sqlalchemy.orm import Session, sessionmaker
 
+from goblinshift import capacity
 from goblinshift.files.errors import (
     InvalidUploadRequestError,
     UploadContentTooLargeError,
     UploadGoneError,
     UploadNotFoundError,
     UploadObjectNotPendingError,
+    UploadSignatureMismatchError,
     UploadSizeMismatchError,
     UploadStateConflictError,
 )
+from goblinshift.files.limits import MAX_FILE_BYTES
 from goblinshift.files.states import Availability, UploadState
 from goblinshift.files.storage import FileStorage
 from goblinshift.files.tables import stored_object, upload
@@ -30,6 +33,7 @@ from goblinshift.files.uploads import (
     request_deletion,
 )
 from goblinshift.platform.db import unit_of_work
+from tests.capacity.support import account_reserved, live_amount
 from tests.files.support import (
     create_intent,
     create_user,
@@ -40,7 +44,6 @@ from tests.files.support import (
 pytestmark = pytest.mark.integration
 
 MIB = 1024 * 1024
-MAX_FILE_BYTES = 32 * MIB
 MAX_BATCH_BYTES = 512 * MIB
 
 
@@ -283,17 +286,120 @@ def test_conteudo_completo_deixa_upload_pronto_com_hash_e_tamanho(
     assert files_under(storage) != []
 
 
-def test_conteudo_de_32_mib_exatos_e_aceito(
+def test_conteudo_no_teto_comum_exato_e_aceito(
     factory: sessionmaker[Session], storage: FileStorage
 ) -> None:
     owner = create_user(factory, "a")
     intent = create_intent(factory, owner, size=MAX_FILE_BYTES)
-    chunks = (b"\x00" * MIB for _ in range(32))
+    chunks = (b"\x00" * MIB for _ in range(MAX_FILE_BYTES // MIB))
 
     with factory() as session:
         view = receive_content(session, storage, owner, intent.id, chunks)
 
     assert view.size_bytes == MAX_FILE_BYTES
+
+
+# Cabeçalhos mínimos que `detect_container` reconhece: caixa `ftyp` do ISO BMFF e EBML com DocType.
+MP4_HEADER = b"\x00\x00\x00\x18ftypisom"
+WEBM_HEADER = b"\x1a\x45\xdf\xa3\x9f\x42\x82\x84webm"
+
+
+def content_of(
+    size: int, header: bytes = b"", *, header_block: int | None = None
+) -> Iterator[bytes]:
+    """`size` bytes: `header` (em blocos de `header_block`, se dado) e depois zeros."""
+    if header_block is None:
+        yield header
+    else:
+        for start in range(0, len(header), header_block):
+            yield header[start : start + header_block]
+    left = size - len(header)
+    while left > 0:
+        block = min(MIB, left)
+        yield b"\x00" * block
+        left -= block
+
+
+def assert_failed_without_object(
+    factory: sessionmaker[Session], storage: FileStorage, owner: uuid.UUID, upload_id: uuid.UUID
+) -> None:
+    with factory() as session:
+        assert get_upload(session, owner, upload_id).state is UploadState.FAILED
+    assert object_state(factory, upload_id) == "pending"
+    assert files_under(storage) == []
+    # A recusa devolve a reserva da intenção à cota, como qualquer outra falha do envio.
+    assert live_amount(factory, capacity.HolderKind.UPLOAD, upload_id) is None
+    assert account_reserved(factory, owner) == 0
+
+
+@pytest.mark.parametrize(("size", "checked"), [(MAX_FILE_BYTES, False), (MAX_FILE_BYTES + 1, True)])
+def test_assinatura_so_e_conferida_acima_do_teto_comum(
+    factory: sessionmaker[Session], storage: FileStorage, size: int, checked: bool
+) -> None:
+    owner = create_user(factory, "a")
+    intent = create_intent(factory, owner, name="clip.mp4", size=size)
+
+    if not checked:
+        with factory() as session:
+            view = receive_content(session, storage, owner, intent.id, content_of(size))
+        assert view.state is UploadState.READY
+        return
+
+    with pytest.raises(UploadSignatureMismatchError), factory() as session:
+        receive_content(session, storage, owner, intent.id, content_of(size))
+    assert_failed_without_object(factory, storage, owner, intent.id)
+
+
+def test_recusa_de_assinatura_nao_e_erro_de_tamanho(
+    factory: sessionmaker[Session], storage: FileStorage
+) -> None:
+    owner = create_user(factory, "a")
+    size = MAX_FILE_BYTES + 1
+    intent = create_intent(factory, owner, name="clip.mp4", size=size)
+    assert live_amount(factory, capacity.HolderKind.UPLOAD, intent.id) == size
+
+    with pytest.raises(UploadSignatureMismatchError) as error, factory() as session:
+        receive_content(session, storage, owner, intent.id, [b"\x00" * 100])
+
+    assert not isinstance(error.value, UploadSizeMismatchError)
+    assert_failed_without_object(factory, storage, owner, intent.id)
+
+
+@pytest.mark.parametrize(("name", "header"), [("clip.mp4", MP4_HEADER), ("clip.webm", WEBM_HEADER)])
+def test_video_grande_com_assinatura_fica_pronto(
+    factory: sessionmaker[Session], storage: FileStorage, name: str, header: bytes
+) -> None:
+    owner = create_user(factory, "a")
+    size = MAX_FILE_BYTES + 1
+    intent = create_intent(factory, owner, name=name, size=size)
+
+    with factory() as session:
+        view = receive_content(session, storage, owner, intent.id, content_of(size, header))
+
+    assert view.state is UploadState.READY
+    assert view.size_bytes == size
+
+
+def test_assinatura_conferida_com_cabecalho_fatiado(
+    factory: sessionmaker[Session], storage: FileStorage
+) -> None:
+    owner = create_user(factory, "a")
+    size = MAX_FILE_BYTES + 1
+    good = create_intent(factory, owner, name="bom.mp4", size=size)
+    bad = create_intent(factory, owner, name="lixo.mp4", size=size)
+    garbage = b"\x01" * 64
+
+    with factory() as session:
+        view = receive_content(
+            session, storage, owner, good.id, content_of(size, MP4_HEADER, header_block=1)
+        )
+    assert view.state is UploadState.READY
+
+    with pytest.raises(UploadSignatureMismatchError), factory() as session:
+        receive_content(session, storage, owner, bad.id, content_of(size, garbage, header_block=1))
+    with factory() as session:
+        assert get_upload(session, owner, bad.id).state is UploadState.FAILED
+    assert live_amount(factory, capacity.HolderKind.UPLOAD, bad.id) is None
 
 
 def test_objeto_fora_de_pending_na_conclusao_e_estado_impossivel(

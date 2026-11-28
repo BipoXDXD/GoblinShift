@@ -55,6 +55,7 @@ from goblinshift.files.errors import (
     UploadNotFoundError,
     UploadRequestInProgressError,
     UploadRequestKeyReusedError,
+    UploadSignatureMismatchError,
     UploadSizeMismatchError,
     UploadStateConflictError,
 )
@@ -343,6 +344,10 @@ def _upload_problem(error: FilesError) -> ApiProblem:
             return ApiProblem(
                 ProblemCode.BODY_TOO_LARGE,
                 f"O conteúdo passou dos {expected_size} bytes declarados; o upload falhou.",
+            )
+        case UploadSignatureMismatchError():
+            return _validation_problem(
+                "body", "signature_mismatch", "O conteúdo não é MP4, MOV nem WebM; o upload falhou."
             )
         case UploadSizeMismatchError(expected_size=expected_size):
             return _validation_problem(
