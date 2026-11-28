@@ -1,4 +1,4 @@
-"""Receita downloads-detox, versão 1: classificar → deduplicar → nomear/agrupar → copiar bytes.
+"""Receita downloads-detox: classificar → deduplicar → nomear/agrupar → copiar bytes.
 
 Tudo é decidido antes da primeira cópia, para o lote acima do teto falhar sem escrever nada.
 Os bytes saem idênticos aos da entrada; o reaproveitamento do objeto no storage é do worker
@@ -11,7 +11,14 @@ from collections.abc import Sequence
 from dataclasses import dataclass
 from typing import assert_never
 
-from goblinshift.processing.downloads_detox.classify import Format, Kind, Refusal, classify
+from goblinshift.processing.downloads_detox.classify import (
+    V1_FORMATS,
+    AcceptedFormats,
+    Format,
+    Kind,
+    Refusal,
+    classify,
+)
 from goblinshift.processing.downloads_detox.naming import destination
 from goblinshift.processing.downloads_detox.params import Params
 from goblinshift.processing.recipe import (
@@ -55,10 +62,16 @@ class _Accepted:
 type _Decision = _Accepted | ItemRejected | ItemDuplicate
 
 
-class DownloadsDetoxV1:
+class DownloadsDetox:
+    """Uma classe para todas as versões; a diferença entre elas são os formatos aceitos."""
+
     def __init__(
-        self, max_inputs: int = MAX_INPUTS, max_total_bytes: int = MAX_TOTAL_INPUT_BYTES
+        self,
+        accepted: AcceptedFormats = V1_FORMATS,
+        max_inputs: int = MAX_INPUTS,
+        max_total_bytes: int = MAX_TOTAL_INPUT_BYTES,
     ) -> None:
+        self._accepted = accepted
         self._max_inputs = max_inputs
         self._max_total_bytes = max_total_bytes
 
@@ -66,7 +79,7 @@ class DownloadsDetoxV1:
         self, params: Params, inputs: Sequence[InputFile], out: OutputDir, progress: Progress
     ) -> Report:
         require_max_inputs(inputs, self._max_inputs, "arquivos")
-        decisions = _decide(inputs, params)
+        decisions = _decide(inputs, params, self._accepted)
         self._require_within_budget(decisions)
         items: list[ReportItem] = []
         for decision in decisions:
@@ -83,13 +96,15 @@ class DownloadsDetoxV1:
             )
 
 
-def _decide(inputs: Sequence[InputFile], params: Params) -> list[_Decision]:
+def _decide(
+    inputs: Sequence[InputFile], params: Params, accepted: AcceptedFormats
+) -> list[_Decision]:
     """Classifica cada entrada e marca as duplicatas; só entradas aceitas viram originais."""
     first_by_content: dict[tuple[str, int], int] = {}
     decisions: list[_Decision] = []
     for entry in inputs:
         with entry.path.open("rb") as source:
-            classified = classify(source, entry.original_name)
+            classified = classify(source, entry.original_name, accepted)
         if isinstance(classified, Refusal):
             decisions.append(ItemRejected(entry.position, REJECTION_CODE, classified.reason))
             continue

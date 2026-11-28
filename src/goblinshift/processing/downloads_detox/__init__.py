@@ -17,7 +17,7 @@ from goblinshift.processing.downloads_detox.recipe import (
     MAX_TOTAL_INPUT_BYTES,
     RECIPE_ID,
     VERSION,
-    DownloadsDetoxV1,
+    DownloadsDetox,
 )
 
 __all__ = [
@@ -27,7 +27,7 @@ __all__ = [
     "MAX_TOTAL_INPUT_BYTES",
     "RECIPE_ID",
     "VERSION",
-    "DownloadsDetoxV1",
+    "DownloadsDetox",
     "GroupBy",
     "InvalidParametersError",
     "NameMode",

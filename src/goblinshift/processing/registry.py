@@ -12,7 +12,7 @@ from typing import Protocol
 
 from goblinshift.processing import csv_janitor, downloads_detox, image_forge, media_mill, pdf_press
 from goblinshift.processing.csv_janitor import recipe as csv_janitor_recipe
-from goblinshift.processing.downloads_detox import DownloadsDetoxV1
+from goblinshift.processing.downloads_detox import DownloadsDetox
 from goblinshift.processing.image_forge.recipe import ImageForgeV1
 from goblinshift.processing.media_mill.recipe import MediaMillV1
 from goblinshift.processing.pdf_press.recipe import PdfPressV1
@@ -57,7 +57,7 @@ _IMAGE_FORGE_V1: _Bound[image_forge.Params] = _Bound(
     image_forge.params_from_mapping, ImageForgeV1()
 )
 _DOWNLOADS_DETOX_V1: _Bound[downloads_detox.Params] = _Bound(
-    downloads_detox.params_from_mapping, DownloadsDetoxV1()
+    downloads_detox.params_from_mapping, DownloadsDetox()
 )
 _MEDIA_MILL_V1: _Bound[media_mill.Params] = _Bound(media_mill.params_from_mapping, MediaMillV1())
 

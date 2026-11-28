@@ -6,6 +6,7 @@ import pytest
 
 from goblinshift.processing.downloads_detox.classify import (
     TEXT_BLOCK_BYTES,
+    V1_FORMATS,
     Format,
     Refusal,
     classify,
@@ -17,7 +18,7 @@ FOUR_BYTE = "😀".encode()
 
 
 def classified(name: str, data: bytes) -> Format | Refusal:
-    return classify(io.BytesIO(data), name)
+    return classify(io.BytesIO(data), name, V1_FORMATS)
 
 
 @pytest.mark.parametrize(

@@ -10,7 +10,7 @@ from goblinshift.processing.downloads_detox.recipe import (
     MAX_TOTAL_INPUT_BYTES,
     OPAQUE_ARCHIVE_NOTE,
     OPAQUE_ARCHIVES_LIMIT,
-    DownloadsDetoxV1,
+    DownloadsDetox,
 )
 from goblinshift.processing.recipe import (
     FailureCode,
@@ -249,7 +249,7 @@ def test_saidas_exatamente_no_limite_do_lote_passam(work: Workspace) -> None:
     work.add("a.txt", b"a" * 6)
     work.add("b.txt", b"b" * 4)
 
-    report = work.run(recipe=DownloadsDetoxV1(max_total_bytes=10))
+    report = work.run(recipe=DownloadsDetox(max_total_bytes=10))
 
     assert report.has_outputs
 
@@ -259,7 +259,7 @@ def test_saidas_acima_do_limite_do_lote_falham_antes_de_copiar(work: Workspace) 
     work.add("b.txt", b"b" * 5)
 
     with pytest.raises(RecipeFailure) as caught:
-        work.run(recipe=DownloadsDetoxV1(max_total_bytes=10))
+        work.run(recipe=DownloadsDetox(max_total_bytes=10))
 
     assert caught.value.code is FailureCode.OUTPUT_LIMIT_EXCEEDED
     assert work.output_paths() == []
@@ -271,6 +271,6 @@ def test_duplicatas_e_rejeicoes_nao_contam_para_o_limite_do_lote(work: Workspace
     work.add("b.txt", b"a" * 10)
     work.add("c.png", b"c" * 10)
 
-    report = work.run(recipe=DownloadsDetoxV1(max_total_bytes=10))
+    report = work.run(recipe=DownloadsDetox(max_total_bytes=10))
 
     assert [type(item) for item in report.items] == [ItemOk, ItemDuplicate, ItemRejected]

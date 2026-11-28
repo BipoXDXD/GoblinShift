@@ -65,6 +65,11 @@ _FORMAT_BY_EXTENSION = {
     ".txt": Format.TXT,
     ".zip": Format.ZIP,
 }
+# Formatos que uma versão da receita aceita; a v1 fica congelada nos cinco de 1.4.
+type AcceptedFormats = frozenset[Format]
+V1_FORMATS: AcceptedFormats = frozenset(
+    {Format.JPEG, Format.PNG, Format.CSV, Format.TXT, Format.ZIP}
+)
 _LABEL = {Format.JPEG: "JPEG", Format.PNG: "PNG", Format.ZIP: "ZIP"}
 _BINARY_SIGNATURES = (
     (b"\xff\xd8\xff", Format.JPEG),
@@ -104,17 +109,21 @@ class Refusal:
     reason: str
 
 
-def classify(source: BinaryIO, original_name: str) -> Format | Refusal:
-    """Formato da entrada, lida do início; o texto é lido até o fim, em blocos."""
+def classify(source: BinaryIO, original_name: str, accepted: AcceptedFormats) -> Format | Refusal:
+    """Formato da entrada, lida do início; o texto é lido até o fim, em blocos.
+
+    Só valem a extensão e a assinatura dos formatos em `accepted`: o que a versão não aceita é
+    recusado pela extensão, e a assinatura dele nem é reconhecida.
+    """
     extension = extension_of(original_name)
-    expected = _format_by_extension(extension)
+    expected = _format_by_extension(extension, accepted)
     if expected is None:
-        accepted = ", ".join(_FORMAT_BY_EXTENSION)
-        return Refusal(f"extensão {extension or '(nenhuma)'} não aceita; aceitas: {accepted}")
+        names = ", ".join(ext for ext, fmt in _FORMAT_BY_EXTENSION.items() if fmt in accepted)
+        return Refusal(f"extensão {extension or '(nenhuma)'} não aceita; aceitas: {names}")
     head = source.read(TEXT_BLOCK_BYTES)
     if head.startswith(_EXECUTABLE_SIGNATURES):
         return Refusal("assinatura de executável ou script")
-    found = _binary_format(head)
+    found = _binary_format(head, accepted)
     if found is expected:
         return expected
     if found is not None:
@@ -125,15 +134,23 @@ def classify(source: BinaryIO, original_name: str) -> Format | Refusal:
     return expected if refusal is None else Refusal(refusal)
 
 
-def _format_by_extension(extension: str) -> Format | None:
+def _format_by_extension(extension: str, accepted: AcceptedFormats) -> Format | None:
     # Só ASCII: o casefold levaria um `s` longo (U+017F) de `.c\u017fv` a `.csv`.
     if not extension.isascii():
         return None
-    return _FORMAT_BY_EXTENSION.get(extension.casefold())
+    fmt = _FORMAT_BY_EXTENSION.get(extension.casefold())
+    return fmt if fmt in accepted else None
 
 
-def _binary_format(head: bytes) -> Format | None:
-    return next((fmt for signature, fmt in _BINARY_SIGNATURES if head.startswith(signature)), None)
+def _binary_format(head: bytes, accepted: AcceptedFormats) -> Format | None:
+    return next(
+        (
+            fmt
+            for signature, fmt in _BINARY_SIGNATURES
+            if fmt in accepted and head.startswith(signature)
+        ),
+        None,
+    )
 
 
 def _text_refusal(blocks: Iterable[bytes]) -> str | None:

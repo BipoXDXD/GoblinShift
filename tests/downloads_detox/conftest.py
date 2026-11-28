@@ -6,7 +6,7 @@ from pathlib import Path
 import pytest
 
 from goblinshift.processing.downloads_detox import Params
-from goblinshift.processing.downloads_detox.recipe import RECIPE_ID, DownloadsDetoxV1
+from goblinshift.processing.downloads_detox.recipe import RECIPE_ID, DownloadsDetox
 from goblinshift.processing.output_dir import RESERVED_NAMES, FileSystemOutputDir
 from goblinshift.processing.recipe import InputFile, Report
 
@@ -41,11 +41,9 @@ class Workspace:
         self.inputs.append(entry)
         return entry
 
-    def run(self, params: Params | None = None, recipe: DownloadsDetoxV1 | None = None) -> Report:
+    def run(self, params: Params | None = None, recipe: DownloadsDetox | None = None) -> Report:
         out = FileSystemOutputDir(self.out_dir, reserved_names=DETOX_RESERVED_NAMES)
-        return (recipe or DownloadsDetoxV1()).run(
-            params or Params(), self.inputs, out, self.progress
-        )
+        return (recipe or DownloadsDetox()).run(params or Params(), self.inputs, out, self.progress)
 
     def output_paths(self) -> list[str]:
         return sorted(

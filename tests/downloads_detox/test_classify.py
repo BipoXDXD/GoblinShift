@@ -4,14 +4,20 @@ import io
 
 import pytest
 
-from goblinshift.processing.downloads_detox.classify import Format, Kind, Refusal, classify
+from goblinshift.processing.downloads_detox.classify import (
+    V1_FORMATS,
+    Format,
+    Kind,
+    Refusal,
+    classify,
+)
 from tests.downloads_detox import samples
 
 ACCEPTED_EXTENSIONS = (".jpg", ".jpeg", ".png", ".csv", ".txt", ".zip")
 
 
 def classified(name: str, data: bytes) -> Format | Refusal:
-    return classify(io.BytesIO(data), name)
+    return classify(io.BytesIO(data), name, V1_FORMATS)
 
 
 # Conteúdo de cada formato e as extensões coerentes com ele.
