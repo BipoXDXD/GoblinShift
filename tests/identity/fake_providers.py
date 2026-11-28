@@ -135,7 +135,7 @@ class FakeProviders:
             "exp": now + 300,
             "email": GITHUB_USER["email"],
         }
-        if not self.omit_auth_time:
+        if not self.omit_auth_time and _requests_auth_time(grant.claims):
             claims["auth_time"] = now
         if grant.nonce is not None:
             claims["nonce"] = grant.nonce
@@ -213,6 +213,18 @@ class FakeProviders:
     def _client_authenticated(request: httpx.Request, client: OAuthClient) -> bool:
         expected = base64.b64encode(f"{client.client_id}:{client.client_secret}".encode())
         return request.headers.get("authorization") == f"Basic {expected.decode()}"
+
+
+def _requests_auth_time(claims: str | None) -> bool:
+    """O Google só põe `auth_time` no ID token quando o pedido o exige no parâmetro `claims`."""
+    if claims is None:
+        return False
+    try:
+        requested = json.loads(claims)
+    except json.JSONDecodeError:
+        return False
+    id_token = requested.get("id_token") if isinstance(requested, dict) else None
+    return isinstance(id_token, dict) and "auth_time" in id_token
 
 
 def _pkce_matches(grant: Grant, verifier: str | None) -> bool:
