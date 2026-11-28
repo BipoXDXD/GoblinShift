@@ -477,6 +477,8 @@ export const TEXT = {
         },
         tableCaption: (fileName: string, rows: number) =>
           `Amostra de ${fileName}: ${rows === 1 ? "1 registro" : `${String(rows)} registros`}`,
+        // Nome em branco no cabeçalho; `position` começa em 1 (D7 do plano contrato-e-front).
+        unnamedColumn: (position: number) => `Coluna ${String(position)}`,
         pagesCaption: (fileName: string, pages: number) =>
           `Páginas de ${fileName}: ${pages === 1 ? "1 página" : `${String(pages)} páginas`}`,
         page: (pageNumber: number, inputPosition: number) =>

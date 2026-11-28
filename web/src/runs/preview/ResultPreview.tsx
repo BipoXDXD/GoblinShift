@@ -154,7 +154,7 @@ function SampleTable({
                 scope="col"
                 className="border-b-2 border-line px-3 py-2 font-semibold whitespace-nowrap"
               >
-                {name}
+                {name.trim() === "" ? T.unnamedColumn(index + 1) : name}
               </th>
             ))}
           </tr>

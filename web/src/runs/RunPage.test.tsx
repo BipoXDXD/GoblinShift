@@ -770,6 +770,20 @@ describe("pré-visualização dos resultados", () => {
     expect(within(table).getByRole("cell", { name: "ana@example.com" })).toBeInTheDocument();
   });
 
+  it("CSV: rotula as colunas sem nome do cabeçalho da prévia", async () => {
+    setupPreview({ fileName: "clientes.csv", previewName: "clientes.csv" }, () =>
+      bytes("nome,, \nAna,1,2,extra\n"),
+    );
+
+    const table = await screen.findByRole("table", { name: "Amostra de clientes.csv: 1 registro" });
+    expect(
+      within(table)
+        .getAllByRole("columnheader")
+        .map((th) => th.textContent),
+    ).toEqual(["nome", "Coluna 2", "Coluna 3", "Coluna 4"]);
+    expect(within(table).getByRole("cell", { name: "extra" })).toBeInTheDocument();
+  });
+
   it("CSV: a caixa rolável da amostra recebe foco e tem o nome da legenda", async () => {
     setupPreview({ fileName: "clientes.csv", previewName: "clientes.csv" }, () =>
       bytes("nome,email\nAna,ana@example.com\n"),
