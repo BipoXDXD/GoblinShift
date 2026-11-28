@@ -245,9 +245,21 @@ def test_formatos_de_imagem_cobrem_entrada_e_saida_da_v1() -> None:
     assert v1 <= values(ImageFormat)
 
 
-def test_comparacao_da_v2_aceita_webp_e_gif() -> None:
+def test_formatos_de_imagem_cobrem_entrada_e_saida_da_v2() -> None:
     v2 = {name.lower() for name in (*V2_FORMATS, MPO)} | values(SaveFormat)
     assert v2 <= values(ImageFormat)
+
+
+def test_comparacao_da_v2_aceita_webp_e_gif() -> None:
+    details = IMAGE_DETAILS | {"format_before": "gif", "format_after": "webp"}
+
+    comparison = comparison_from_report("image-forge", {}, details)
+
+    assert isinstance(comparison, ImageComparison)
+    assert (comparison.format_before, comparison.format_after) == (
+        ImageFormat.GIF,
+        ImageFormat.WEBP,
+    )
 
 
 def test_formatos_de_audio_cobrem_os_da_v1_do_media_mill() -> None:
