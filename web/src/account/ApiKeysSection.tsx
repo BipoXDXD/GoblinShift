@@ -106,6 +106,8 @@ export function ApiKeysSection({ now }: { readonly now: () => number }): ReactEl
                 setFormOpen(false);
                 setRestored(null);
               });
+              // Um REAUTH deixou as escolhas na URL: sem isto, recarregar reabriria o formulário.
+              setSearchParams(withoutNewKeyChoices, { replace: true });
             }}
           />
         )}

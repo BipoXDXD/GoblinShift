@@ -38,7 +38,7 @@ export function NewKeyForm({ onCreated, onCancel, initial }: NewKeyFormProps): R
   const queryClient = useQueryClient();
   const headingId = useId();
   const heading = useRef<HTMLHeadingElement>(null);
-  const ids = { scopes: useId(), days: useId() };
+  const ids = { scopes: useId(), days: useId(), kept: useId() };
   const [, setSearchParams] = useSearchParams();
   const [scopes, setScopes] = useState<ReadonlySet<Scope>>(() => new Set(initial?.scopes ?? []));
   const [days, setDays] = useState(initial?.days ?? String(KEY_DAYS.initial));
@@ -109,6 +109,7 @@ export function NewKeyForm({ onCreated, onCancel, initial }: NewKeyFormProps): R
   return (
     <form
       aria-labelledby={headingId}
+      aria-describedby={initial === undefined ? undefined : ids.kept}
       noValidate
       onSubmit={submit}
       className="flex flex-col gap-6 rounded-lg bg-surface-sunken p-6"
@@ -116,7 +117,11 @@ export function NewKeyForm({ onCreated, onCancel, initial }: NewKeyFormProps): R
       <h3 id={headingId} ref={heading} tabIndex={-1} className="font-semibold text-fg">
         {T.formHeading}
       </h3>
-      {initial !== undefined && <p className="text-sm text-fg-muted">{T.choicesKept}</p>}
+      {initial !== undefined && (
+        <p id={ids.kept} className="text-sm text-fg-muted">
+          {T.choicesKept}
+        </p>
+      )}
       <ErrorSummary issues={issues} attempt={attempt} headingLevel={4} />
       <FieldGroup id={ids.scopes} legend={T.scopes} error={errors.scopes}>
         <div className="flex flex-col gap-1">

@@ -843,6 +843,25 @@ describe("Acesso: chave nova", () => {
       });
     });
 
+    it("cancelar depois do REAUTH tira as escolhas da URL", async () => {
+      const { user, router } = setup({
+        "POST /api/v1/api-keys": () => problemResponse(401, "REAUTH_REQUIRED"),
+      });
+      const form = await openForm(user);
+      await user.click(within(form).getByLabelText("Ver execuções (runs:read)"));
+      await user.click(within(form).getByRole("button", { name: "Criar chave" }));
+      await section("Entre de novo para confirmar");
+      await waitFor(() => {
+        expect(currentUrl(router)).toContain("nova_chave=1");
+      });
+
+      await user.click(within(form).getByRole("button", { name: "Cancelar" }));
+
+      await waitFor(() => {
+        expect(currentUrl(router)).toBe("/acesso");
+      });
+    });
+
     it("outro erro ao criar não grava as escolhas na URL", async () => {
       const { user, router } = setup({
         "POST /api/v1/api-keys": () => problemResponse(409, "STATE_CONFLICT"),
@@ -867,6 +886,7 @@ describe("Acesso: chave nova", () => {
       }
       expect(within(form).getByLabelText("Validade, em dias")).toHaveValue("7");
       expect(within(form).getByText(TEXT.account.keys.choicesKept)).toBeVisible();
+      expect(form).toHaveAccessibleDescription(TEXT.account.keys.choicesKept);
       expect(screen.getByRole("heading", { name: "Nova chave de API" })).toHaveFocus();
       await waitFor(() => {
         expect(currentUrl(router)).toBe("/acesso");
@@ -883,8 +903,10 @@ describe("Acesso: chave nova", () => {
       await user.click(within(form).getByRole("button", { name: "Criar chave" }));
 
       await section("Chave criada: gsk_nova");
+      await waitFor(() => {
+        expect(currentUrl(router)).not.toContain("nova_chave");
+      });
       expect(currentUrl(router)).not.toContain(CANARY);
-      expect(currentUrl(router)).not.toContain("nova_chave");
     });
 
     it("cancelar e abrir de novo traz o formulário vazio", async () => {
@@ -897,6 +919,7 @@ describe("Acesso: chave nova", () => {
       expect(within(form).getByLabelText("Ver execuções (runs:read)")).not.toBeChecked();
       expect(within(form).getByLabelText("Validade, em dias")).toHaveValue("30");
       expect(within(form).queryByText(TEXT.account.keys.choicesKept)).toBeNull();
+      expect(form).not.toHaveAttribute("aria-describedby");
     });
 
     it("escopo desconhecido na URL não marca nada", async () => {
