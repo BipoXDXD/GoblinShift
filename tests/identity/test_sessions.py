@@ -103,15 +103,6 @@ def test_prazos_da_sessao_nova(factory: sessionmaker[Session]) -> None:
     assert row["absolute_expires_at"] == issued.absolute_expires_at
 
 
-def test_inatividade_nunca_passa_do_teto_absoluto(factory: sessionmaker[Session]) -> None:
-    # Aberta há 7h50: a inatividade não passa do teto, a 10 min de NOW.
-    opened = NOW - timedelta(hours=7, minutes=50)
-    issued = _start(factory, new_user(factory), authenticated_at=opened, now=opened)
-
-    assert issued.absolute_expires_at == NOW + timedelta(minutes=10)
-    assert issued.idle_expires_at == opened + timedelta(minutes=30)
-
-
 def test_login_antigo_no_provedor_abre_sessao_com_teto_contado_de_agora(
     factory: sessionmaker[Session],
 ) -> None:

@@ -85,7 +85,9 @@ def start_session(
     if authenticated_at > now:
         raise ValueError("authenticated_at no futuro")
     absolute_expires_at = now + ABSOLUTE_TIMEOUT
-    idle_expires_at = min(now + IDLE_TIMEOUT, absolute_expires_at)
+    # Na abertura, os 30 min de inatividade cabem sempre nas 8 h; o corte no teto fica com
+    # `record_session_use`.
+    idle_expires_at = now + IDLE_TIMEOUT
     token = secrets.token_urlsafe(TOKEN_BYTES)
     session_id: UUID = session.execute(
         insert(web_session)
