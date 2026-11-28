@@ -469,6 +469,44 @@ def test_repeticao_com_rotacoes_diferentes(
     ]
 
 
+def _invalid_rotations(pdf: pikepdf.Pdf) -> None:
+    """`/Rotate` não numérico: Name na página 1 e String na página 2."""
+    pdf.pages[0].obj.Rotate = pikepdf.Name("/Noventa")
+    pdf.pages[1].obj.Rotate = pikepdf.String("90")
+
+
+def raw_rotations(data: bytes) -> list[str]:
+    with pikepdf.open(io.BytesIO(data)) as pdf:
+        return [repr(page.obj.get("/Rotate")) for page in pdf.pages]
+
+
+INVALID_ROTATIONS = ['pikepdf.Name("/Noventa")', 'pikepdf.String("90")']
+
+
+def test_v1_grava_rotate_nao_numerico_como_esta(work: Workspace) -> None:
+    work.add("a.pdf", samples.document("a", pages=2, mutate=_invalid_rotations), UPLOAD_A)
+
+    work.run(select((UPLOAD_A, 1), (UPLOAD_A, 2), (UPLOAD_A, 1)))
+
+    assert raw_rotations(work.read("selection.pdf")) == [*INVALID_ROTATIONS, INVALID_ROTATIONS[0]]
+
+
+def test_v2_sem_rotacao_deixa_rotate_nao_numerico_intocado(work: Workspace) -> None:
+    work.add("a.pdf", samples.document("a", pages=2, mutate=_invalid_rotations), UPLOAD_A)
+
+    work.run(Params())
+
+    assert raw_rotations(work.read("merged.pdf")) == INVALID_ROTATIONS
+
+
+def test_v2_girando_rotate_nao_numerico_parte_de_zero(work: Workspace) -> None:
+    work.add("a.pdf", samples.document("a", pages=2, mutate=_invalid_rotations), UPLOAD_A)
+
+    work.run(Params(rotation=90))
+
+    assert rotations(work.read("merged.pdf")) == [90, 90]
+
+
 def test_split_girado_gira_cada_parte(work: Workspace) -> None:
     work.add("a.pdf", samples.document("a", pages=2))
 

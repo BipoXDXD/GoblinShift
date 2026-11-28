@@ -73,7 +73,11 @@ class DocumentWriter:
             for page in planned.pages:
                 origin = sources[page.position].pdf.pages[page.page_number - 1]
                 composed.pages.append(origin)
-                _set_rotation(composed.pages[-1], _inherited_rotation(origin) + page.rotation)
+                if page.rotation:
+                    base = _numeric_rotation(_resolved_rotate(origin)) or 0
+                    _set_rotation(composed.pages[-1], base + page.rotation)
+                else:
+                    _keep_origin_rotation(composed.pages[-1], origin)
             _drop_private_metadata(composed)
             if self._strip_annotation_metadata:
                 _drop_annotation_metadata(composed)
@@ -93,16 +97,33 @@ def _set_rotation(copy: pikepdf.Page, degrees: int) -> None:
     """Grava na cópia a rotação absoluta, calculada da origem, nunca do objeto copiado.
 
     A mesma página de origem repetida sai do cache do qpdf como cópia rasa, com o `/Rotate` que
-    a cópia anterior recebeu; por isso cada cópia recebe o valor absoluto. Quando a cópia já tem a
-    rotação certa (sempre na v1, que não gira), o dicionário não é tocado e os bytes não mudam.
+    a cópia anterior recebeu; por isso cada cópia recebe o valor absoluto.
     """
     absolute = degrees % 360
-    if _inherited_rotation(copy) != absolute:
+    if _numeric_rotation(_resolved_rotate(copy)) != absolute:
         copy.obj.Rotate = absolute
 
 
-def _inherited_rotation(page: pikepdf.Page) -> int:
-    """O `/Rotate` efetivo da página: o próprio ou o herdado do nó `/Pages` mais próximo."""
+def _keep_origin_rotation(copy: pikepdf.Page, origin: pikepdf.Page) -> None:
+    """Sem rotação pedida, a cópia fica com o `/Rotate` da origem, mesmo não numérico.
+
+    Só mexe quando a cópia rasa de uma página repetida trouxe a rotação de outra cópia; na v1,
+    que nunca gira, a cópia já é igual à origem e o dicionário não é tocado.
+    """
+    original = _resolved_rotate(origin)
+    if repr(_resolved_rotate(copy)) != repr(original):
+        copy.obj.Rotate = 0 if original is None else original
+
+
+def _numeric_rotation(rotate: object) -> int | None:
+    """O ângulo de um `/Rotate` inteiro; None quando falta ou não é número (Name, String)."""
+    if isinstance(rotate, int) and not isinstance(rotate, bool):
+        return rotate % 360
+    return None
+
+
+def _resolved_rotate(page: pikepdf.Page) -> object:
+    """O `/Rotate` efetivo da página, como está: o próprio ou o do nó `/Pages` mais próximo."""
     node: pikepdf.Object | None = page.obj
     visited: set[tuple[int, int]] = set()
     while isinstance(node, pikepdf.Dictionary):
@@ -112,9 +133,9 @@ def _inherited_rotation(page: pikepdf.Page) -> int:
             visited.add(node.objgen)
         rotate = node.get("/Rotate")
         if rotate is not None:
-            return int(rotate) % 360
+            return rotate
         node = node.get("/Parent")
-    return 0
+    return None
 
 
 def _save(
