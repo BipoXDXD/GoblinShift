@@ -2494,6 +2494,15 @@ export interface operations {
                     "application/octet-stream": string;
                 };
             };
+            /** @description Navegação do navegador que falhou: volta à tela da execução com ?falha=<code>. */
+            303: {
+                headers: {
+                    /** @description Tela da execução de origem: /execucoes/<uuid>?falha=<code>. */
+                    Location: string;
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
             /** @description Unauthorized */
             401: {
                 headers: {
