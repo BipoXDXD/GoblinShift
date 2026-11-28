@@ -29,6 +29,8 @@ EXAMPLE_VALUES = {
     "run_id": "019a0000-0000-7000-8000-000000000002",
     "public_id": "0123456789abcdef",
     "ref": "4f1c2b7e-9a3d-4e5f-8b6a-0c1d2e3f4a5b",
+    # Teto global de armazenamento (deploy/openobserve/README.md; tests/test_docs_operacao.py).
+    "bytes": str(30 * 1024**3),
 }
 
 

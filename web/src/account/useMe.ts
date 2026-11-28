@@ -8,6 +8,7 @@ import {
 import { useApiClient } from "../api/ApiClientContext";
 import type { ApiClient } from "../api/client";
 import { ApiError } from "../api/response";
+import { forgetAccountData } from "./accountCache";
 import { getMe, ME_QUERY_KEY, type Me } from "./api";
 
 /** Quanto o GET /me vale no cache: a navegação entre telas não repete o pedido a cada troca. */
@@ -53,7 +54,8 @@ export function isSignedOut(account: Me | null | undefined): boolean {
  * Faz o GET /me ser relido quando outra chamada mostra que a sessão acabou ou que os termos
  * mudaram: o cabeçalho e o aceite dos termos decidem pelo /me, que é a fonte única desse estado.
  * Ligado no QueryCache e no MutationCache do app (App.tsx). A falha do próprio /me não relê o /me,
- * senão o 401 sem sessão viraria um laço de pedidos.
+ * senão o 401 sem sessão viraria um laço de pedidos. O 401 também esquece antes os dados das telas
+ * (accountCache.ts): nada da conta anterior fica na tela enquanto o /me é relido.
  */
 export function refreshAccountOn(
   queryClient: QueryClient,
@@ -61,7 +63,13 @@ export function refreshAccountOn(
   return (error, queryKey) => {
     const code = problemCode(error);
     const fromMe = queryKey?.[0] === ME_QUERY_KEY[0];
-    if (!fromMe && (code === "AUTHENTICATION_REQUIRED" || code === "TERMS_NOT_ACCEPTED")) {
+    if (fromMe) {
+      return;
+    }
+    if (code === "AUTHENTICATION_REQUIRED") {
+      forgetAccountData(queryClient);
+    }
+    if (code === "AUTHENTICATION_REQUIRED" || code === "TERMS_NOT_ACCEPTED") {
       void queryClient.invalidateQueries({ queryKey: ME_QUERY_KEY, refetchType: "active" });
     }
   };
