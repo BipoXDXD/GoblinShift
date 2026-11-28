@@ -327,6 +327,27 @@ def test_sigterm_no_cliente_do_start_repete_o_religamento(fakes: Path) -> None:
     ]
 
 
+def test_start_lento_fica_marcado_antes_de_a_chamada_aparecer(fakes: Path) -> None:
+    # O teste do SIGTERM sinaliza assim que vê a chamada no registro: se o marcador do start lento
+    # viesse depois, o start repetido pelo trap dormiria os 30 s inteiros. Com o registro numa FIFO
+    # sem leitor, o fake trava ao abri-lo, e só a ordem decide se o marcador já existe nesse ponto.
+    calls = fakes / "calls"
+    os.mkfifo(calls)
+    process = subprocess.Popen(  # noqa: S603 - fake do próprio teste
+        [str(fakes / "bin" / "docker"), "start", WORKER],
+        env={**script_env(fakes, CHECK_URL, WORKER), "FAKE_START_SLEEP_S": "0"},
+    )
+    try:
+        deadline = time.monotonic() + 5
+        while not (fakes / "calls.start").exists() and time.monotonic() < deadline:
+            time.sleep(0.01)
+        assert (fakes / "calls.start").exists()
+    finally:
+        with calls.open() as reader:
+            reader.read()
+        process.wait(timeout=SCRIPT_TIMEOUT_S)
+
+
 @pytest.mark.parametrize("state", ["false", ""])
 def test_worker_que_nao_ficou_rodando_reprova_mesmo_com_o_start_aceito(
     fakes: Path, state: str
