@@ -534,7 +534,7 @@ def test_cancelamento_falho_na_purga_conta_e_tenta_no_ciclo_seguinte(
     maintenance: Maintenance,
     caplog: pytest.LogCaptureFixture,
 ) -> None:
-    """51a: a Run que o `DELETE /me` não cancelou é cancelada pela purga; uma falha no
+    """#442: a Run que o `DELETE /me` não cancelou é cancelada pela purga; uma falha no
     cancelamento conta, fica no log e a conta volta no ciclo seguinte."""
     owner = create_user(factory, "ana")
     queue_run(factory, storage, owner)

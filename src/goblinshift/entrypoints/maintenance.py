@@ -19,7 +19,7 @@ import time
 from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass
 from datetime import UTC, datetime
-from enum import Enum
+from enum import Enum, auto
 from functools import partial
 from uuid import UUID
 
@@ -208,7 +208,7 @@ class AccountJobs:
     `identity` (chaves, sessões, capacidade e a conta). Cada lote é uma transação; uma etapa que
     ainda não terminou adia as seguintes para o próximo ciclo, e a purga interrompida retoma do
     banco. Conta com Run não terminal espera: `runs` não apaga a Run e não termina, e a purga pede
-    o cancelamento dela (`cancel_active_run`), que o `DELETE /me` pode não ter completado (51a).
+    o cancelamento dela (`cancel_active_run`), que o `DELETE /me` pode não ter completado (#442).
 
     Passos independentes, como no ciclo de execuções: a exceção de um fica no log e em
     `account_steps_failed`, e os outros seguem, inclusive o alerta da exclusão atrasada; as
@@ -321,8 +321,10 @@ class AccountJobs:
                 _log_purge_failure(owner_id, error)
                 failed += 1
                 continue
-            purged += outcome is _Purge.DONE
-            cancel_failed += outcome is _Purge.CANCEL_FAILED
+            if outcome == _Purge.DONE:
+                purged += 1
+            elif outcome == _Purge.CANCEL_FAILED:
+                cancel_failed += 1
         return {
             "accounts_purged": purged,
             ACCOUNTS_PURGE_FAILED: failed,
@@ -340,7 +342,7 @@ class AccountJobs:
         return _Purge.DONE
 
     def _cancel_pending_run(self, owner_id: UUID) -> _Purge:
-        """Cancela a Run não terminal que o `DELETE /me` deixou (falha depois do commit, 51a).
+        """Cancela a Run não terminal que o `DELETE /me` deixou (falha depois do commit, #442).
 
         Repetir a cada ciclo é seguro: o cancelamento é idempotente e, sem Run não terminal, não
         faz nada. A purga segue quando a Run terminar. A falha fica no log e na contagem, e a conta
@@ -363,9 +365,9 @@ class AccountJobs:
 class _Purge(Enum):
     """Como terminou a tentativa de purga de uma conta no ciclo."""
 
-    DONE = "done"
-    PENDING = "pending"
-    CANCEL_FAILED = "cancel_failed"
+    DONE = auto()
+    PENDING = auto()
+    CANCEL_FAILED = auto()
 
 
 def _log_purge_failure(

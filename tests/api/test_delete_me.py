@@ -141,7 +141,7 @@ def test_delete_me_com_cancelamento_falho_a_manutencao_cancela_e_purga(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
 ) -> None:
-    """51a: o cancelamento roda depois do commit do pedido; se falhar, a resposta é 500, a sessão
+    """#442: o cancelamento roda depois do commit do pedido; se falhar, a resposta é 500, a sessão
     já caiu e quem completa é a purga da manutenção."""
     finished = RecordedFinished(factory)
     app.state.run_finished = finished.reporter

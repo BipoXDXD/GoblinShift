@@ -306,7 +306,7 @@ def test_worker_e_manutencao_rodam_o_ciclo_de_uma_run_com_os_papeis_novos(
 def test_manutencao_cancela_e_purga_a_run_da_conta_pedida_com_o_papel_novo(
     runtime_factory: Callable[[str], sessionmaker[Session]], owner: Engine, tmp_path: Path
 ) -> None:
-    """51a: a Run que o `DELETE /me` não cancelou é cancelada pela purga, como `gs_maintenance`."""
+    """#442: a Run que o `DELETE /me` não cancelou é cancelada pela purga, como `gs_maintenance`."""
     app = runtime_factory("gs_app")
     maintenance = runtime_factory("gs_maintenance")
     storage = FileStorage(tmp_path / "storage")
