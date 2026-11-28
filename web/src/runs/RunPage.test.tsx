@@ -787,6 +787,43 @@ describe("pré-visualização dos resultados", () => {
     expect(await axeViolations(table)).toEqual([]);
   });
 
+  it("CSV: cabeçalho vazio rotula todas as colunas pela posição", async () => {
+    setupPreview({ fileName: "clientes.csv", previewName: "clientes.csv" }, () => bytes("\n1,2\n"));
+
+    const table = await screen.findByRole("table", { name: "Amostra de clientes.csv: 1 registro" });
+    expect(
+      within(table)
+        .getAllByRole("columnheader")
+        .map((th) => th.textContent),
+    ).toEqual(["Coluna 1", "Coluna 2"]);
+  });
+
+  it("CSV: o rótulo da coluna sem nome não repete um cabeçalho real", async () => {
+    setupPreview({ fileName: "clientes.csv", previewName: "clientes.csv" }, () =>
+      bytes("Coluna 2,,\nAna,1,2\n"),
+    );
+
+    const table = await screen.findByRole("table", { name: "Amostra de clientes.csv: 1 registro" });
+    expect(
+      within(table)
+        .getAllByRole("columnheader")
+        .map((th) => th.textContent),
+    ).toEqual(["Coluna 2", "Coluna 2 (2)", "Coluna 3"]);
+  });
+
+  it("CSV: o sufixo do rótulo também não repete um cabeçalho real", async () => {
+    setupPreview({ fileName: "clientes.csv", previewName: "clientes.csv" }, () =>
+      bytes("Coluna 2 (2),,Coluna 2\nAna,1,2\n"),
+    );
+
+    const table = await screen.findByRole("table", { name: "Amostra de clientes.csv: 1 registro" });
+    expect(
+      within(table)
+        .getAllByRole("columnheader")
+        .map((th) => th.textContent),
+    ).toEqual(["Coluna 2 (2)", "Coluna 2 (3)", "Coluna 2"]);
+  });
+
   it("CSV: a caixa rolável da amostra recebe foco e tem o nome da legenda", async () => {
     setupPreview({ fileName: "clientes.csv", previewName: "clientes.csv" }, () =>
       bytes("nome,email\nAna,ana@example.com\n"),
