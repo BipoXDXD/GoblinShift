@@ -18,12 +18,13 @@ from goblinshift.processing.image_forge.params_v2 import (
     ParamsV2,
     params_v2_from_mapping,
 )
-from goblinshift.processing.image_forge.version import RECIPE_ID, VERSION, VERSION_2
+from goblinshift.processing.image_forge.version import RECIPE_ID, VERSION, VERSION_1, VERSION_2
 
 __all__ = [
     "MAX_INPUTS",
     "RECIPE_ID",
     "VERSION",
+    "VERSION_1",
     "VERSION_2",
     "HexColor",
     "InvalidParametersError",

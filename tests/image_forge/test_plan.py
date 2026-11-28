@@ -4,6 +4,7 @@ from collections.abc import Mapping
 
 import pytest
 
+from goblinshift.processing import image_forge
 from goblinshift.processing.image_forge import (
     InvalidParametersError,
     OutputFormat,
@@ -111,3 +112,7 @@ def test_combinacao_valida_da_v2_e_aceita(raw: Mapping[str, object]) -> None:
 def test_valor_fora_do_tipo_ou_da_faixa_e_recusado(raw: Mapping[str, object], field: str) -> None:
     with pytest.raises(InvalidParametersError, match=field):
         params_v2_from_mapping(raw)
+
+
+def test_version_continua_apontando_para_a_v1() -> None:
+    assert (image_forge.VERSION, image_forge.VERSION_1, image_forge.VERSION_2) == (1, 1, 2)

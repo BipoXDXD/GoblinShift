@@ -13,6 +13,16 @@ from dataclasses import dataclass, fields
 from enum import StrEnum
 from typing import ClassVar, Self
 
+from goblinshift.processing.image_forge.validation import (
+    InvalidParametersError as InvalidParametersError,
+)
+from goblinshift.processing.image_forge.validation import (
+    boolean,
+    integer,
+    require_range,
+    string,
+)
+
 MIN_SIDE = 16
 MAX_SIDE = 4096
 DEFAULT_SIDE = 1600
@@ -20,10 +30,6 @@ MIN_JPEG_QUALITY = 60
 MAX_JPEG_QUALITY = 95
 DEFAULT_JPEG_QUALITY = 85
 MAX_CHANNEL = 255
-
-
-class InvalidParametersError(ValueError):
-    """Configuração recusada antes de ler qualquer imagem."""
 
 
 class OutputFormat(StrEnum):
@@ -73,9 +79,9 @@ class Params:
     make_thumbnails: bool = False
 
     def __post_init__(self) -> None:
-        _require_range("max_width", self.max_width, MIN_SIDE, MAX_SIDE)
-        _require_range("max_height", self.max_height, MIN_SIDE, MAX_SIDE)
-        _require_range("jpeg_quality", self.jpeg_quality, MIN_JPEG_QUALITY, MAX_JPEG_QUALITY)
+        require_range("max_width", self.max_width, MIN_SIDE, MAX_SIDE)
+        require_range("max_height", self.max_height, MIN_SIDE, MAX_SIDE)
+        require_range("jpeg_quality", self.jpeg_quality, MIN_JPEG_QUALITY, MAX_JPEG_QUALITY)
         if self.output_format is OutputFormat.PNG:
             self._require_jpeg_options_at_default()
 
@@ -100,49 +106,23 @@ def params_from_mapping(raw: Mapping[str, object]) -> Params:
     if unknown:
         raise InvalidParametersError(f"opções desconhecidas: {unknown}")
     return Params(
-        max_width=_integer(raw.get("max_width", DEFAULT_SIDE), "max_width"),
-        max_height=_integer(raw.get("max_height", DEFAULT_SIDE), "max_height"),
+        max_width=integer(raw.get("max_width", DEFAULT_SIDE), "max_width"),
+        max_height=integer(raw.get("max_height", DEFAULT_SIDE), "max_height"),
         output_format=_output_format(raw.get("output_format", OutputFormat.PRESERVE.value)),
-        jpeg_quality=_integer(raw.get("jpeg_quality", DEFAULT_JPEG_QUALITY), "jpeg_quality"),
+        jpeg_quality=integer(raw.get("jpeg_quality", DEFAULT_JPEG_QUALITY), "jpeg_quality"),
         jpeg_background=HexColor.parse(
-            _string(raw.get("jpeg_background", str(WHITE)), "jpeg_background")
+            string(raw.get("jpeg_background", str(WHITE)), "jpeg_background")
         ),
-        make_thumbnails=_boolean(raw.get("make_thumbnails", False), "make_thumbnails"),
+        make_thumbnails=boolean(raw.get("make_thumbnails", False), "make_thumbnails"),
     )
 
 
 _KNOWN_OPTIONS = frozenset(field.name for field in fields(Params))
 
 
-def _require_range(option: str, value: int, minimum: int, maximum: int) -> None:
-    if isinstance(value, bool) or not isinstance(value, int):
-        raise InvalidParametersError(f"{option} deve ser inteiro")
-    if not minimum <= value <= maximum:
-        raise InvalidParametersError(f"{option} deve estar entre {minimum} e {maximum}")
-
-
 def _output_format(raw: object) -> OutputFormat:
     try:
-        return OutputFormat(_string(raw, "output_format"))
+        return OutputFormat(string(raw, "output_format"))
     except ValueError:
         allowed = [member.value for member in OutputFormat]
         raise InvalidParametersError(f"output_format deve ser um de {allowed}") from None
-
-
-def _integer(raw: object, option: str) -> int:
-    # bool é subclasse de int em Python; `true` do JSON não é um tamanho.
-    if isinstance(raw, bool) or not isinstance(raw, int):
-        raise InvalidParametersError(f"{option} deve ser inteiro")
-    return raw
-
-
-def _boolean(raw: object, option: str) -> bool:
-    if not isinstance(raw, bool):
-        raise InvalidParametersError(f"{option} deve ser booleano")
-    return raw
-
-
-def _string(raw: object, option: str) -> str:
-    if not isinstance(raw, str):
-        raise InvalidParametersError(f"{option} deve ser texto")
-    return raw

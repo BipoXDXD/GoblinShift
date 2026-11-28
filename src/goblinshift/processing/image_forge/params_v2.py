@@ -27,6 +27,7 @@ from goblinshift.processing.image_forge.params import (
     HexColor,
     InvalidParametersError,
 )
+from goblinshift.processing.image_forge.validation import boolean, integer, require_range, string
 
 MIN_WEBP_QUALITY = 60
 MAX_WEBP_QUALITY = 95
@@ -62,11 +63,11 @@ class ParamsV2:
     webp_lossless: bool = False  # só nas saídas WebP
 
     def __post_init__(self) -> None:
-        _require_range("max_width", self.max_width, MIN_SIDE, MAX_SIDE)
-        _require_range("max_height", self.max_height, MIN_SIDE, MAX_SIDE)
-        _require_range("jpeg_quality", self.jpeg_quality, MIN_JPEG_QUALITY, MAX_JPEG_QUALITY)
-        _require_range("webp_quality", self.webp_quality, MIN_WEBP_QUALITY, MAX_WEBP_QUALITY)
-        _require_range("scale_percent", self.scale_percent, MIN_SCALE_PERCENT, MAX_SCALE_PERCENT)
+        require_range("max_width", self.max_width, MIN_SIDE, MAX_SIDE)
+        require_range("max_height", self.max_height, MIN_SIDE, MAX_SIDE)
+        require_range("jpeg_quality", self.jpeg_quality, MIN_JPEG_QUALITY, MAX_JPEG_QUALITY)
+        require_range("webp_quality", self.webp_quality, MIN_WEBP_QUALITY, MAX_WEBP_QUALITY)
+        require_range("scale_percent", self.scale_percent, MIN_SCALE_PERCENT, MAX_SCALE_PERCENT)
         if self.fit is FitMode.SCALE:
             self._require_default(
                 "fit é scale", ("max_width", DEFAULT_SIDE), ("max_height", DEFAULT_SIDE)
@@ -102,55 +103,29 @@ def params_v2_from_mapping(raw: Mapping[str, object]) -> ParamsV2:
     if unknown:
         raise InvalidParametersError(f"opções desconhecidas: {unknown}")
     return ParamsV2(
-        max_width=_integer(raw.get("max_width", DEFAULT_SIDE), "max_width"),
-        max_height=_integer(raw.get("max_height", DEFAULT_SIDE), "max_height"),
+        max_width=integer(raw.get("max_width", DEFAULT_SIDE), "max_width"),
+        max_height=integer(raw.get("max_height", DEFAULT_SIDE), "max_height"),
         output_format=_choice(
             raw.get("output_format", OutputFormatV2.PRESERVE.value), "output_format", OutputFormatV2
         ),
-        jpeg_quality=_integer(raw.get("jpeg_quality", DEFAULT_JPEG_QUALITY), "jpeg_quality"),
+        jpeg_quality=integer(raw.get("jpeg_quality", DEFAULT_JPEG_QUALITY), "jpeg_quality"),
         jpeg_background=HexColor.parse(
-            _string(raw.get("jpeg_background", str(WHITE)), "jpeg_background")
+            string(raw.get("jpeg_background", str(WHITE)), "jpeg_background")
         ),
-        make_thumbnails=_boolean(raw.get("make_thumbnails", False), "make_thumbnails"),
+        make_thumbnails=boolean(raw.get("make_thumbnails", False), "make_thumbnails"),
         fit=_choice(raw.get("fit", FitMode.CONTAIN.value), "fit", FitMode),
-        scale_percent=_integer(raw.get("scale_percent", DEFAULT_SCALE_PERCENT), "scale_percent"),
-        webp_quality=_integer(raw.get("webp_quality", DEFAULT_WEBP_QUALITY), "webp_quality"),
-        webp_lossless=_boolean(raw.get("webp_lossless", False), "webp_lossless"),
+        scale_percent=integer(raw.get("scale_percent", DEFAULT_SCALE_PERCENT), "scale_percent"),
+        webp_quality=integer(raw.get("webp_quality", DEFAULT_WEBP_QUALITY), "webp_quality"),
+        webp_lossless=boolean(raw.get("webp_lossless", False), "webp_lossless"),
     )
 
 
 _KNOWN_OPTIONS = frozenset(field.name for field in fields(ParamsV2))
 
 
-def _require_range(option: str, value: int, minimum: int, maximum: int) -> None:
-    if isinstance(value, bool) or not isinstance(value, int):
-        raise InvalidParametersError(f"{option} deve ser inteiro")
-    if not minimum <= value <= maximum:
-        raise InvalidParametersError(f"{option} deve estar entre {minimum} e {maximum}")
-
-
 def _choice[E: StrEnum](raw: object, option: str, enum: type[E]) -> E:
     try:
-        return enum(_string(raw, option))
+        return enum(string(raw, option))
     except ValueError:
         allowed = [member.value for member in enum]
         raise InvalidParametersError(f"{option} deve ser um de {allowed}") from None
-
-
-def _integer(raw: object, option: str) -> int:
-    # bool é subclasse de int em Python; `true` do JSON não é um tamanho.
-    if isinstance(raw, bool) or not isinstance(raw, int):
-        raise InvalidParametersError(f"{option} deve ser inteiro")
-    return raw
-
-
-def _boolean(raw: object, option: str) -> bool:
-    if not isinstance(raw, bool):
-        raise InvalidParametersError(f"{option} deve ser booleano")
-    return raw
-
-
-def _string(raw: object, option: str) -> str:
-    if not isinstance(raw, str):
-        raise InvalidParametersError(f"{option} deve ser texto")
-    return raw
