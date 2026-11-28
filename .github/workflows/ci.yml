@@ -417,7 +417,10 @@ jobs:
       - name: Tamanho da imagem do executor (amd64)
         # O job executor-image grava o índice OCI sem carregá-lo no Docker; aqui a imagem que os
         # testes construíram (amd64, mesmo Dockerfile) está no Docker do runner. Orçamento do
-        # ADR 063: +3 MiB.
+        # ADR 063: +3 MiB. A base é a imagem publicada do commit de partida (pública no GHCR),
+        # medida no mesmo Docker; sem ela (release pulada) o passo só informa o tamanho absoluto.
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha || github.event.before }}
         run: |
           mapfile -t imagens < <(docker image ls --filter 'reference=goblinshift-executor:test-*' --format '{{.Repository}}:{{.Tag}}')
           if [ "${#imagens[@]}" -ne 1 ]; then
@@ -425,7 +428,15 @@ jobs:
             exit 1
           fi
           tamanho=$(docker image inspect --format '{{.Size}}' "${imagens[0]}")
-          echo "Imagem do executor (amd64, ${imagens[0]}): ${tamanho} bytes" >>"$GITHUB_STEP_SUMMARY"
+          echo "Imagem do executor (amd64, ${imagens[0]}): ${tamanho} bytes" | tee -a "$GITHUB_STEP_SUMMARY"
+          base="ghcr.io/bipoxdxd/goblinshift-executor:sha-${BASE_SHA:0:12}"
+          if [[ "$BASE_SHA" =~ ^[0-9a-f]{40}$ ]] && docker pull --quiet --platform linux/amd64 "$base" >/dev/null 2>&1; then
+            anterior=$(docker image inspect --format '{{.Size}}' "$base")
+            echo "Base ($base): ${anterior} bytes; diferença: $((tamanho - anterior)) bytes" | tee -a "$GITHUB_STEP_SUMMARY"
+            docker image rm --force "$base" >/dev/null
+          else
+            echo "Base ($base) indisponível; só o tamanho absoluto" | tee -a "$GITHUB_STEP_SUMMARY"
+          fi
 
   e2e-gvisor:
     name: Jornadas reais sob gVisor (Playwright)
