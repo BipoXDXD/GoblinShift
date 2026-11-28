@@ -106,6 +106,28 @@ class RunDetail:
 
 
 @dataclass(frozen=True)
+class RunSummary:
+    """Resumo de uma execução para a exportação da conta; os nomes dos arquivos ficam no detalhe
+    (`GET /runs/{id}`)."""
+
+    id: UUID
+    recipe_id: str
+    recipe_version: int
+    status: Status
+    error_code: str | None
+    created_at: datetime
+    started_at: datetime | None
+    finished_at: datetime | None
+    processed: int
+    total: int
+    # Contagens finais do relatório; nulas antes do fim (ver `_summary`).
+    summary: dict[str, int] | None
+    # Nulos depois da retenção de 30 dias (1.7).
+    parameters: dict[str, Any] | None
+    preset_id: UUID | None
+
+
+@dataclass(frozen=True)
 class RunFilters:
     recipe_id: str | None = None
     status: Status | None = None
@@ -226,6 +248,48 @@ def list_runs(
     last = items[-1]
     next_cursor = encode_cursor(Position(last.created_at, last.id), scope, secret=secret, now=now)
     return RunPage(items, next_cursor)
+
+
+def export_runs(session: Session, owner_id: UUID) -> list[RunSummary]:
+    """Todas as execuções da conta, das mais antigas às mais novas. A retenção de 90 dias (1.7)
+    limita o volume; a exportação não pagina."""
+    rows = session.execute(
+        select(
+            run.c.id,
+            run.c.recipe_id,
+            run.c.recipe_version,
+            run.c.status,
+            run.c.error_code,
+            run.c.created_at,
+            run.c.started_at,
+            run.c.finished_at,
+            run.c.summary,
+            run.c.parameters,
+            run.c.preset_id,
+            _count_inputs(run_input.c.outcome.is_not(None)).label("processed"),
+            _count_inputs().label("total"),
+        )
+        .where(run.c.owner_id == owner_id)
+        .order_by(run.c.created_at, run.c.id)
+    ).all()
+    return [
+        RunSummary(
+            id=row.id,
+            recipe_id=row.recipe_id,
+            recipe_version=row.recipe_version,
+            status=Status(row.status),
+            error_code=row.error_code,
+            created_at=row.created_at,
+            started_at=row.started_at,
+            finished_at=row.finished_at,
+            processed=row.processed,
+            total=row.total,
+            summary=_summary(row.summary) if Status(row.status) in TERMINAL_STATUSES else None,
+            parameters=row.parameters,
+            preset_id=row.preset_id,
+        )
+        for row in rows
+    ]
 
 
 def get_results(session: Session, owner_id: UUID, run_id: UUID) -> RunResults:

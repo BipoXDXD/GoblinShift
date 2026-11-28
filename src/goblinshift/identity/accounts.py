@@ -64,6 +64,9 @@ class Account:
     display_name: str
     issuer: str
     accepted_terms: AcceptedTerms | None
+    # `active` ou `blocked` (CHECK `app_user_status`).
+    status: str
+    created_at: datetime
 
     def needs_terms_acceptance(self, current_version: str) -> bool:
         """Conta do login sem o aceite da versão vigente (1.8; ADR 029).
@@ -235,6 +238,8 @@ def find_account(session: Session, owner_id: UUID) -> Account | None:
             app_user.c.issuer,
             app_user.c.terms_version,
             app_user.c.terms_accepted_at,
+            app_user.c.status,
+            app_user.c.created_at,
         ).where(app_user.c.id == owner_id)
     ).first()
     if row is None:
@@ -246,7 +251,12 @@ def find_account(session: Session, owner_id: UUID) -> Account | None:
         else AcceptedTerms(version=row.terms_version, accepted_at=row.terms_accepted_at)
     )
     return Account(
-        id=row.id, display_name=row.display_name, issuer=row.issuer, accepted_terms=accepted
+        id=row.id,
+        display_name=row.display_name,
+        issuer=row.issuer,
+        accepted_terms=accepted,
+        status=row.status,
+        created_at=row.created_at,
     )
 
 

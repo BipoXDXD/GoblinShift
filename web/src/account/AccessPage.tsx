@@ -6,6 +6,7 @@ import { TEXT } from "../text";
 import type { Me } from "./api";
 import { ApiKeysSection } from "./ApiKeysSection";
 import { DeleteAccountSection } from "./DeleteAccountSection";
+import { ExportSection } from "./ExportSection";
 import { SessionSection } from "./SessionSection";
 import { SignInPrompt } from "./SignInPrompt";
 import { UsageSection } from "./UsageSection";
@@ -14,8 +15,9 @@ import { useMe } from "./useMe";
 const T = TEXT.account.access;
 
 /**
- * Acesso (5.5): coluna única e séria, sem goblins. Sessão, uso e cotas, chaves e exclusão da
- * conta. Com chave de API (só scripts e o E2E) ficam o uso e o aviso: o resto exige a sessão.
+ * Acesso (5.5): coluna única e séria, sem goblins. Sessão, uso e cotas, chaves, exportação dos
+ * dados e exclusão da conta. Com chave de API (só scripts e o E2E) ficam o uso e o aviso: o resto
+ * exige a sessão.
  */
 export function AccessPage({ now }: { readonly now: () => number }): ReactElement {
   const me = useMe();
@@ -58,6 +60,7 @@ function AccessBody({ me, error, now }: AccessBodyProps): ReactElement {
       <SessionSection me={me} />
       <UsageSection me={me} />
       <ApiKeysSection now={now} />
+      <ExportSection />
       <DeleteAccountSection />
     </>
   );

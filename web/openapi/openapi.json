@@ -436,6 +436,107 @@
         }
       }
     },
+    "/api/v1/me/export": {
+      "get": {
+        "tags": [
+          "me"
+        ],
+        "summary": "Export Me",
+        "operationId": "exportMe",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AccountExport"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Unauthorized",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Forbidden",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Unprocessable Content",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Too Many Requests",
+            "headers": {
+              "Retry-After": {
+                "description": "Segundos até poder repetir a requisição.",
+                "required": true,
+                "schema": {
+                  "type": "string",
+                  "pattern": "^[0-9]+$"
+                }
+              }
+            },
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Internal Server Error",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Service Unavailable",
+            "headers": {
+              "Retry-After": {
+                "description": "Segundos até poder repetir a requisição.",
+                "required": true,
+                "schema": {
+                  "type": "string",
+                  "pattern": "^[0-9]+$"
+                }
+              }
+            },
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/v1/me/terms:accept": {
       "post": {
         "tags": [
@@ -5357,6 +5458,76 @@
         ],
         "title": "AcceptedTermsResponse"
       },
+      "AccountExport": {
+        "properties": {
+          "generated_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Generated At"
+          },
+          "account": {
+            "$ref": "#/components/schemas/ExportedAccount"
+          },
+          "terms": {
+            "$ref": "#/components/schemas/ExportedTerms"
+          },
+          "limits": {
+            "$ref": "#/components/schemas/Limits"
+          },
+          "usage": {
+            "$ref": "#/components/schemas/Usage"
+          },
+          "api_keys": {
+            "items": {
+              "$ref": "#/components/schemas/ExportedApiKey"
+            },
+            "type": "array",
+            "title": "Api Keys"
+          },
+          "sessions": {
+            "items": {
+              "$ref": "#/components/schemas/ExportedSession"
+            },
+            "type": "array",
+            "title": "Sessions"
+          },
+          "security_events": {
+            "items": {
+              "$ref": "#/components/schemas/ExportedSecurityEvent"
+            },
+            "type": "array",
+            "title": "Security Events"
+          },
+          "runs": {
+            "items": {
+              "$ref": "#/components/schemas/ExportedRunSummary"
+            },
+            "type": "array",
+            "title": "Runs"
+          },
+          "presets": {
+            "items": {
+              "$ref": "#/components/schemas/ExportedPreset"
+            },
+            "type": "array",
+            "title": "Presets"
+          }
+        },
+        "type": "object",
+        "required": [
+          "generated_at",
+          "account",
+          "terms",
+          "limits",
+          "usage",
+          "api_keys",
+          "sessions",
+          "security_events",
+          "runs",
+          "presets"
+        ],
+        "title": "AccountExport"
+      },
       "ApiKeyList": {
         "properties": {
           "data": {
@@ -5509,6 +5680,35 @@
         ],
         "title": "AudioFormat",
         "description": "Formato do áudio extraído pelo Media Mill."
+      },
+      "AuditEventType": {
+        "type": "string",
+        "enum": [
+          "LOGIN_SUCCEEDED",
+          "LOGIN_FAILED",
+          "LOGOUT",
+          "LOGOUT_ALL",
+          "KEY_ISSUED",
+          "KEY_REVOKED",
+          "REAUTH_REQUIRED",
+          "CSRF_FAILED",
+          "ACCESS_DENIED",
+          "ACCOUNT_DELETION_REQUESTED",
+          "ACCOUNT_BLOCKED",
+          "ACCOUNT_UNBLOCKED",
+          "TERMS_ACCEPTED",
+          "ACCOUNT_LIMITS_CHANGED"
+        ],
+        "title": "AuditEventType",
+        "description": "Tipos aceitos pelo CHECK `audit_event_event_type_check` (migrações 0006, 0008 e 0016)."
+      },
+      "AuditOutcome": {
+        "type": "string",
+        "enum": [
+          "success",
+          "failure"
+        ],
+        "title": "AuditOutcome"
       },
       "Availability": {
         "type": "string",
@@ -5686,6 +5886,404 @@
           "items"
         ],
         "title": "CreatedUploads"
+      },
+      "ExportedAccount": {
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid",
+            "title": "Id"
+          },
+          "issuer": {
+            "type": "string",
+            "title": "Issuer"
+          },
+          "display_name": {
+            "type": "string",
+            "title": "Display Name"
+          },
+          "status": {
+            "type": "string",
+            "title": "Status"
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Created At"
+          }
+        },
+        "type": "object",
+        "required": [
+          "id",
+          "issuer",
+          "display_name",
+          "status",
+          "created_at"
+        ],
+        "title": "ExportedAccount"
+      },
+      "ExportedApiKey": {
+        "properties": {
+          "public_id": {
+            "type": "string",
+            "title": "Public Id"
+          },
+          "scopes": {
+            "items": {
+              "$ref": "#/components/schemas/Scope"
+            },
+            "type": "array",
+            "title": "Scopes"
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Created At"
+          },
+          "expires_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Expires At"
+          },
+          "last_used_at": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Last Used At"
+          },
+          "revoked_at": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Revoked At"
+          }
+        },
+        "type": "object",
+        "required": [
+          "public_id",
+          "scopes",
+          "created_at",
+          "expires_at",
+          "last_used_at",
+          "revoked_at"
+        ],
+        "title": "ExportedApiKey",
+        "description": "Metadados da chave; o segredo nunca é guardado, e o hash não sai."
+      },
+      "ExportedPreset": {
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid",
+            "title": "Id"
+          },
+          "name": {
+            "type": "string",
+            "title": "Name"
+          },
+          "recipe_id": {
+            "type": "string",
+            "title": "Recipe Id"
+          },
+          "recipe_version": {
+            "type": "integer",
+            "title": "Recipe Version"
+          },
+          "parameters": {
+            "additionalProperties": true,
+            "type": "object",
+            "title": "Parameters"
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Created At"
+          },
+          "updated_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Updated At"
+          }
+        },
+        "type": "object",
+        "required": [
+          "id",
+          "name",
+          "recipe_id",
+          "recipe_version",
+          "parameters",
+          "created_at",
+          "updated_at"
+        ],
+        "title": "ExportedPreset"
+      },
+      "ExportedRunSummary": {
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid",
+            "title": "Id"
+          },
+          "recipe_id": {
+            "type": "string",
+            "title": "Recipe Id"
+          },
+          "recipe_version": {
+            "type": "integer",
+            "title": "Recipe Version"
+          },
+          "status": {
+            "$ref": "#/components/schemas/Status"
+          },
+          "error_code": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Error Code"
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Created At"
+          },
+          "started_at": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Started At"
+          },
+          "finished_at": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Finished At"
+          },
+          "processed": {
+            "type": "integer",
+            "title": "Processed"
+          },
+          "total": {
+            "type": "integer",
+            "title": "Total"
+          },
+          "summary": {
+            "anyOf": [
+              {
+                "additionalProperties": {
+                  "type": "integer"
+                },
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Summary"
+          },
+          "parameters": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Parameters"
+          },
+          "preset_id": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "uuid"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Preset Id"
+          }
+        },
+        "type": "object",
+        "required": [
+          "id",
+          "recipe_id",
+          "recipe_version",
+          "status",
+          "error_code",
+          "created_at",
+          "started_at",
+          "finished_at",
+          "processed",
+          "total",
+          "summary",
+          "parameters",
+          "preset_id"
+        ],
+        "title": "ExportedRunSummary"
+      },
+      "ExportedSecurityEvent": {
+        "properties": {
+          "event_type": {
+            "$ref": "#/components/schemas/AuditEventType"
+          },
+          "outcome": {
+            "$ref": "#/components/schemas/AuditOutcome"
+          },
+          "occurred_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Occurred At"
+          },
+          "ip_prefix": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Ip Prefix",
+            "description": "A rede do cliente: /24 em IPv4, /48 em IPv6."
+          },
+          "details": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Details"
+          }
+        },
+        "type": "object",
+        "required": [
+          "event_type",
+          "outcome",
+          "occurred_at",
+          "ip_prefix",
+          "details"
+        ],
+        "title": "ExportedSecurityEvent"
+      },
+      "ExportedSession": {
+        "properties": {
+          "created_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Created At"
+          },
+          "authenticated_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Authenticated At"
+          },
+          "last_seen_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Last Seen At"
+          },
+          "idle_expires_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Idle Expires At"
+          },
+          "absolute_expires_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Absolute Expires At"
+          },
+          "revoked_at": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Revoked At"
+          }
+        },
+        "type": "object",
+        "required": [
+          "created_at",
+          "authenticated_at",
+          "last_seen_at",
+          "idle_expires_at",
+          "absolute_expires_at",
+          "revoked_at"
+        ],
+        "title": "ExportedSession",
+        "description": "Datas da sessão, sem id nem hash."
+      },
+      "ExportedTerms": {
+        "properties": {
+          "accepted_version": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Accepted Version"
+          },
+          "accepted_at": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Accepted At"
+          }
+        },
+        "type": "object",
+        "required": [
+          "accepted_version",
+          "accepted_at"
+        ],
+        "title": "ExportedTerms"
       },
       "FieldError": {
         "properties": {

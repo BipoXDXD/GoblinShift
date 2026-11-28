@@ -853,6 +853,12 @@ export const TEXT = {
       revoked: (publicId: string) => `Chave ${publicId} revogada.`,
       notFound: "Chave não encontrada. Ela pode já ter sido revogada; a lista foi atualizada.",
     },
+    export: {
+      heading: "Seus dados",
+      body: "Um arquivo JSON com o que a conta guarda: perfil, termos aceitos, limites e uso, chaves e sessões (sem segredos), eventos de segurança, execuções e presets.",
+      download: "Baixar meus dados (JSON)",
+      downloading: "Preparando…",
+    },
     deletion: {
       heading: "Excluir conta",
       body: "A exclusão revoga as sessões e as chaves na hora, cancela a execução em andamento e apaga arquivos, resultados e dados da conta em até 24 horas.",

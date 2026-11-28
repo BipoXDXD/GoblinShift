@@ -525,6 +525,8 @@ def test_canario_em_credencial_cookie_agente_chave_query_nome_e_parametro_nunca_
         ("GET", "/api/v1/runs", RateLimitClass.READ),
         ("HEAD", "/api/v1/runs/{run_id}", RateLimitClass.READ),
         ("POST", "/api/v1/runs", RateLimitClass.RUN_CREATE),
+        # A exportação da conta, leitura pesada, usa o limite da criação de execução.
+        ("GET", "/api/v1/me/export", RateLimitClass.RUN_CREATE),
         ("POST", "/api/v1/runs/{run_id}/cancel", RateLimitClass.COMMAND),
         ("POST", "/api/v1/uploads", RateLimitClass.COMMAND),
         ("DELETE", "/api/v1/uploads/{upload_id}", RateLimitClass.COMMAND),

@@ -128,6 +128,22 @@ export async function deleteAccount(client: ApiClient): Promise<void> {
   await client.request({ method: "DELETE", path: "/api/v1/me", schema: noContentSchema });
 }
 
+/** Nome do arquivo da exportação; o mesmo do `Content-Disposition` da API. */
+export const EXPORT_FILE_NAME = "goblinshift-conta.json";
+
+/**
+ * GET /me/export: os dados da conta (AccountExport), só para salvar em arquivo; a tela não lê o
+ * conteúdo, então não há espelho do schema. Exige login recente (REAUTH_REQUIRED).
+ */
+export async function exportMe(client: ApiClient): Promise<Blob> {
+  const response = await client.request({
+    method: "GET",
+    path: "/api/v1/me/export",
+    schema: z.json(),
+  });
+  return new Blob([JSON.stringify(response.data, null, 2)], { type: "application/json" });
+}
+
 /** GET /api-keys: metadados das chaves da conta, nunca o segredo. */
 export async function listApiKeys(client: ApiClient, signal?: AbortSignal): Promise<ApiKey[]> {
   const response = await client.request({

@@ -25,6 +25,7 @@ from goblinshift.entrypoints.api import (
     health,
     me,
     me_delete,
+    me_export,
     me_terms,
     presets,
     runs,
@@ -196,6 +197,7 @@ def create_app(
     api.include_router(catalog.router)
     api.include_router(me.router)
     api.include_router(me_delete.router)
+    api.include_router(me_export.router)
     api.include_router(me_terms.router)
     api.include_router(api_keys.router)
     api.include_router(uploads.router)
