@@ -23,6 +23,11 @@ export type PollSnapshot =
   | { kind: "success"; status: RunStatus; retryAfterMs: number | null }
   | { kind: "failure"; error: unknown; consecutiveFailures: number };
 
+/** Se a execução já terminou: o polling para e não há mais transição a avisar. */
+export function isTerminalStatus(status: RunStatus): boolean {
+  return TERMINAL_STATUSES.has(status);
+}
+
 /**
  * Espera até a próxima consulta, ou `false` para parar.
  *
@@ -33,7 +38,7 @@ export type PollSnapshot =
  */
 export function nextPollDelayMs(snapshot: PollSnapshot, random: () => number): number | false {
   if (snapshot.kind === "success") {
-    return TERMINAL_STATUSES.has(snapshot.status)
+    return isTerminalStatus(snapshot.status)
       ? false
       : Math.max(snapshot.retryAfterMs ?? 0, DEFAULT_POLL_MS);
   }

@@ -93,7 +93,7 @@ RUN_OUTPUT_CEILING_BYTES = (
 )
 # Versões que limitam a soma das entradas (o Detox copia cada entrada aceita para a saída).
 _MAX_TOTAL_INPUT_BYTES = "max_total_input_bytes"
-# Teto de cada entrada, que toda versão declara: 32 MiB, ou 256 MiB no Media Mill (1.7, ADR 036).
+# Teto de cada entrada, que toda versão declara: o comum, ou 256 MiB no Media Mill (1.7, ADR 036).
 # O envio dá o teto de vídeo a qualquer nome terminado em .mp4, .mov ou .webm; a extensão não é
 # fronteira, então a aceitação confere o tamanho guardado contra a receita escolhida.
 _MAX_INPUT_BYTES = "max_input_bytes"

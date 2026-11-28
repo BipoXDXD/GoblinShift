@@ -4,7 +4,7 @@
 // do caso. Cada execução precisa terminar com todos os testes selecionados executados e detectar
 // o defeito em pelo menos um deles.
 //
-// Uso, depois de `npm run build` e `npm run build:notice-e2e`:
+// Uso, depois de `npm run build`, `npm run build:notice-e2e` e `npm run build:notice-incident-e2e`:
 // npm run e2e:sabotage [-- trecho do nome do caso]
 import { spawnSync } from "node:child_process";
 import {
@@ -19,6 +19,7 @@ import {
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
+import { NOTICE_ENV } from "./support/phases.ts";
 import { inspectSabotageReport } from "./support/sabotageReport.ts";
 import { selectCases } from "./support/selectCases.ts";
 
@@ -43,9 +44,11 @@ interface Case {
 
 const DIST = "dist";
 const NOTICE_DIST = "dist-notice";
+const NOTICE_INCIDENT_DIST = "dist-notice-incident";
 const BUILD_COMMAND: Readonly<Record<string, string>> = {
   [DIST]: "npm run build",
   [NOTICE_DIST]: "npm run build:notice-e2e",
+  [NOTICE_INCIDENT_DIST]: "npm run build:notice-incident-e2e",
 };
 const FIRST_PORT = 4180;
 const PLANTED_KEY = "CANARY-sabotagem-fixa";
@@ -63,6 +66,30 @@ const CASES: readonly Case[] = [
     name: "contraste: texto secundário quase invisível só no tema escuro",
     spec: ["contrast.spec.ts", "-g", "tema dark"],
     assertions: ["contrast-dark"],
+    plant: (dist) => {
+      addStylesheet(dist, 'html[data-theme="dark"] { --fg-muted: #44403c; }');
+    },
+  },
+  // A faixa do incidente (fase notice-incident): o texto em fg-subtle, como se a faixa usasse
+  // `text-fg-subtle`, cai abaixo de 4,5:1 sobre o fundo de perigo nos dois temas.
+  ...(["light", "dark"] as const).map((theme): Case => ({
+    name: `aviso de incidente: texto da faixa em fg-subtle (tema ${theme})`,
+    spec: ["contrast.spec.ts", "-g", `tema ${theme}`],
+    assertions: [`contrast-${theme}`],
+    dist: NOTICE_INCIDENT_DIST,
+    env: { E2E_NOTICE: NOTICE_ENV.incident },
+    plant: (dist) => {
+      addStylesheet(
+        dist,
+        'section[aria-label^="Aviso"], section[aria-label^="Aviso"] * { color: var(--fg-subtle) !important; }',
+      );
+    },
+  })),
+  {
+    // A cena montada só existe com WebGL: o caso roda a suíte "com GPU" no SwiftShader do job.
+    name: "palco 3D: texto secundário quase invisível só no tema escuro, com a cena montada",
+    spec: ["oficina-3d.spec.ts", "-g", "com a cena montada, tema dark"],
+    assertions: ["contrast-3d-dark"],
     plant: (dist) => {
       addStylesheet(dist, 'html[data-theme="dark"] { --fg-muted: #44403c; }');
     },
@@ -229,7 +256,7 @@ const CASES: readonly Case[] = [
     spec: ["notice.spec.ts", "-g", "Fechar aviso esconde"],
     assertions: ["notice-close-name"],
     dist: NOTICE_DIST,
-    env: { E2E_NOTICE: "1" },
+    env: { E2E_NOTICE: NOTICE_ENV["terms-change"] },
     plant: (dist) => {
       // Sem o complemento para leitor de tela, o nome perde o que o botão fecha.
       addStylesheet(dist, 'section[aria-label^="Aviso"] button .sr-only { display: none; }');
@@ -240,7 +267,7 @@ const CASES: readonly Case[] = [
     spec: ["notice.spec.ts", "-g", "Fechar aviso esconde"],
     assertions: ["notice-close-focus"],
     dist: NOTICE_DIST,
-    env: { E2E_NOTICE: "1" },
+    env: { E2E_NOTICE: NOTICE_ENV["terms-change"] },
     plant: (dist) => {
       // Desliga só o foco no título que vem do clique em Fechar, como se o Layout não o pedisse;
       // o foco da troca de rota (FocusHeading) continua.
@@ -292,7 +319,7 @@ const CASES: readonly Case[] = [
     assertions: ["cls-late-text"],
     dist: NOTICE_DIST,
     project,
-    env: { E2E_NOTICE: "1" },
+    env: { E2E_NOTICE: NOTICE_ENV["terms-change"] },
     plant: (dist) => {
       replaceInCss(dist, "font-display:optional", "font-display:swap");
     },

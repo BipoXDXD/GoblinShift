@@ -29,8 +29,12 @@ from goblinshift.processing.csv_janitor import (
     Params,
     params_from_mapping,
 )
+from goblinshift.processing.csv_janitor import Limits as TableLimits
 from goblinshift.processing.registry import RECIPES
 
+TABLE_BYTES = 8 * 1024 * 1024
+# Receitas cujo teto por entrada fica abaixo do comum, com o limite do executor que o justifica.
+INPUT_CEILING_BELOW_COMMON = {"csv-janitor": TableLimits().table_bytes}
 DEFAULTS: dict[str, object] = {
     "case_rules": [],
     "deduplicate_by": [],
@@ -192,8 +196,9 @@ def test_versao_atual_publica_limites_efetivos() -> None:
     assert version.status is VersionStatus.CURRENT
     assert version.limits == {
         "max_inputs": 5,
-        "max_input_bytes": 32 * 1024 * 1024,
-        "table_bytes": 8 * 1024 * 1024,
+        # D8 (ADR 062): a v1 publica o teto da tabela, que o executor aplica, e não o comum.
+        "max_input_bytes": TABLE_BYTES,
+        "table_bytes": TABLE_BYTES,
         "records": 20_000,
         "columns": 100,
         "record_bytes": 1024 * 1024,
@@ -202,9 +207,11 @@ def test_versao_atual_publica_limites_efetivos() -> None:
 
 
 def test_toda_versao_declara_o_teto_por_entrada() -> None:
-    # A aceitação aplica `max_input_bytes` a cada entrada; o envio só olha o nome (ADR 036).
+    # A aceitação aplica `max_input_bytes` a cada entrada; o envio só olha o nome (ADR 036). Só o
+    # CSV Janitor fica abaixo do teto comum, no teto da tabela que o executor aplica (D8, ADR 062).
     for version in CATALOG.list_versions():
-        assert version.limits["max_input_bytes"] >= MAX_FILE_BYTES
+        floor = INPUT_CEILING_BELOW_COMMON.get(version.recipe_id, MAX_FILE_BYTES)
+        assert version.limits["max_input_bytes"] >= floor
 
 
 def test_teto_comum_do_catalogo_e_o_do_envio() -> None:
@@ -253,7 +260,7 @@ def test_image_forge_publica_os_limites_de_1_7() -> None:
     assert version.status is VersionStatus.CURRENT
     assert version.limits == {
         "max_inputs": 100,
-        "max_input_bytes": 32 * 1024 * 1024,
+        "max_input_bytes": 50 * 1024 * 1024,
         "max_pixels": 24_000_000,
         "max_axis_px": 8192,
         "thumbnail_box_px": 320,
@@ -266,7 +273,7 @@ def test_downloads_detox_publica_o_teto_do_lote_abaixo_do_teto_de_saidas() -> No
     assert version.status is VersionStatus.CURRENT
     assert version.limits == {
         "max_inputs": 100,
-        "max_input_bytes": 32 * 1024 * 1024,
+        "max_input_bytes": 50 * 1024 * 1024,
         "max_total_input_bytes": 480 * 1024 * 1024,
     }
 

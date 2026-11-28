@@ -11,7 +11,7 @@ export const CATALOG_BODY = {
           status: "current",
           limits: {
             max_inputs: 5,
-            max_input_bytes: 33554432,
+            max_input_bytes: 8388608,
             table_bytes: 8388608,
             records: 20000,
             columns: 100,
@@ -45,7 +45,7 @@ export const CATALOG_BODY = {
           status: "current",
           limits: {
             max_inputs: 100,
-            max_input_bytes: 33554432,
+            max_input_bytes: 52428800,
             max_pixels: 24000000,
             max_axis_px: 8192,
             thumbnail_box_px: 320,
@@ -75,7 +75,7 @@ export const CATALOG_BODY = {
         {
           version: 1,
           status: "current",
-          limits: { max_inputs: 100, max_input_bytes: 33554432, max_total_input_bytes: 503316480 },
+          limits: { max_inputs: 100, max_input_bytes: 52428800, max_total_input_bytes: 503316480 },
           defaults: {
             deduplicate: true,
             group_by: "kind",
@@ -99,7 +99,7 @@ export const CATALOG_BODY = {
           status: "current",
           limits: {
             max_inputs: 20,
-            max_input_bytes: 33554432,
+            max_input_bytes: 52428800,
             max_total_input_bytes: 268435456,
             max_input_pages: 200,
             max_output_pages: 400,

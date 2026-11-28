@@ -39,6 +39,7 @@ REQUIRED = {
     "goblinshift": {
         "Verificações",
         "Segredos (gitleaks)",
+        "Snapshots congelados",
         "Interface web",
         "Interface no navegador (Playwright)",
         "Contrato (Schemathesis)",

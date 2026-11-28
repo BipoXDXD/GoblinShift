@@ -8,11 +8,12 @@ from typing import Any
 import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
-from sqlalchemy import func, update
+from sqlalchemy import func, select, update
 from sqlalchemy.orm import Session, sessionmaker
 
 from goblinshift.files.retention import NAME_AFTER, anonymize_deleted_uploads, expire_unused_uploads
 from goblinshift.files.states import TransferDirection
+from goblinshift.files.storage import ObjectMissingError
 from goblinshift.files.tables import upload
 from goblinshift.identity import Scope
 from goblinshift.platform.db import unit_of_work
@@ -60,6 +61,12 @@ def expire_upload(factory: sessionmaker[Session], upload_id: str) -> None:
             .where(upload.c.id == uuid.UUID(upload_id))
             .values(expires_at=func.now() - timedelta(seconds=1))
         )
+
+
+def upload_rows(factory: sessionmaker[Session]) -> int:
+    with factory() as session:
+        rows: int = session.execute(select(func.count()).select_from(upload)).scalar_one()
+    return rows
 
 
 # --- Fluxo completo ---------------------------------------------------------------------------
@@ -273,7 +280,7 @@ def test_envio_sem_octet_stream_e_recusado_sem_mexer_no_upload(
 
 
 def test_corpo_maior_que_o_declarado_responde_413_e_falha_o_upload(
-    client: TestClient, factory: sessionmaker[Session]
+    app: FastAPI, client: TestClient, factory: sessionmaker[Session]
 ) -> None:
     _, auth = new_account(factory)
     item = create_upload(client, auth, size=3)
@@ -282,6 +289,41 @@ def test_corpo_maior_que_o_declarado_responde_413_e_falha_o_upload(
 
     assert_problem(response, 413, "BODY_TOO_LARGE")
     assert client.get(upload_url(item), headers=auth).json()["state"] == "failed"
+    with pytest.raises(ObjectMissingError):
+        storage_of(app).stat(upload_storage_key(factory, item["id"]))
+
+
+# Fronteira do teto comum (ADR 062), por extenso e nunca pela constante. Um byte acima com
+# declaração mentirosa cai no 413 de
+# `test_corpo_maior_que_o_declarado_responde_413_e_falha_o_upload`.
+FIFTY_MIB = 50 * 1024 * 1024
+
+
+@pytest.mark.heavy
+def test_arquivo_no_teto_passa_e_um_byte_acima_e_recusado_no_teto_passa(
+    client: TestClient, factory: sessionmaker[Session]
+) -> None:
+    # `heavy`: manda 50 MiB pelo TestClient.
+    _, auth = new_account(factory)
+    item = create_upload(client, auth, name="foto.png", size=FIFTY_MIB)
+
+    ready = send_content(client, auth, item, b"\0" * FIFTY_MIB)
+
+    assert (ready["state"], ready["size"]) == ("ready", FIFTY_MIB)
+
+
+def test_arquivo_no_teto_passa_e_um_byte_acima_e_recusado_um_byte_acima_da_422(
+    client: TestClient, factory: sessionmaker[Session]
+) -> None:
+    _, auth = new_account(factory)
+
+    response = client.post(
+        UPLOADS, json={"items": [{"name": "foto.png", "size": FIFTY_MIB + 1}]}, headers=auth
+    )
+
+    body = assert_problem(response, 422, "VALIDATION_FAILED")
+    assert [(e["field"], e["code"]) for e in body["errors"]] == [("body.items.0.size", "invalid")]
+    assert upload_rows(factory) == 0
 
 
 def test_corpo_menor_que_o_declarado_responde_422_e_falha_o_upload(

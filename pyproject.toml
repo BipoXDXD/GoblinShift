@@ -133,7 +133,7 @@ testpaths = ["tests"]
 # outro `-m` (a CI passa sempre) precisa deixá-lo de fora também. `real_clock` (lembrete com a
 # data de hoje) também: roda só no workflow agendado security-txt.yml.
 # `arte` (render do Blender e ImageMagick locais) também: roda só na máquina de quem gera a arte.
-addopts = "-ra --strict-markers -p no:schemathesis -m 'not needs_root and not real_clock and not arte'"
+addopts = "-ra --strict-markers -p no:schemathesis -m 'not needs_root and not real_clock and not arte and not heavy'"
 # O executor-ctl é um pacote do host em deploy/, fora de src/ (roda no Python do sistema).
 # src/ vem antes do editable da .venv, que pode apontar para o src de outro checkout.
 pythonpath = ["src", "deploy"]
@@ -154,6 +154,7 @@ markers = [
     "real_clock: lembrete que depende da data de hoje; fora da CI de PR, roda no workflow security-txt.yml",
     "arte: precisa de Blender e ImageMagick locais; fora do CI",
     "oasdiff: roda o oasdiff da imagem fixada em scripts/openapi-breaking.sh (precisa de Docker)",
+    "heavy: gera entradas de 50 MiB e mede RSS num subprocesso; roda no job de Verificações, fora do padrão local",
 ]
 
 # Fitness functions da arquitetura (docs/GoblinShiftPlan.md, seção 3.2).

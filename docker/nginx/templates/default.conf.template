@@ -60,7 +60,7 @@ limit_req_zone $client_limit_key zone=auth:10m rate=10r/m;
 # (tests/test_nginx_limit_consumers.py).
 limit_req_zone $client_limit_key zone=api:10m rate=20r/s;
 # /readyz: cada sonda consulta o banco. 5 por segundo, com rajada de 10; o monitor de uptime
-# consulta a cada 2 min e o healthcheck do Nginx a cada 10 s.
+# consulta a cada 2 min (o healthcheck do Nginx sonda o /livez, na zona api).
 limit_req_zone $client_limit_key zone=readyz:1m rate=5r/s;
 limit_req_status 429;
 
@@ -162,6 +162,29 @@ server {
         default_type application/manifest+json;
         try_files $uri =404;
         add_header Cache-Control no-cache always;
+        include /etc/nginx/snippets/spa-headers.conf;
+    }
+    # Service worker (ADR 064): nome fixo e sem cache, como o index.html, para um deploy novo valer
+    # na próxima navegação. O que não existir é 404, nunca o index.html como JavaScript.
+    location = /sw.js {
+        try_files $uri =404;
+        add_header Cache-Control no-cache always;
+        include /etc/nginx/snippets/spa-headers.conf;
+    }
+    # Destino do `share_target` do manifest. O GET (para onde o service worker redireciona) é a
+    # SPA. O POST só chega aqui sem service worker: o estático responde 405 e um corpo acima de
+    # 64k, 413; nos dois casos a Oficina explica que o compartilhamento não está disponível. Os
+    # arquivos nunca vão ao servidor por aqui (fora do fluxo de intenções e cotas).
+    location = /compartilhar {
+        client_max_body_size 64k;
+        error_page 405 413 = @share_unavailable;
+        try_files /index.html =404;
+        add_header Cache-Control no-cache always;
+        include /etc/nginx/snippets/spa-headers.conf;
+    }
+    location @share_unavailable {
+        absolute_redirect off;
+        return 303 /?compartilhamento=indisponivel;
         include /etc/nginx/snippets/spa-headers.conf;
     }
     # robots.txt (e outro .txt ou .xml que vier a existir na raiz) servido de verdade; o que não

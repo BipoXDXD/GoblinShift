@@ -1171,7 +1171,7 @@
                           "type": "string"
                         },
                         "size": {
-                          "description": "Bytes: até 32 MiB, ou 256 MiB para vídeo (.mp4, .mov, .webm); o lote soma até 512 MiB.",
+                          "description": "Bytes: até 50 MiB, ou 256 MiB para vídeo (.mp4, .mov, .webm); o lote soma até 512 MiB.",
                           "maximum": 268435456,
                           "minimum": 0,
                           "title": "Size",
@@ -5953,6 +5953,17 @@
             "type": "string",
             "title": "Display Name"
           },
+          "provider": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ProviderName"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "O provedor de login da conta: a reautenticação oferece só ele. Nulo na conta do operador, que não entra pelo navegador."
+          },
           "scopes": {
             "items": {
               "$ref": "#/components/schemas/Scope"
@@ -5982,6 +5993,7 @@
         "required": [
           "id",
           "display_name",
+          "provider",
           "scopes",
           "via",
           "limits",
@@ -6306,6 +6318,14 @@
           "total"
         ],
         "title": "Progress"
+      },
+      "ProviderName": {
+        "type": "string",
+        "enum": [
+          "google",
+          "github"
+        ],
+        "title": "ProviderName"
       },
       "ReceivedContent": {
         "properties": {

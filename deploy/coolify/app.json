@@ -33,12 +33,12 @@
         "GS_CSRF_SECRET_FILE": "/run/secrets/csrf_secret",
         "GS_CURSOR_SECRET": "${GS_CURSOR_SECRET:?defina a variável privada no recurso da aplicação no Coolify}",
         "GS_EXECUTOR_IMAGE": "${GS_EXECUTOR_IMAGE:?exportada pelo deploy/release.sh (imagem do executor por digest)}",
-        "GS_GITHUB_CLIENT_ID": "${GS_GITHUB_CLIENT_ID:?defina em secrets/app.env (OAuth App do GitHub)}",
+        "GS_GITHUB_CLIENT_ID": "${GS_GITHUB_CLIENT_ID:?defina a variável no recurso da aplicação no Coolify (OAuth App do GitHub)}",
         "GS_GITHUB_CLIENT_SECRET_FILE": "/run/secrets/github_client_secret",
-        "GS_GOOGLE_CLIENT_ID": "${GS_GOOGLE_CLIENT_ID:?defina em secrets/app.env (console do Google)}",
+        "GS_GOOGLE_CLIENT_ID": "${GS_GOOGLE_CLIENT_ID:?defina a variável no recurso da aplicação no Coolify (console do Google)}",
         "GS_GOOGLE_CLIENT_SECRET_FILE": "/run/secrets/google_client_secret",
         "GS_LOGIN_COOKIE_SECRET_FILE": "/run/secrets/login_cookie_secret",
-        "GS_PUBLIC_ORIGIN": "${GS_PUBLIC_ORIGIN:?defina em secrets/app.env (https://goblinshift.dev)}",
+        "GS_PUBLIC_ORIGIN": "${GS_PUBLIC_ORIGIN:?defina a variável no recurso da aplicação no Coolify (https://goblinshift.dev)}",
         "GS_RUNNER": "executor_ctl",
         "GS_SIGNUP_MODE": "${GS_SIGNUP_MODE:-closed}",
         "GS_USER_HASH_SECRET": "${GS_USER_HASH_SECRET:?defina a variável privada no recurso da aplicação no Coolify}"
@@ -50,7 +50,7 @@
           "CMD",
           "python",
           "-c",
-          "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/readyz',timeout=2)"
+          "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/livez',timeout=2)"
         ],
         "timeout": "3s"
       },
@@ -329,7 +329,7 @@
           "--show-error",
           "--max-time",
           "2",
-          "http://127.0.0.1/readyz"
+          "http://127.0.0.1/livez"
         ]
       },
       "image": "${GS_WEB_IMAGE:-ghcr.io/bipoxdxd/goblinshift-web:sha-03f15c824029@sha256:76d9f0209ded60bcf7a109565fb95e4b77e350a0a7262c7f4eff4bb221328568}",
