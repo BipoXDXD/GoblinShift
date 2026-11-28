@@ -194,3 +194,76 @@ def test_merge_acima_do_teto_de_paginas_de_saida_falha() -> None:
     code = failure_code(Params(), inputs, Limits(max_output_pages=3))
 
     assert code is FailureCode.OUTPUT_LIMIT_EXCEEDED
+
+
+# --- v2: intervalos expandidos no executor e rotação por página (ADR 070) ----------------------
+
+
+def failure(params: Params, inputs: list[InputDocument], limits: Limits) -> RecipeFailure:
+    with pytest.raises(RecipeFailure) as caught:
+        plan_documents(params, inputs, limits)
+    return caught.value
+
+
+def test_intervalos_expandem_na_ordem_com_rotacao() -> None:
+    params = Params(
+        Operation.SELECT, select=(PageRange(UPLOAD_A, 2, 3, 90), PageRange(UPLOAD_B, 1, 1))
+    )
+    inputs = [document(0, "a.pdf", 5, UPLOAD_A), document(1, "b.pdf", 2, UPLOAD_B)]
+
+    plan = plan_documents(params, inputs, Limits())
+
+    assert plan[0].pages == (SourcePage(0, 2, 90), SourcePage(0, 3, 90), SourcePage(1, 1, 0))
+
+
+def test_intervalo_aberto_vai_ate_a_ultima_pagina() -> None:
+    params = Params(Operation.SELECT, select=(PageRange(UPLOAD_A, 3, None),))
+
+    plan = plan_documents(params, [document(0, "a.pdf", 5, UPLOAD_A)], Limits())
+
+    assert [page.page_number for page in plan[0].pages] == [3, 4, 5]
+
+
+def test_intervalo_aberto_na_ultima_pagina_tem_uma_pagina() -> None:
+    params = Params(Operation.SELECT, select=(PageRange(UPLOAD_A, 10, None),))
+
+    plan = plan_documents(params, [document(0, "a.pdf", 10, UPLOAD_A)], Limits())
+
+    assert plan[0].pages == pages(0, 10)
+
+
+def test_intervalo_aberto_alem_do_fim_falha() -> None:
+    params = Params(Operation.SELECT, select=(PageRange(UPLOAD_A, 10, None),))
+
+    caught = failure(params, [document(0, "a.pdf", 9, UPLOAD_A)], Limits())
+
+    assert caught.code is FailureCode.PDF_PAGE_NOT_FOUND
+    assert caught.detail == "a entrada 1 tem 9 páginas; a seleção pede a página 10"
+
+
+def test_fim_do_intervalo_alem_do_documento_falha() -> None:
+    params = Params(Operation.SELECT, select=(PageRange(UPLOAD_A, 2, 12),))
+
+    caught = failure(params, [document(0, "a.pdf", 9, UPLOAD_A)], Limits())
+
+    assert caught.code is FailureCode.PDF_PAGE_NOT_FOUND
+    assert caught.detail == "a entrada 1 tem 9 páginas; a seleção pede a página 12"
+
+
+def test_intervalos_que_somam_acima_do_teto_de_saida_falham() -> None:
+    params = Params(Operation.SELECT, select=(PageRange(UPLOAD_A, 1, 200),) * 3)
+
+    caught = failure(params, [document(0, "a.pdf", 200, UPLOAD_A)], Limits(max_output_pages=400))
+
+    assert caught.code is FailureCode.OUTPUT_LIMIT_EXCEEDED
+    assert "seriam 600 páginas" in caught.detail
+
+
+@pytest.mark.parametrize("operation", [Operation.MERGE, Operation.SPLIT])
+def test_rotacao_global_vale_em_merge_e_split(operation: Operation) -> None:
+    inputs = [document(0, "a.pdf", 2), document(1, "b.pdf", 1)]
+
+    plan = plan_documents(Params(operation, rotation=180), inputs, Limits())
+
+    assert {page.rotation for planned in plan for page in planned.pages} == {180}
+    assert sum(len(planned.pages) for planned in plan) == 3

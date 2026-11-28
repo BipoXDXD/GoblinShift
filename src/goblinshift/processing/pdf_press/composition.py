@@ -6,6 +6,10 @@ saída falham aqui, para a execução nunca publicar uma composição incompleta
 
 Cada documento é atribuído à entrada da sua primeira página (`source_position`): é a linhagem
 que o relatório e o manifesto registram, já que um PDF composto não pertence a uma entrada só.
+
+Os intervalos do `select` são expandidos aqui, porque só aqui a contagem de páginas de cada
+entrada é conhecida (ADR 070): `10-` vai da página 10 até a última. Cada página planejada leva a
+rotação que a gravação aplica: a global no `merge` e no `split`, a do intervalo no `select`.
 """
 
 import math
@@ -15,7 +19,7 @@ from typing import assert_never
 
 from goblinshift.processing.names import safe_stem
 from goblinshift.processing.pdf_press.limits import Limits
-from goblinshift.processing.pdf_press.params import Operation, PageRange, Params
+from goblinshift.processing.pdf_press.params import NO_ROTATION, Operation, PageRange, Params
 from goblinshift.processing.recipe import FailureCode, InputContractError, RecipeFailure
 
 MERGED_NAME = "merged.pdf"
@@ -41,6 +45,7 @@ class InputDocument:
 class SourcePage:
     position: int  # da entrada
     page_number: int  # a partir de 1
+    rotation: int = NO_ROTATION  # graus no sentido horário, somados ao /Rotate da página
 
 
 @dataclass(frozen=True)
@@ -56,9 +61,9 @@ def plan_documents(
     """Documentos na ordem do ZIP. Falha com `RecipeFailure` antes de qualquer escrita."""
     match params.operation:
         case Operation.MERGE:
-            plan: tuple[PlannedDocument, ...] = (_merged(inputs),)
+            plan: tuple[PlannedDocument, ...] = (_merged(inputs, params.rotation),)
         case Operation.SPLIT:
-            plan = tuple(_split(inputs, params.pages_per_document))
+            plan = tuple(_split(inputs, params.pages_per_document, params.rotation))
         case Operation.SELECT:
             plan = (_selection(params.select or (), inputs),)
         case unreachable:
@@ -67,22 +72,24 @@ def plan_documents(
     return plan
 
 
-def _merged(inputs: Sequence[InputDocument]) -> PlannedDocument:
+def _merged(inputs: Sequence[InputDocument], rotation: int) -> PlannedDocument:
     pages = tuple(
-        SourcePage(entry.position, number)
+        SourcePage(entry.position, number, rotation)
         for entry in inputs
         for number in range(1, entry.page_count + 1)
     )
     return PlannedDocument(MERGED_NAME, inputs[0].position, pages)
 
 
-def _split(inputs: Sequence[InputDocument], group_size: int) -> Iterator[PlannedDocument]:
+def _split(
+    inputs: Sequence[InputDocument], group_size: int, rotation: int
+) -> Iterator[PlannedDocument]:
     for entry in inputs:
         stem = safe_stem(entry.original_name, STEM_FALLBACK)
         for group in range(math.ceil(entry.page_count / group_size)):
             first = group * group_size + 1
             last = min(first + group_size - 1, entry.page_count)
-            pages = tuple(SourcePage(entry.position, n) for n in range(first, last + 1))
+            pages = tuple(SourcePage(entry.position, n, rotation) for n in range(first, last + 1))
             yield PlannedDocument(_part_name(stem, first, last), entry.position, pages)
 
 
@@ -95,7 +102,7 @@ def _part_name(stem: str, first: int, last: int) -> str:
 
 def _selection(selection: Sequence[PageRange], inputs: Sequence[InputDocument]) -> PlannedDocument:
     by_upload = _inputs_by_upload(inputs)
-    pages = tuple(_source_page(choice, by_upload) for choice in selection)
+    pages = tuple(page for choice in selection for page in _source_pages(choice, by_upload))
     return PlannedDocument(SELECTION_NAME, pages[0].position, pages)
 
 
@@ -105,17 +112,22 @@ def _inputs_by_upload(inputs: Sequence[InputDocument]) -> dict[str, InputDocumen
     return {entry.upload_id: entry for entry in inputs if entry.upload_id is not None}
 
 
-def _source_page(choice: PageRange, by_upload: dict[str, InputDocument]) -> SourcePage:
+def _source_pages(choice: PageRange, by_upload: dict[str, InputDocument]) -> Iterator[SourcePage]:
+    """As páginas do intervalo, na ordem; o fim aberto é a última página da entrada."""
     entry = by_upload.get(choice.upload_id)
     if entry is None:
         raise InputContractError("select cita um upload que não está entre as entradas")
-    if choice.first_page > entry.page_count:
+    last = entry.page_count if choice.last_page is None else choice.last_page
+    # Cita a primeira página quando ela já passa do fim; senão, o fim explícito.
+    missing = choice.first_page if choice.first_page > entry.page_count else last
+    if missing > entry.page_count:
         raise RecipeFailure(
             FailureCode.PDF_PAGE_NOT_FOUND,
             f"a entrada {entry.position + 1} tem {entry.page_count} páginas; "
-            f"a seleção pede a página {choice.first_page}",
+            f"a seleção pede a página {missing}",
         )
-    return SourcePage(entry.position, choice.first_page)
+    for number in range(choice.first_page, last + 1):
+        yield SourcePage(entry.position, number, choice.rotation)
 
 
 def _require_within_limits(plan: Sequence[PlannedDocument], limits: Limits) -> None:

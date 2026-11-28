@@ -210,6 +210,24 @@ def test_mapa_de_paginas_descreve_entradas_e_documentos(work: Workspace) -> None
     }
 
 
+def test_mapa_de_paginas_registra_a_rotacao_so_quando_ha(work: Workspace) -> None:
+    work.add("a.pdf", samples.document("a", pages=2), UPLOAD_A)
+
+    work.run(
+        Params(
+            Operation.SELECT,
+            select=(PageRange(UPLOAD_A, 1, 1, 90), PageRange(UPLOAD_A, 2, 2)),
+        )
+    )
+
+    expected = [
+        {"input_position": 0, "page_number": 1, "rotation": 90},
+        {"input_position": 0, "page_number": 2},
+    ]
+    assert work.page_map()["documents"][0]["pages"] == expected  # type: ignore[index]
+    assert json.loads(work.read("previews/selection.json"))["pages"] == expected
+
+
 def test_saida_usa_a_maior_versao_das_entradas(work: Workspace) -> None:
     work.add("a.pdf", samples.document("a", version="1.4"))
     work.add("b.pdf", samples.document("b", version="1.7"))

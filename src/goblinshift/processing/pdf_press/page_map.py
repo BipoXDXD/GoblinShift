@@ -9,9 +9,13 @@ Entra no pacote como conteúdo, ao lado dos PDFs, e é a prévia do resultado se
       "inputs": [{"position": 0, "original_name": "a.pdf", "pages": 2}],
       "documents": [
         {"path": "selection.pdf",
-         "pages": [{"input_position": 0, "page_number": 2}]}   # na ordem do documento
+         "pages": [{"input_position": 0, "page_number": 2},    # na ordem do documento
+                   {"input_position": 0, "page_number": 3, "rotation": 90}]}
       ]
     }
+
+`rotation` (graus no sentido horário, ADR 070) é aditivo: só aparece na página girada, então o
+mapa de quem não gira (toda execução da v1) continua com os mesmos bytes.
 
 Não traz `upload_id`, como o manifesto (3.6): as entradas são citadas pela posição. Fica bem
 abaixo dos 8 MiB de 1.7: no máximo 400 páginas e 20 entradas.
@@ -20,7 +24,11 @@ abaixo dos 8 MiB de 1.7: no máximo 400 páginas e 20 entradas.
 import json
 from collections.abc import Sequence
 
-from goblinshift.processing.pdf_press.composition import InputDocument, PlannedDocument
+from goblinshift.processing.pdf_press.composition import (
+    InputDocument,
+    PlannedDocument,
+    SourcePage,
+)
 from goblinshift.processing.pdf_press.params import Operation
 
 PAGE_MAP_NAME = "page-map.json"
@@ -47,10 +55,7 @@ def encode_page_map(
         "documents": [
             {
                 "path": path,
-                "pages": [
-                    {"input_position": page.position, "page_number": page.page_number}
-                    for page in planned.pages
-                ],
+                "pages": [_page(page) for page in planned.pages],
             }
             for path, planned in documents
         ],
@@ -66,9 +71,13 @@ def encode_document_preview(path: str, planned: PlannedDocument) -> bytes:
     document = {
         "schema_version": PAGE_MAP_SCHEMA_VERSION,
         "path": path,
-        "pages": [
-            {"input_position": page.position, "page_number": page.page_number}
-            for page in planned.pages
-        ],
+        "pages": [_page(page) for page in planned.pages],
     }
     return (json.dumps(document, ensure_ascii=False) + "\n").encode()
+
+
+def _page(page: SourcePage) -> dict[str, int]:
+    described = {"input_position": page.position, "page_number": page.page_number}
+    if page.rotation:
+        described["rotation"] = page.rotation
+    return described
