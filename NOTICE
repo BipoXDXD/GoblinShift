@@ -26,3 +26,11 @@ A imagem do executor (docker/executor.Dockerfile) inclui o FFmpeg 8.1.2, compila
 oficial sem componentes GPL e distribuído sob a GNU Lesser General Public License 2.1 ou posterior
 (https://ffmpeg.org/legal.html). O texto da licença acompanha os binários na imagem, em
 /usr/local/share/doc/ffmpeg/, e a configuração exata do build está no Dockerfile (ADR 036).
+
+O FFmpeg da imagem do executor traz, ligadas estaticamente (ADR 063):
+- LAME 3.100 (https://lame.sourceforge.io/), encoder de MP3, sob a GNU Lesser General Public
+  License 2 ou posterior. Texto em /usr/local/share/doc/ffmpeg/lame/.
+- Opus 1.6.1 (https://opus-codec.org/), Copyright 2001-2023 Xiph.Org, Skype Limited, Octasic,
+  Jean-Marc Valin, Timothy B. Terriberry, CSIRO, Gregory Maxwell, Mark Borgerding, Erik de Castro
+  Lopo, Mozilla, Amazon, sob a licença BSD de 3 cláusulas. Texto em
+  /usr/local/share/doc/ffmpeg/opus/.

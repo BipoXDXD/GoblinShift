@@ -3,6 +3,7 @@
 - **Estado:** aceito na implementação do Media Mill (2026-10-15); pior caso medido na VPS em 2026-11-05 (ver Consequências)
 - **Atualizado pelo [ADR 062](062-teto-de-50-mib-por-arquivo.md):** o teto comum é 50 MiB.
 - **Plano:** [1.5](../GoblinShiftPlan.md#s1-5), [1.6](../GoblinShiftPlan.md#s1-6), [1.7](../GoblinShiftPlan.md#s1-7), [2.3](../GoblinShiftPlan.md#s2-3), [3.6](../GoblinShiftPlan.md#s3-6)
+- **Atualizado por:** [ADR 063](063-media-mill-v2-audio-com-perda-e-corte.md) (LAME e Opus estáticos, AAC nativo, muxers `mp3`, `ipod` e `opus` e o filtro `asetpts`)
 - **Relacionado:** [ADR 004](004-container-gvisor-por-tentativa.md), [ADR 005](005-area-do-executor-em-filesystem-fixo.md), [ADR 018](018-pillow-na-imagem-do-executor.md), [ADR 019](019-layout-de-out-pacote-e-papeis.md)
 
 ## Contexto
