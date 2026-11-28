@@ -9,7 +9,7 @@ variáveis GS_* da API para chegar ao banco e ao armazenamento.
     gs-admin block --user <id> [--yes | --dry-run]
     gs-admin unblock --user <id>
     gs-admin approve --user <id>
-    gs-admin request-deletion --user <id>
+    gs-admin request-deletion --user <id> [--yes | --dry-run]
     gs-admin list-users [--pending]
     gs-admin find-user --user-hash <hash>
     printf '%s' "$user_hash" | gs-admin find-user --user-hash -
@@ -30,6 +30,8 @@ fechado (ADR 023): um não faz o papel do outro, e o `unblock` de uma pendente s
 o `approve`. `request-deletion` pede a exclusão da conta pelo mesmo caminho do `DELETE /me`, também
 para conta bloqueada, que não consegue entrar: marca o pedido, revoga, audita e cancela a execução
 ativa, e a manutenção purga em até 24 h; repetir mantém o primeiro pedido e completa o que faltou.
+Como o `block`, só age com `--yes`: sem ele, mostra o resumo da conta e sai com 2, e `--dry-run`
+mostra o mesmo e sai com 0, sem gravar nada.
 `list-users` imprime id, emissor, estado e criação separados por tab, sem o sujeito da
 identidade externa; `--pending` mostra só as contas à espera de liberação (ADR 023).
 `find-user` traduz o `user.hash` dos eventos da telemetria no id da conta (roteiro de abuso);
@@ -273,6 +275,7 @@ def _argument_parser() -> argparse.ArgumentParser:
         help="pede a exclusão da conta, mesmo bloqueada; a manutenção purga em até 24 h",
     )
     deletion.add_argument("--user", type=UUID, required=True, help="id da conta")
+    _add_confirmation(deletion)
     deletion.set_defaults(command=_request_deletion)
 
     list_users = commands.add_parser("list-users", help="lista as contas, das mais novas primeiro")
@@ -469,6 +472,13 @@ def _impact_line(user_id: UUID, impact: AccountImpact, run_id: UUID | None) -> s
 
 
 def _request_deletion(args: argparse.Namespace, context: _Context) -> int:
+    if not args.yes:
+        return _show_impact(
+            args,
+            context,
+            "request-deletion pediria a exclusão da conta, revogaria essas chaves e sessões, "
+            "cancelaria a execução ativa e entregaria a conta à purga em até 24 h, sem desfazer",
+        )
     with _run_finished_reporter(context) as finished:
         now = datetime.now(UTC)
         try:

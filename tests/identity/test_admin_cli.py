@@ -369,10 +369,6 @@ def test_block_bloqueia_revoga_chaves_e_cancela_a_execucao(
     assert audited(factory, user_id) == ["ACCOUNT_CREATED", "KEY_ISSUED", "ACCOUNT_BLOCKED"]
 
 
-# O que cada comando que cancela a execução ativa precisa para agir de fato.
-CONFIRMED: dict[str, tuple[str, ...]] = {"block": ("--yes",), "request-deletion": ()}
-
-
 @pytest.fixture
 def finished(
     factory: sessionmaker[Session], monkeypatch: pytest.MonkeyPatch
@@ -400,7 +396,7 @@ def test_cancelamento_pela_cli_emite_um_termino_cancelado(
     user_id = create_user(capsys)
     run_id = queue_run(factory, storage, UUID(user_id))
 
-    exit_code, _, _ = run(capsys, command, "--user", user_id, *CONFIRMED[command])
+    exit_code, _, _ = run(capsys, command, "--user", user_id, "--yes")
 
     assert exit_code == EXIT_OK
     [event] = finished.events()
@@ -426,7 +422,7 @@ def test_sem_segredo_do_user_hash_em_producao_falha_antes_de_gravar(
     monkeypatch.setenv("GS_ENVIRONMENT", "production")
     monkeypatch.delenv("GS_USER_HASH_SECRET", raising=False)
 
-    exit_code, _, err = run(capsys, command, "--user", user_id, *CONFIRMED[command])
+    exit_code, _, err = run(capsys, command, "--user", user_id, "--yes")
 
     assert exit_code == EXIT_MISSING_SECRET
     assert "GS_USER_HASH_SECRET" in err
@@ -707,7 +703,7 @@ def test_request_deletion_marca_revoga_cancela_e_audita(
     _, token, _ = run(capsys, "issue-key", "--user", user_id, "--scopes", "files:read")
     run_id = queue_run(factory, storage, UUID(user_id))
 
-    exit_code, out, err = run(capsys, "request-deletion", "--user", user_id)
+    exit_code, out, err = run(capsys, "request-deletion", "--user", user_id, "--yes")
 
     assert exit_code == EXIT_OK
     assert out == ""
@@ -724,6 +720,89 @@ def test_request_deletion_marca_revoga_cancela_e_audita(
         "KEY_ISSUED",
         "ACCOUNT_DELETION_REQUESTED",
     ]
+
+
+def test_request_deletion_sem_yes_sai_com_2_e_nada_muda(
+    capsys: pytest.CaptureFixture[str], factory: sessionmaker[Session], storage: FileStorage
+) -> None:
+    user_id = create_user(capsys)
+    run(capsys, "issue-key", "--user", user_id, "--scopes", "files:read")
+    run_id = queue_run(factory, storage, UUID(user_id))
+
+    exit_code, out, err = run(capsys, "request-deletion", "--user", user_id)
+
+    assert exit_code == EXIT_USAGE
+    assert out == ""
+    assert "Ana" in err
+    assert "ativa;" in err
+    assert "1 chave(s) ativa(s)" in err
+    assert str(run_id) in err
+    assert "--yes" in err
+    assert deletion_requested_at(factory, user_id) is None
+    assert open_keys(factory, user_id) == 1
+    assert run_status(factory, run_id) == Status.QUEUED
+    assert audited(factory, user_id) == ["ACCOUNT_CREATED", "KEY_ISSUED"]
+
+
+def test_request_deletion_dry_run_mostra_o_impacto_e_nao_grava(
+    capsys: pytest.CaptureFixture[str], factory: sessionmaker[Session], storage: FileStorage
+) -> None:
+    user_id = create_user(capsys)
+    put_in_state(factory, user_id, "bloqueada")
+    run_id = queue_run(factory, storage, UUID(user_id))
+
+    exit_code, out, err = run(capsys, "request-deletion", "--user", user_id, "--dry-run")
+
+    assert (exit_code, out) == (EXIT_OK, "")
+    assert "Ana" in err
+    assert "bloqueada" in err
+    assert "0 chave(s) ativa(s)" in err
+    assert str(run_id) in err
+    assert "exclusão" in err
+    assert deletion_requested_at(factory, user_id) is None
+    assert run_status(factory, run_id) == Status.QUEUED
+    assert "ACCOUNT_DELETION_REQUESTED" not in audited(factory, user_id)
+
+
+def test_request_deletion_com_yes_pede_como_hoje(
+    capsys: pytest.CaptureFixture[str], factory: sessionmaker[Session], storage: FileStorage
+) -> None:
+    user_id = create_user(capsys)
+    run(capsys, "issue-key", "--user", user_id, "--scopes", "files:read")
+    run_id = queue_run(factory, storage, UUID(user_id))
+
+    exit_code, _, _ = run(capsys, "request-deletion", "--user", user_id, "--yes")
+
+    assert exit_code == EXIT_OK
+    assert deletion_requested_at(factory, user_id) is not None
+    assert open_keys(factory, user_id) == 0
+    assert run_status(factory, run_id) == Status.CANCELED
+    assert actors(factory, user_id)[-1] == ("ACCOUNT_DELETION_REQUESTED", "admin")
+
+
+@pytest.mark.parametrize("confirmation", [(), ("--dry-run",)], ids=["sem-yes", "dry-run"])
+def test_request_deletion_sem_confirmacao_nao_altera_linhas(
+    capsys: pytest.CaptureFixture[str],
+    factory: sessionmaker[Session],
+    storage: FileStorage,
+    confirmation: tuple[str, ...],
+) -> None:
+    user_id = create_user(capsys)
+    run(capsys, "issue-key", "--user", user_id, "--scopes", "files:read")
+    queue_run(factory, storage, UUID(user_id))
+    before = row_snapshot(factory, user_id)
+
+    run(capsys, "request-deletion", "--user", user_id, *confirmation)
+
+    assert row_snapshot(factory, user_id) == before
+
+
+def test_request_deletion_dry_run_de_conta_inexistente_sai_como_nao_encontrada(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    exit_code, _, _ = run(capsys, "request-deletion", "--user", str(uuid7()), "--dry-run")
+
+    assert exit_code == EXIT_NOT_FOUND
 
 
 def actors(factory: sessionmaker[Session], user_id: str) -> list[tuple[str, str | None]]:
@@ -744,7 +823,7 @@ def test_request_deletion_do_gs_admin_grava_actor_admin(
 ) -> None:
     user_id = create_user(capsys)
 
-    exit_code, _, _ = run(capsys, "request-deletion", "--user", user_id)
+    exit_code, _, _ = run(capsys, "request-deletion", "--user", user_id, "--yes")
 
     assert exit_code == EXIT_OK
     assert ("ACCOUNT_DELETION_REQUESTED", "admin") in actors(factory, user_id)
@@ -760,7 +839,7 @@ def test_request_deletion_repetido_mantem_o_primeiro_pedido_e_completa_o_que_fal
     with unit_of_work(factory) as session:
         request_account_deletion(session, UUID(user_id), first_request)
 
-    exit_code, _, _ = run(capsys, "request-deletion", "--user", user_id)
+    exit_code, _, _ = run(capsys, "request-deletion", "--user", user_id, "--yes")
 
     assert exit_code == EXIT_OK
     assert deletion_requested_at(factory, user_id) == first_request
@@ -776,7 +855,7 @@ def test_request_deletion_de_conta_inexistente_sai_como_nao_encontrada(
 ) -> None:
     missing = str(uuid7())
 
-    exit_code, out, err = run(capsys, "request-deletion", "--user", missing)
+    exit_code, out, err = run(capsys, "request-deletion", "--user", missing, "--yes")
 
     assert exit_code == EXIT_NOT_FOUND
     assert out == ""
@@ -797,7 +876,7 @@ def test_conta_bloqueada_com_exclusao_pedida_e_purgada_pela_manutencao(
     run(capsys, "block", "--user", user_id, "--yes")
     assert status_of(factory, user_id) == "blocked"
 
-    exit_code, _, _ = run(capsys, "request-deletion", "--user", user_id)
+    exit_code, _, _ = run(capsys, "request-deletion", "--user", user_id, "--yes")
 
     assert exit_code == EXIT_OK
     maintenance = Maintenance(factory, storage, local_runner(tmp_path / "work"))

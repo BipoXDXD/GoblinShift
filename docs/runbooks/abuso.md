@@ -151,7 +151,7 @@ O teste `tests/api/auth/test_block_end_to_end.py` prova este roteiro contra o Po
 O bloqueio **não apaga nada**: ele só tira o acesso.
 
 - Uploads, artefatos e saídas expiram sozinhos em 48 horas; não há link público, então nada fica servido a terceiros enquanto isso.
-- A conta bloqueada continua existindo, com o estado `blocked`, para que a mesma identidade não volte a entrar. Ela não consegue usar o `DELETE /me`; quando a exclusão for devida, use `gs_admin request-deletion --user "$owner_id"`, que segue o mesmo caminho: marca o pedido, revoga, audita `ACCOUNT_DELETION_REQUESTED` e cancela a execução, e a manutenção purga em até 24 h. Depois disso, a identidade pode voltar a entrar como conta nova.
+- A conta bloqueada continua existindo, com o estado `blocked`, para que a mesma identidade não volte a entrar. Ela não consegue usar o `DELETE /me`; quando a exclusão for devida, confira a conta com `gs_admin request-deletion --user "$owner_id" --dry-run` e rode o mesmo comando com `--yes`, que segue o mesmo caminho: marca o pedido, revoga, audita `ACCOUNT_DELETION_REQUESTED` e cancela a execução, e a manutenção purga em até 24 h, sem desfazer. Sem `--yes` (nem `--dry-run`), o comando mostra o nome, o estado e as contagens, sai com 2 e não grava nada. Depois da purga, a identidade pode voltar a entrar como conta nova.
 - Se a lei ou um pedido do titular exigir apagar a conta, trate como pedido de dados pessoais (aviso de privacidade) e registre a decisão na ficha do caso antes de agir.
 - A auditoria do caso fica 90 dias em qualquer cenário.
 
@@ -245,7 +245,8 @@ Os termos de uso (item 2) prometem bloquear e excluir em até 15 dias, contados 
 3. Peça a exclusão:
 
    ```bash
-   gs_admin request-deletion --user "$owner_id"
+   gs_admin request-deletion --user "$owner_id" --dry-run   # confira nome e contagens
+   gs_admin request-deletion --user "$owner_id" --yes
    ```
 
 4. Confira, em até 24 h, que a conta sumiu; esperado, 0:
@@ -260,4 +261,4 @@ Os termos de uso (item 2) prometem bloquear e excluir em até 15 dias, contados 
 
 ## Revisão anual dos bloqueios
 
-Uma vez por ano, liste as contas (`gs_admin list-users`), inclusive as pendentes do cadastro fechado (`--pending`), e confira, na ficha de cada caso, se o motivo continua valendo. Sem motivo vigente, libere a conta (passo 6) ou peça a exclusão com `gs_admin request-deletion --user "$owner_id"` (aviso de privacidade, item 5). Conta com caso de abuso sexual infantil em aberto segue o prazo da seção acima.
+Uma vez por ano, liste as contas (`gs_admin list-users`), inclusive as pendentes do cadastro fechado (`--pending`), e confira, na ficha de cada caso, se o motivo continua valendo. Sem motivo vigente, libere a conta (passo 6) ou peça a exclusão com `gs_admin request-deletion --user "$owner_id" --yes`, depois de conferir com `--dry-run` (aviso de privacidade, item 5). Conta com caso de abuso sexual infantil em aberto segue o prazo da seção acima.
