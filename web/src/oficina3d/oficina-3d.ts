@@ -26,17 +26,13 @@ import { GLTFLoader } from "three/addons/loaders/GLTFLoader.js";
 import type { CastId } from "./cast";
 import { attachGestures } from "./gestures";
 import type { MountOptions, SceneHandle } from "./OficinaHero";
-import { REST_POSE, turned, type Pose } from "./pose";
+import { REST_POSE } from "./pose";
 import { ShowOrder } from "./show-order";
+import { Stage } from "./stage";
 
 const FIELD_OF_VIEW_DEGREES = 22;
 /** Folga em volta da goblin, para o cabelo não encostar na borda do quadro. */
 const FRAME_MARGIN = 1.06;
-/** Entrada: gira de um lado para o outro e para; abaixo dos 5 s da WCAG 2.2.2, sem botão. */
-const INTRO_MS = 3_500;
-const INTRO_FROM_RADIANS = 0.9;
-/** Auto-rotação do botão Girar: uma volta a cada 12 s. */
-const SPIN_RADIANS_PER_MS = (2 * Math.PI) / 12_000;
 const MAX_PIXEL_RATIO = 2;
 /*
  * Luz do render realista que o usuário aprovou (render_glb.py --realista, ADR 030): três luzes de
@@ -301,148 +297,6 @@ function frameModel(
     radius: size.length() / 2,
     distance: Math.max(fitHeight, fitWidth) * FRAME_MARGIN + size.z / 2,
   };
-}
-
-interface StageView {
-  readonly applyPose: (pose: Pose) => void;
-  readonly render: () => void;
-}
-
-type Motion = "entrada" | "girando" | "parado";
-
-/**
- * A pose da goblin e o que a mexe: a entrada (uma vez, até 3,5 s, nunca com movimento reduzido), a
- * auto-rotação do botão Girar, o arrasto e as setas. O laço de animação só roda com entrada ou
- * giro; fora disso o canvas redesenha só quando a pose muda, sem gastar bateria. Marca `data-movimento`, `data-giro` e
- * `data-inclinacao` (graus) no host para o E2E.
- */
-class Stage {
-  readonly #host: HTMLElement;
-  readonly #renderer: WebGLRenderer;
-  readonly #view: StageView;
-  #pose: Pose = REST_POSE;
-  #introStart: number | null = null;
-  #introRunning = false;
-  #spinning = false;
-  #reducedMotion = false;
-  #lastFrame: number | null = null;
-
-  constructor(host: HTMLElement, renderer: WebGLRenderer, view: StageView) {
-    this.#host = host;
-    this.#renderer = renderer;
-    this.#view = view;
-    this.#mark();
-  }
-
-  render(): void {
-    this.#view.render();
-  }
-
-  playIntro(): void {
-    if (this.#reducedMotion) {
-      // Sem a entrada, a goblin chega já na pose de repouso.
-      this.#pose = REST_POSE;
-      this.#apply();
-      this.#loop();
-      return;
-    }
-    this.#pose = { yaw: INTRO_FROM_RADIANS, pitch: REST_POSE.pitch };
-    this.#introStart = null;
-    this.#introRunning = true;
-    this.#apply();
-    this.#loop();
-  }
-
-  stopIntro(): void {
-    this.#introRunning = false;
-    this.#loop();
-  }
-
-  turn(by: Pose): void {
-    this.#pose = turned(this.#pose, by);
-    this.#apply();
-  }
-
-  resetPose(): void {
-    this.#introRunning = false;
-    this.#spinning = false;
-    this.#pose = REST_POSE;
-    this.#apply();
-    this.#loop();
-  }
-
-  setSpinning(spinning: boolean): void {
-    this.#spinning = spinning;
-    if (spinning) {
-      this.#introRunning = false;
-    }
-    this.#loop();
-  }
-
-  setReducedMotion(reduced: boolean): void {
-    this.#reducedMotion = reduced;
-    if (reduced && this.#introRunning) {
-      // A entrada interrompida termina onde terminaria, sem animar o resto.
-      this.#introRunning = false;
-      this.#pose = { ...this.#pose, yaw: REST_POSE.yaw };
-      this.#apply();
-      this.#loop();
-    }
-  }
-
-  stop(): void {
-    this.#introRunning = false;
-    this.#spinning = false;
-    this.#renderer.setAnimationLoop(null);
-  }
-
-  /** Liga o laço se há o que animar e desliga quando não há. */
-  #loop(): void {
-    this.#mark();
-    if (!this.#introRunning && !this.#spinning) {
-      this.#renderer.setAnimationLoop(null);
-      this.#lastFrame = null;
-      return;
-    }
-    this.#renderer.setAnimationLoop((now) => {
-      this.#frame(now);
-    });
-  }
-
-  #frame(now: number): void {
-    const elapsed = this.#lastFrame === null ? 0 : now - this.#lastFrame;
-    this.#lastFrame = now;
-    if (this.#introRunning) {
-      this.#introStart ??= now;
-      const progress = Math.min(1, (now - this.#introStart) / INTRO_MS);
-      const eased = 1 - (1 - progress) ** 3;
-      this.#pose = {
-        ...this.#pose,
-        yaw: INTRO_FROM_RADIANS + (REST_POSE.yaw - INTRO_FROM_RADIANS) * eased,
-      };
-      if (progress === 1) {
-        this.#introRunning = false;
-      }
-    } else if (this.#spinning) {
-      this.#pose = turned(this.#pose, { yaw: elapsed * SPIN_RADIANS_PER_MS, pitch: 0 });
-    }
-    this.#apply();
-    if (!this.#introRunning && !this.#spinning) {
-      this.#loop();
-    }
-  }
-
-  #apply(): void {
-    this.#view.applyPose(this.#pose);
-    this.#view.render();
-    this.#host.dataset["giro"] = String(Math.round((this.#pose.yaw * 180) / Math.PI));
-    this.#host.dataset["inclinacao"] = String(Math.round((this.#pose.pitch * 180) / Math.PI));
-  }
-
-  #mark(): void {
-    const motion: Motion = this.#introRunning ? "entrada" : this.#spinning ? "girando" : "parado";
-    this.#host.dataset["movimento"] = motion;
-  }
 }
 
 /** Libera da GPU a malha, os materiais, as texturas e os mapas de sombra de uma árvore. */
