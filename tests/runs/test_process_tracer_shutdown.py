@@ -21,7 +21,7 @@ from opentelemetry.trace import Tracer
 from sqlalchemy import Engine
 from sqlalchemy.orm import Session, sessionmaker
 
-from goblinshift.entrypoints import maintenance, worker
+from goblinshift.entrypoints import bootstrap, maintenance, worker
 from goblinshift.entrypoints.maintenance import CYCLE_SPAN, AccountJobs, Cycle, run_cycles
 from goblinshift.entrypoints.shutdown import SHUTDOWN_POLL_S, ShutdownFlag
 from goblinshift.platform import telemetry
@@ -114,7 +114,7 @@ def _messages(caplog: pytest.LogCaptureFixture, level: int) -> list[str]:
 
 
 def test_parada_do_worker_exporta_o_span_que_ficou_na_fila(exporters: Exporters) -> None:
-    with worker.process_tracer(Settings(environment="test"), "goblinshift-worker") as tracer:
+    with bootstrap.process_tracer(Settings(environment="test"), "goblinshift-worker") as tracer:
         tracer.start_span(PENDING_SPAN).end()
         assert exporters.span_names() == []
 
@@ -124,7 +124,7 @@ def test_parada_do_worker_exporta_o_span_que_ficou_na_fila(exporters: Exporters)
 def test_prazo_estourado_no_encerramento_do_tracing_do_worker_fica_no_log(
     stuck_exporters: Exporters, caplog: pytest.LogCaptureFixture
 ) -> None:
-    with worker.process_tracer(Settings(environment="test"), "goblinshift-worker") as tracer:
+    with bootstrap.process_tracer(Settings(environment="test"), "goblinshift-worker") as tracer:
         tracer.start_span(PENDING_SPAN).end()
 
     assert any(DEADLINE_WARNING in message for message in _messages(caplog, logging.WARNING))
@@ -136,7 +136,7 @@ def test_falha_ao_encerrar_o_tracing_do_worker_nao_derruba_a_parada(
     exporters = Exporters(BrokenShutdownExporter)
     otlp.setattr(telemetry, "OTLPSpanExporter", exporters)
 
-    with worker.process_tracer(Settings(environment="test"), "goblinshift-worker") as tracer:
+    with bootstrap.process_tracer(Settings(environment="test"), "goblinshift-worker") as tracer:
         tracer.start_span(PENDING_SPAN).end()
 
     assert exporters.span_names() == [PENDING_SPAN]

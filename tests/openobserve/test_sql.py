@@ -475,6 +475,7 @@ def test_span_que_nao_e_da_manutencao_nao_dispara_as_causas_dela(telemetry: Tele
         "causa-imagem-executor-ausente",
         "causa-sonda-imagem-falhou",
         "causa-entrada-adulterada",
+        "causa-google-sem-auth-time",
     ):
         assert not cause_rows(telemetry, name, stream), name
 
@@ -557,6 +558,7 @@ def test_falha_repetida_da_manutencao_dispara(
         ("causa-sem-reserva", "alert.run_without_reservation"),
         ("causa-arquivos-nao-removidos", "alert.purge_file_not_removed"),
         ("causa-entrada-adulterada", "alert.input_tampered"),
+        ("causa-google-sem-auth-time", "alert.google_auth_time_missing"),
     ],
 )
 @pytest.mark.parametrize(("value", "fires"), [(0, False), (1, True)])

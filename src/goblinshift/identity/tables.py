@@ -95,7 +95,8 @@ web_session = Table(
     # SHA-256 do segredo de 256 bits do cookie, como nas chaves de API.
     Column("secret_hash", LargeBinary(32), nullable=False, unique=True),
     Column("created_at", DateTime(timezone=True), nullable=False, server_default=func.now()),
-    # Login no provedor: base do teto absoluto de 8 h e da autenticação recente de 10 min.
+    # Login no provedor: base da autenticação recente de 10 min. O teto absoluto de 8 h conta da
+    # abertura da sessão (`start_session`), então `absolute_expires_at > authenticated_at` vale.
     Column("authenticated_at", DateTime(timezone=True), nullable=False),
     Column("last_seen_at", DateTime(timezone=True), nullable=False),
     Column("idle_expires_at", DateTime(timezone=True), nullable=False),
@@ -115,7 +116,7 @@ web_session = Table(
 )
 
 # Cache do Authlib (`state`, `nonce`, `code_verifier`) durante o login, com TTL de 10 min (3.6).
-# O cookie `__Secure-gs_login` leva só o marcador; o conteúdo nunca sai do servidor (ADR 025).
+# O cookie `__Host-gs_login` leva só o marcador; o conteúdo nunca sai do servidor (ADR 025).
 login_state = Table(
     "login_state",
     metadata,

@@ -10,6 +10,7 @@ from pathlib import Path
 
 import pytest
 
+from goblinshift.entrypoints.api.cookies import CSRF_COOKIE, LOGIN_COOKIE, SESSION_COOKIE
 from goblinshift.identity import CURRENT_TERMS_VERSION
 
 ROOT = Path(__file__).resolve().parent.parent
@@ -135,3 +136,12 @@ def test_lia_e_registro_interno_fora_do_build(name: str) -> None:
     assert "Nada daqui entra no build da SPA" in text or "Fora do build da SPA" in text
     assert "RASCUNHO" not in text
     assert "Perguntas ao revisor" not in text
+
+
+def test_aviso_nomeia_os_cookies_que_o_servidor_grava() -> None:
+    # Renomear um cookie no código sem revisar o aviso (ou o contrário) reprova aqui; a revisão
+    # sem nova versão fica registrada no histórico, como a de 2026-11-27.
+    cookies = (LEGAL / "aviso-de-privacidade.md").read_text().split("## 9. Cookies", 1)[1]
+    table = re.findall(r"^\| `([^`]+)` \|", cookies.split("\n\n## ", 1)[0], re.MULTILINE)
+
+    assert table == [SESSION_COOKIE, CSRF_COOKIE, LOGIN_COOKIE]

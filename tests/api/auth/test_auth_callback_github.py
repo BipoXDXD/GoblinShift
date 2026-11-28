@@ -8,7 +8,13 @@ from fastapi.testclient import TestClient
 from sqlalchemy import select
 from sqlalchemy.orm import Session, sessionmaker
 
-from goblinshift.identity.providers import GITHUB_ISSUER, GITHUB_USER_URL, MAX_GITHUB_USER_BYTES
+from goblinshift.entrypoints.api import auth_login
+from goblinshift.identity.providers import (
+    GITHUB_ISSUER,
+    GITHUB_USER_URL,
+    GOOGLE_ISSUER,
+    MAX_GITHUB_USER_BYTES,
+)
 from goblinshift.identity.tables import app_user
 from goblinshift.platform.db import metadata, unit_of_work
 from tests.api.auth.support import (
@@ -16,6 +22,7 @@ from tests.api.auth.support import (
     accounts,
     assert_login_failed,
     audit_events,
+    delete_me_headers,
     login,
     open_signup,
 )
@@ -161,6 +168,47 @@ def test_github_user_malicioso_e_recusado(
     assert audit_events(factory) == [("LOGIN_FAILED", "failure", None)]
 
 
+@pytest.mark.parametrize(
+    "token",
+    [
+        {"token_type": "bearer"},
+        {"access_token": "gho_x", "token_type": "mac"},
+        {"access_token": "gho_x", "token_type": 5},
+    ],
+    ids=["sem-access-token", "token-type-mac", "token-type-numero"],
+)
+def test_token_do_github_com_forma_errada_vira_o_erro_generico(
+    client: TestClient,
+    fake: FakeProviders,
+    sessions: StoredSessions,
+    factory: sessionmaker[Session],
+    login_app: FastAPI,
+    token: dict[str, object],
+) -> None:
+    open_signup(login_app)
+    fake.token_body = json.dumps(token).encode()
+
+    response = login(client, fake, "github")
+
+    assert_login_failed(response)
+    assert sessions.started == []
+    assert accounts(factory) == []
+    assert audit_events(factory) == [("LOGIN_FAILED", "failure", None)]
+
+
+def test_type_error_do_nosso_codigo_nao_vira_recusa_de_login(
+    client: TestClient, fake: FakeProviders, login_app: FastAPI, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # Só o erro de forma da resposta do provedor é recusa; um defeito nosso segue para o 500.
+    def broken(body: bytes) -> None:
+        raise TypeError("defeito nosso")
+
+    open_signup(login_app)
+    monkeypatch.setattr(auth_login, "github_identity", broken)
+
+    assert login(client, fake, "github").status_code == 500
+
+
 def test_teto_do_corpo_do_github_cabe_um_usuario_real() -> None:
     assert len(json.dumps(GITHUB_USER | {"bio": "x" * 160})) < MAX_GITHUB_USER_BYTES
 
@@ -214,3 +262,43 @@ def test_conta_com_exclusao_pedida_nao_completa_login(
 
     assert_login_failed(login(client, fake, "github"))
     assert len(sessions.started) == 1
+
+
+def test_reauth_pelo_github_com_sessao_do_google_e_recusada(
+    client: TestClient,
+    fake: FakeProviders,
+    sessions: StoredSessions,
+    factory: sessionmaker[Session],
+    login_app: FastAPI,
+) -> None:
+    open_signup(login_app)
+    login(client, fake, "google")
+    [google_account] = [account["id"] for account in accounts(factory)]
+
+    response = login(client, fake, "github", reauth="1")
+
+    assert_login_failed(response)
+    assert sessions.revoked == []
+    assert sessions.started_for == [google_account]
+    assert [account["issuer"] for account in accounts(factory)] == [GOOGLE_ISSUER]
+    assert audit_events(factory)[-1] == ("LOGIN_FAILED", "failure", google_account)
+
+
+def test_reauth_pelo_github_continua_recente(
+    client: TestClient,
+    fake: FakeProviders,
+    sessions: StoredSessions,
+    login_app: FastAPI,
+) -> None:
+    # O GitHub não informa a hora do login: a reautenticação vale como recente (ADR 065).
+    open_signup(login_app)
+    login(client, fake, "github")
+
+    response = login(client, fake, "github", reauth="1")
+
+    assert response.status_code == 303
+    assert response.headers["location"] == "/"
+    first, second = sessions.started
+    assert sessions.revoked == [first.session_id]
+    assert second.issued_for(client.cookies["__Host-gs_session"])
+    assert client.delete("/api/v1/me", headers=delete_me_headers(client)).status_code == 202
