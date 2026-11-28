@@ -34,12 +34,14 @@ from goblinshift.identity.accounts import (
     unblock_account,
 )
 from goblinshift.identity.audit import (
+    MAX_ANONYMOUS_LOGIN_FAILURES_PER_MINUTE,
     AuditEventType,
     AuditEventView,
     AuditOutcome,
     LimitChange,
     limits_changed_details,
     list_audit_events,
+    record_anonymous_login_failure,
     record_csrf_failure,
     truncate_ip,
 )
@@ -100,6 +102,7 @@ __all__ = [
     "KEY_PREFIX",
     "KEY_RETENTION",
     "MAX_ACTIVE_KEYS",
+    "MAX_ANONYMOUS_LOGIN_FAILURES_PER_MINUTE",
     "MAX_KEY_DAYS",
     "MAX_STORED_KEYS",
     "RECENT_AUTH_WINDOW",
@@ -157,6 +160,7 @@ __all__ = [
     "parse_key",
     "parse_scopes",
     "purge_owner",
+    "record_anonymous_login_failure",
     "record_audit_event",
     "record_csrf_failure",
     "record_session_use",

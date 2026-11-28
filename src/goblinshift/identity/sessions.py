@@ -1,8 +1,9 @@
 """Sessão web opaca e revogável no PostgreSQL (docs/GoblinShiftPlan.md, 3.6; Frente B).
 
 Token de 256 bits no cookie `__Host-gs_session`, só o SHA-256 no banco, comparação em tempo
-constante. Expira por 30 min sem uso ou 8 h depois do login no provedor, o que vier antes;
+constante. Expira por 30 min sem uso ou 8 h depois da abertura da sessão, o que vier antes;
 `last_seen_at` é gravado no máximo uma vez por minuto, e a inatividade conta a partir dele.
+`authenticated_at` é só a hora do login no provedor, base da autenticação recente de 10 min.
 Conta bloqueada ou com exclusão pedida invalida a sessão.
 
 Resolver o cookie (`resolve_session`) só identifica, sem escrita. Registrar o uso
@@ -77,13 +78,16 @@ def start_session(
 ) -> IssuedSession:
     """Abre uma sessão nova, sempre com token novo (contra fixação de sessão).
 
-    `authenticated_at` é o login no provedor; um login de 8 h ou mais já nasceria vencido, o que
-    só acontece por erro de quem chama.
+    `authenticated_at` é a hora do login no provedor, de qualquer idade (o Google informa o
+    `auth_time` real); só serve à autenticação recente. O teto absoluto conta de `now`, a abertura
+    da sessão. Um `authenticated_at` no futuro é erro de quem chama.
     """
-    absolute_expires_at = authenticated_at + ABSOLUTE_TIMEOUT
-    if absolute_expires_at <= now:
-        raise ValueError("login no provedor há 8 h ou mais não abre sessão")
-    idle_expires_at = min(now + IDLE_TIMEOUT, absolute_expires_at)
+    if authenticated_at > now:
+        raise ValueError("authenticated_at no futuro")
+    absolute_expires_at = now + ABSOLUTE_TIMEOUT
+    # Na abertura, os 30 min de inatividade cabem sempre nas 8 h; o corte no teto fica com
+    # `record_session_use`.
+    idle_expires_at = now + IDLE_TIMEOUT
     token = secrets.token_urlsafe(TOKEN_BYTES)
     session_id: UUID = session.execute(
         insert(web_session)

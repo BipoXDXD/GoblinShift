@@ -1,6 +1,6 @@
-import { act, screen, waitFor, within } from "@testing-library/react";
+import { act, fireEvent, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it } from "vitest";
 import { z } from "zod";
 
 import { appRoutes, preloadRoutes } from "../test/appRoutes";
@@ -15,6 +15,14 @@ import {
   uploadIdFor,
   uploadIntentsHandler,
 } from "../test/fakeApi";
+import {
+  fakeDir,
+  fakeFile,
+  fakeHeldDir,
+  fakeItem,
+  fakeSpecial,
+  type FakeEntry,
+} from "../test/fakeEntries";
 import { fakeUploader } from "../test/fakeUploader";
 import { expectHeadingFocused } from "../test/focus";
 import { renderRoutes } from "../test/renderRoutes";
@@ -1003,5 +1011,321 @@ describe("Bancada do PDF Press", () => {
       operation: "select",
       select: [{ upload_id: uploadIdFor(2), page_number: 1 }],
     });
+  });
+});
+
+/** Área de transferência falsa: o jsdom não tem `DataTransfer`. */
+function clipboard(files: readonly File[], text: string | null = null) {
+  const types = [...(files.length > 0 ? ["Files"] : []), ...(text === null ? [] : ["text/plain"])];
+  return {
+    files,
+    types,
+    items: [],
+    getData: (type: string) => (type === "text/plain" ? (text ?? "") : ""),
+  };
+}
+
+function uploadIntents(requests: readonly Request[]): Request[] {
+  return requests.filter(
+    (request) => request.method === "POST" && new URL(request.url).pathname === "/api/v1/uploads",
+  );
+}
+
+describe("Bancada: colar arquivos", () => {
+  it("diz que dá para colar com Ctrl+V", async () => {
+    await setup();
+
+    expect(screen.getByLabelText("Escolher arquivos")).toHaveAccessibleDescription(
+      /colar com Ctrl\+V \(⌘V no Mac\)/,
+    );
+  });
+
+  it("colar arquivos adiciona à lista e anuncia", async () => {
+    await setup();
+
+    const notPrevented = fireEvent.paste(document, {
+      clipboardData: clipboard([csv("a.csv"), csv("b.csv")]),
+    });
+
+    expect(notPrevented).toBe(false);
+    await waitUntilSent(2);
+    expect(screen.getByRole("list", { name: "Ordem de processamento" })).toHaveTextContent(
+      /a\.csv.*b\.csv/,
+    );
+    expect(
+      screen.getAllByRole("status").some((region) => region.textContent === "2 arquivos colados."),
+    ).toBe(true);
+  });
+
+  it("a imagem colada ganha nome próprio, que não se repete na sessão", async () => {
+    await setup({ recipe: "image-forge" });
+    const print = () => new File(["png"], "image.png", { type: "image/png" });
+
+    fireEvent.paste(document, { clipboardData: clipboard([print()]) });
+    fireEvent.paste(document, { clipboardData: clipboard([print()]) });
+
+    await waitUntilSent(2);
+    const list = screen.getByRole("list", { name: "Ordem de processamento" });
+    expect(list).toHaveTextContent("colado-1.png");
+    expect(list).toHaveTextContent("colado-2.png");
+  });
+
+  it("colar texto num campo não adiciona arquivo", async () => {
+    const { user, api } = await setup();
+    await user.click(screen.getByRole("button", { name: "Salvar preset" }));
+    const name = screen.getByRole("textbox", { name: "Nome do preset" });
+
+    const notPrevented = fireEvent.paste(name, { clipboardData: clipboard([], "Meu preset") });
+
+    expect(notPrevented).toBe(true);
+    expect(uploadIntents(api.requests)).toHaveLength(0);
+    expect(screen.getByText("Nenhum arquivo escolhido")).toBeInTheDocument();
+  });
+
+  it("colar num campo com texto e arquivo juntos fica com o texto", async () => {
+    const { api } = await setup();
+    const columns = screen.getByRole("textbox", { name: "Colunas finais, na ordem" });
+
+    const notPrevented = fireEvent.paste(columns, {
+      clipboardData: clipboard([csv("planilha.csv")], "nome,email"),
+    });
+
+    expect(notPrevented).toBe(true);
+    expect(uploadIntents(api.requests)).toHaveLength(0);
+  });
+
+  it("colar arquivo com um diálogo aberto não mexe na Bancada atrás dele", async () => {
+    const { user, api } = await setup();
+    await user.click(screen.getByRole("button", { name: "Salvar preset" }));
+    const name = screen.getByRole("textbox", { name: "Nome do preset" });
+
+    const notPrevented = fireEvent.paste(name, { clipboardData: clipboard([csv("a.csv")]) });
+
+    expect(notPrevented).toBe(true);
+    expect(uploadIntents(api.requests)).toHaveLength(0);
+  });
+
+  it("colar mais arquivos que o teto avisa sem enviar nenhum", async () => {
+    const { api } = await setup();
+    const six = ["1", "2", "3", "4", "5", "6"].map((n) => csv(`${n}.csv`));
+
+    fireEvent.paste(document, { clipboardData: clipboard(six) });
+
+    const message =
+      "Você colou 6 arquivos; esta receita aceita até 5 por execução. Nada foi enviado: cole menos arquivos de cada vez.";
+    await waitFor(() => {
+      expect(screen.getAllByRole("status").some((region) => region.textContent === message)).toBe(
+        true,
+      );
+    });
+    expect(screen.getByLabelText("Escolher arquivos")).toHaveAccessibleDescription(
+      expect.stringContaining(message),
+    );
+    expect(uploadIntents(api.requests)).toHaveLength(0);
+    expect(screen.getByText("Nenhum arquivo escolhido")).toBeInTheDocument();
+  });
+
+  it("colar fora da Bancada não faz nada", async () => {
+    const { api, unmount } = await setup();
+    unmount();
+
+    const notPrevented = fireEvent.paste(document, { clipboardData: clipboard([csv("a.csv")]) });
+
+    expect(notPrevented).toBe(true);
+    expect(uploadIntents(api.requests)).toHaveLength(0);
+  });
+});
+
+/** Colagem de uma pasta copiada no gerenciador de arquivos: o item da pasta e um `File` de 0 B. */
+function clipboardWithFolder(dir: FakeEntry) {
+  return { ...clipboard([new File([], dir.name)]), items: [fakeItem(dir)] };
+}
+
+function statusWith(message: string): boolean {
+  return screen.getAllByRole("status").some((region) => region.textContent === message);
+}
+
+describe("Bancada: pasta inteira", () => {
+  afterEach(() => {
+    Reflect.deleteProperty(HTMLInputElement.prototype, "webkitdirectory");
+  });
+
+  it("colar uma pasta com mais arquivos que o teto avisa sem enviar nenhum", async () => {
+    const { api } = await setup();
+    const six = ["1", "2", "3", "4", "5", "6"].map((n) => fakeFile(`${n}.csv`));
+
+    const notPrevented = fireEvent.paste(document, {
+      clipboardData: clipboardWithFolder(fakeDir("tabelas", [six])),
+    });
+
+    expect(notPrevented).toBe(false);
+    const message =
+      "A pasta tem mais de 5 arquivos; esta receita aceita até 5 por execução. Escolha uma pasta menor ou os arquivos um a um.";
+    await waitFor(() => {
+      expect(statusWith(message)).toBe(true);
+    });
+    expect(screen.getByLabelText("Escolher arquivos")).toHaveAccessibleDescription(
+      expect.stringContaining(message),
+    );
+    expect(uploadIntents(api.requests)).toHaveLength(0);
+    expect(screen.getByText("Nenhum arquivo escolhido")).toBeInTheDocument();
+  });
+
+  it("colar pasta com subpastas acima do teto, somando todas, também não envia nada", async () => {
+    const { api } = await setup();
+    const dir = fakeDir("raiz", [
+      [
+        fakeDir("jan", [[fakeFile("1.csv"), fakeFile("2.csv"), fakeFile("3.csv")]]),
+        fakeDir("fev", [[fakeFile("4.csv"), fakeFile("5.csv"), fakeFile("6.csv")]]),
+      ],
+    ]);
+
+    fireEvent.paste(document, { clipboardData: clipboardWithFolder(dir) });
+
+    await waitFor(() => {
+      expect(screen.getByLabelText("Escolher arquivos")).toHaveAccessibleDescription(
+        expect.stringContaining("A pasta tem mais de 5 arquivos"),
+      );
+    });
+    expect(uploadIntents(api.requests)).toHaveLength(0);
+  });
+
+  it("colar pasta com subpastas, arquivo vazio e oculto envia os arquivos e conta o que ficou de fora", async () => {
+    await setup();
+    const dir = fakeDir("raiz", [
+      [
+        fakeFile(".DS_Store"),
+        fakeFile("vazio.csv", ""),
+        fakeDir("sub", [[fakeFile("b.csv")]]),
+        fakeFile("a.csv"),
+      ],
+    ]);
+
+    fireEvent.paste(document, { clipboardData: clipboardWithFolder(dir) });
+
+    await waitUntilSent(3);
+    expect(screen.getByRole("list", { name: "Ordem de processamento" })).toHaveTextContent(
+      /a\.csv.*b\.csv.*vazio\.csv/,
+    );
+    const notice = "3 arquivos colados. 1 arquivo(s) oculto(s) ou de sistema ficaram de fora.";
+    expect(statusWith(notice)).toBe(true);
+    expect(screen.getByText(notice)).toBeVisible();
+  });
+
+  it("colar pasta com entrada que não é arquivo regular envia o resto e diz o que ficou de fora", async () => {
+    await setup();
+    const dir = fakeDir("raiz", [[fakeFile("a.csv"), fakeSpecial("fila")]]);
+
+    fireEvent.paste(document, { clipboardData: clipboardWithFolder(dir) });
+
+    await waitUntilSent(1);
+    expect(statusWith("1 arquivo colado. 1 item não pôde ser lido e ficou de fora.")).toBe(true);
+  });
+
+  it("pasta só com ocultos não envia nada e diz por quê", async () => {
+    const { api } = await setup();
+
+    fireEvent.paste(document, {
+      clipboardData: clipboardWithFolder(fakeDir("raiz", [[fakeFile(".DS_Store")]])),
+    });
+
+    await waitFor(() => {
+      expect(screen.getByLabelText("Escolher arquivos")).toHaveAccessibleDescription(
+        expect.stringContaining(
+          "A pasta não tem arquivos para enviar. 1 arquivo(s) oculto(s) ou de sistema ficaram de fora.",
+        ),
+      );
+    });
+    expect(uploadIntents(api.requests)).toHaveLength(0);
+  });
+
+  it("pasta colada que termina de ser lida depois de sair da Bancada não envia nada", async () => {
+    const { api, unmount } = await setup();
+
+    fireEvent.paste(document, {
+      clipboardData: clipboardWithFolder(fakeDir("raiz", [[fakeFile("a.csv")]])),
+    });
+    unmount();
+    await new Promise((resolve) => setTimeout(resolve, 50));
+
+    expect(uploadIntents(api.requests)).toHaveLength(0);
+  });
+
+  it("pasta colada com a Bancada ficando ocupada no meio da leitura é descartada com aviso", async () => {
+    const { user, api } = await setup();
+    await chooseFiles(user, ["a.csv"]);
+    await waitUntilSent(1);
+    const held = fakeHeldDir("raiz", [fakeFile("b.csv")]);
+
+    fireEvent.paste(document, { clipboardData: clipboardWithFolder(held.entry) });
+    await user.click(screen.getByRole("button", { name: "Remover a.csv" }));
+    await act(async () => {
+      held.release();
+      await new Promise((resolve) => setTimeout(resolve, 0));
+    });
+
+    await waitFor(() => {
+      expect(statusWith("Colagem cancelada: a Bancada está ocupada.")).toBe(true);
+    });
+    expect(uploadIntents(api.requests)).toHaveLength(1);
+    expect(screen.queryByText("b.csv")).not.toBeInTheDocument();
+  });
+
+  it("pasta com entradas demais para ler diz isso, sem falar em arquivos", async () => {
+    const { api } = await setup();
+    const empties = Array.from({ length: 10_001 }, (_, i) => fakeDir(`d${String(i)}`, []));
+
+    fireEvent.paste(document, {
+      clipboardData: clipboardWithFolder(fakeDir("casa", [empties])),
+    });
+
+    await waitFor(() => {
+      expect(screen.getByLabelText("Escolher arquivos")).toHaveAccessibleDescription(
+        expect.stringContaining(
+          "A pasta tem pastas e itens demais para ler de uma vez. Escolha uma pasta menor ou os arquivos um a um.",
+        ),
+      );
+    });
+    expect(uploadIntents(api.requests)).toHaveLength(0);
+  });
+
+  it("escolher pasta acima do teto avisa sem enviar", async () => {
+    Object.defineProperty(HTMLInputElement.prototype, "webkitdirectory", {
+      configurable: true,
+      value: false,
+      writable: true,
+    });
+    const { user, api } = await setup();
+    const six = ["1", "2", "3", "4", "5", "6"].map((n) => {
+      const file = csv(`${n}.csv`);
+      Object.defineProperty(file, "webkitRelativePath", { value: `tabelas/${n}.csv` });
+      return file;
+    });
+
+    await user.upload(screen.getByLabelText("Escolher pasta"), six);
+
+    expect(screen.getByLabelText("Escolher arquivos")).toHaveAccessibleDescription(
+      expect.stringContaining("A pasta tem mais de 5 arquivos"),
+    );
+    expect(uploadIntents(api.requests)).toHaveLength(0);
+  });
+
+  it("escolher pasta dentro do teto envia e anuncia", async () => {
+    Object.defineProperty(HTMLInputElement.prototype, "webkitdirectory", {
+      configurable: true,
+      value: false,
+      writable: true,
+    });
+    const { user } = await setup();
+    const two = ["a", "b"].map((n) => {
+      const file = csv(`${n}.csv`);
+      Object.defineProperty(file, "webkitRelativePath", { value: `tabelas/${n}.csv` });
+      return file;
+    });
+
+    await user.upload(screen.getByLabelText("Escolher pasta"), two);
+
+    await waitUntilSent(2);
+    expect(statusWith("2 arquivos da pasta adicionados.")).toBe(true);
   });
 });

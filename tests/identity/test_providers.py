@@ -1,6 +1,7 @@
 """Normalização das identidades do Google e do GitHub (ADR 008; 3.6, terceiro malicioso)."""
 
 import json
+from datetime import UTC, datetime
 
 import pytest
 
@@ -27,6 +28,22 @@ def test_google_normaliza_o_emissor(issuer: str) -> None:
     identity = google_identity({"iss": issuer, "sub": "1092837465"})
 
     assert identity == ExternalIdentity(GOOGLE_ISSUER, "1092837465", GOOGLE_DISPLAY_NAME)
+
+
+def test_google_identity_le_o_auth_time_em_utc() -> None:
+    identity = google_identity({"iss": GOOGLE_ISSUER, "sub": "1", "auth_time": 1_800_000_000})
+
+    assert identity.authenticated_at == datetime(2027, 1, 15, 8, 0, tzinfo=UTC)
+
+
+def test_google_sem_auth_time_nao_informa_a_hora() -> None:
+    assert google_identity({"iss": GOOGLE_ISSUER, "sub": "1"}).authenticated_at is None
+
+
+@pytest.mark.parametrize("auth_time", ["1800000000", True, -5, 0, 1.5, 2**63], ids=repr)
+def test_google_auth_time_com_tipo_errado_e_recusado(auth_time: object) -> None:
+    with pytest.raises(InvalidProviderIdentityError):
+        google_identity({"iss": GOOGLE_ISSUER, "sub": "1", "auth_time": auth_time})
 
 
 def test_google_nome_de_exibicao_e_fixo_mesmo_com_claims_de_perfil() -> None:
